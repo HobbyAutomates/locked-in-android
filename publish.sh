@@ -26,7 +26,7 @@ curl -fsS -X POST "$BASE/$APK_NAME" \
   --data-binary @"$APK" >/dev/null
 
 # Optional release notes: NOTES="..." ./publish.sh  (shown in the in-app update dialog)
-NOTES_JSON=$(printf '%s' "${NOTES:-}" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+NOTES_JSON=$(printf '%s' "${NOTES:-}" | PYTHONIOENCODING=utf-8 python3 -c 'import json,sys; print(json.dumps(sys.stdin.buffer.read().decode("utf-8"), ensure_ascii=False))')
 printf '{"versionCode": %s, "versionName": "%s", "url": "%s/%s", "notes": %s}' "$VCODE" "$VNAME" "$PUBLIC" "$APK_NAME" "$NOTES_JSON" > /tmp/bandlog-version.json
 curl -fsS -X POST "$BASE/bandlog-version.json" \
   -H "Authorization: Bearer $SUPABASE_SERVICE_KEY" -H "x-upsert: true" \
