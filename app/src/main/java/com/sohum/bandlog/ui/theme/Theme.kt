@@ -4,6 +4,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.unit.dp
 
 private val AppShapes = Shapes(
@@ -15,6 +16,9 @@ private val AppShapes = Shapes(
 )
 
 @Composable
-fun BandLogTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = DarkScheme, typography = AppTypography, shapes = AppShapes, content = content)
+fun BandLogTheme(dark: Boolean, content: @Composable () -> Unit) {
+    val p = if (dark) DarkPalette else LightPalette
+    CompositionLocalProvider(LocalPalette provides p) {
+        MaterialTheme(colorScheme = p.toScheme(dark), typography = AppTypography, shapes = AppShapes, content = content)
+    }
 }

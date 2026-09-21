@@ -1,263 +1,214 @@
 package com.sohum.bandlog.ui.today
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.sohum.bandlog.data.Api
 import com.sohum.bandlog.data.Meal
-import com.sohum.bandlog.data.MealItem
-import com.sohum.bandlog.data.ParseResult
 import com.sohum.bandlog.data.Workout
 import com.sohum.bandlog.data.totalsFor
 import com.sohum.bandlog.ui.AppViewModel
+import com.sohum.bandlog.ui.components.BowlIcon
 import com.sohum.bandlog.ui.components.Card
+import com.sohum.bandlog.ui.components.DumbbellIcon
 import com.sohum.bandlog.ui.components.ErrorNote
-import com.sohum.bandlog.ui.components.Overline
+import com.sohum.bandlog.ui.components.Flame
+import com.sohum.bandlog.ui.components.FlameIcon
+import com.sohum.bandlog.ui.components.IconTile
+import com.sohum.bandlog.ui.components.MacroDot
 import com.sohum.bandlog.ui.components.Ring
+import com.sohum.bandlog.ui.components.Rise
 import com.sohum.bandlog.ui.components.RowSpaceBetween
-import com.sohum.bandlog.ui.components.SectionGap
-import com.sohum.bandlog.ui.components.Stat
-import com.sohum.bandlog.ui.components.Tag
-import com.sohum.bandlog.ui.theme.Ok
-import com.sohum.bandlog.ui.theme.Warn
-import com.sohum.bandlog.ui.workout.WorkoutSheet
+import com.sohum.bandlog.ui.theme.palette
 import com.sohum.bandlog.util.Dates
-import com.sohum.bandlog.util.Muscles
-import kotlinx.coroutines.launch
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 @Composable
-fun TodayScreen(vm: AppViewModel) {
-    val cs = MaterialTheme.colorScheme
+fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit) {
+    val p = palette
     val today = vm.today
     val totals = totalsFor(vm.meals, today)
+    val prof = vm.profile
     val todayMeals = vm.meals.filter { it.date == today }
     val todayWorkouts = vm.workouts.filter { it.date == today }
-    var sheetFor by remember { mutableStateOf<Workout?>(null) }
-    var showSheet by remember { mutableStateOf(false) }
+    val trained = vm.workoutDates.toSet()
 
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp, 12.dp, 16.dp, 96.dp)) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 110.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
-            RowSpaceBetween {
-                Column {
-                    Overline(Dates.long(today), color = cs.primary)
-                    Text("Today", fontSize = 30.sp, fontWeight = FontWeight(800), letterSpacing = (-1).sp)
-                }
-                IconButton(onClick = { vm.refresh() }) {
-                    if (vm.loading) CircularProgressIndicator(Modifier.width(20.dp).height(20.dp), strokeWidth = 2.dp)
-                    else Icon(Icons.Outlined.Refresh, "Refresh", tint = cs.onSurfaceVariant)
-                }
-            }
-            ErrorNote(vm.error, Modifier.padding(top = 8.dp))
-            SectionGap()
-        }
-
-        item {
-            Card {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    Ring(totals.protein, vm.profile.proteinTargetG.toDouble(), "Protein", "g", Ok)
-                    Ring(totals.calories, vm.profile.calorieTarget.toDouble(), "Calories", "kcal", cs.primary)
-                }
-                Spacer(Modifier.height(14.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Stat("${vm.thisWeek}/${vm.profile.weeklyWorkoutTarget}", "sessions this week", accent = if (vm.thisWeek >= vm.profile.weeklyWorkoutTarget) Ok else null)
-                    Stat("${vm.weekStreak}w", "week streak", accent = if (vm.weekStreak > 0) Warn else null)
-                    Stat("${vm.mealStreak}d", "meals logged")
-                }
-            }
-            SectionGap()
-        }
-
-        item {
-            VoiceMealBox(vm, today)
-            SectionGap()
-        }
-
-        item {
-            RowSpaceBetween {
-                Overline("Workout")
-                TextButton(onClick = { sheetFor = null; showSheet = true }) {
-                    Icon(Icons.Outlined.Add, null); Spacer(Modifier.width(4.dp)); Text("Log")
-                }
-            }
-            if (todayWorkouts.isEmpty()) {
-                Card(onClick = { sheetFor = null; showSheet = true }) {
-                    Text("No session yet today", fontWeight = FontWeight(600))
-                    Text("Tap to log one — muscles, band, minutes.", color = cs.onSurfaceVariant, fontSize = 13.sp)
-                }
-            }
-        }
-        items(todayWorkouts, key = { it.id }) { w ->
-            WorkoutCard(w, onClick = { sheetFor = w; showSheet = true })
-            Spacer(Modifier.height(8.dp))
-        }
-
-        item { SectionGap(); Overline("Meals"); Spacer(Modifier.height(8.dp)) }
-        if (todayMeals.isEmpty()) item {
-            Text("Nothing logged yet. Dictate what you ate above.", color = cs.onSurfaceVariant, fontSize = 13.sp)
-        }
-        items(todayMeals, key = { it.id }) { m ->
-            MealCard(m, onDelete = { vm.launch { vm.deleteMeal(m.id) } })
-            Spacer(Modifier.height(8.dp))
-        }
-    }
-
-    if (showSheet) WorkoutSheet(vm, sheetFor, today, onClose = { showSheet = false })
-}
-
-@Composable
-fun WorkoutCard(w: Workout, onClick: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    Card(onClick = onClick) {
-        RowSpaceBetween {
-            Text(Dates.relative(w.date), fontWeight = FontWeight(700))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Tag(w.bandLevel + (w.resistanceKg?.let { " · ${fmt(it)} kg" } ?: ""), Muscles.bandColor(w.bandLevel))
-                w.minutes?.let { Spacer(Modifier.width(6.dp)); Text("$it min", color = cs.onSurfaceVariant, fontSize = 12.sp) }
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        w.muscles.chunked(4).forEach { row ->
-            Row(Modifier.padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                row.forEach { Tag(it, Muscles.color(it)) }
-            }
-        }
-        if (w.exercises.isNotBlank()) Text(w.exercises, color = cs.onSurfaceVariant, fontSize = 13.sp)
-        if (w.notes.isNotBlank()) Text(w.notes, color = cs.onSurfaceVariant, fontSize = 13.sp)
-    }
-}
-
-@Composable
-fun MealCard(m: Meal, onDelete: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    Card {
-        RowSpaceBetween {
-            Text("${m.calories.toInt()} kcal · ${fmt(m.protein)} g protein", fontWeight = FontWeight(700))
-            IconButton(onClick = onDelete, Modifier.width(32.dp).height(32.dp)) { Icon(Icons.Outlined.Delete, "Delete", tint = cs.onSurfaceVariant) }
-        }
-        m.items.forEach { i ->
-            RowSpaceBetween {
-                Text("${i.name} · ${fmt(i.grams)} g" + if (i.source == "estimated") " ~" else "", fontSize = 13.sp, color = cs.onSurface)
-                Text("${i.calories.toInt()} kcal · ${fmt(i.proteinG)} g", fontSize = 12.sp, color = cs.onSurfaceVariant)
-            }
-        }
-        if (m.rawText.isNotBlank()) {
-            Spacer(Modifier.height(4.dp))
-            Text("“${m.rawText}”", fontSize = 12.sp, color = cs.onSurfaceVariant)
-        }
-    }
-}
-
-@Composable
-private fun VoiceMealBox(vm: AppViewModel, date: String) {
-    val cs = MaterialTheme.colorScheme
-    val scope = rememberCoroutineScope()
-    var text by rememberSaveable { mutableStateOf("") }
-    var parsing by remember { mutableStateOf(false) }
-    var result by remember { mutableStateOf<ParseResult?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var saving by remember { mutableStateOf(false) }
-
-    Card {
-        Overline("What did you eat?")
-        Spacer(Modifier.height(8.dp))
-        OutlinedTextField(
-            text, { text = it }, Modifier.fillMaxWidth(), minLines = 3,
-            placeholder = { Text("Tap here, then dictate with Wispr Flow: “150 g rice, 100 g dal, 2 eggs, 1 scoop whey…”") },
-        )
-        Spacer(Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(
-                onClick = {
-                    scope.launch {
-                        parsing = true; error = null; result = null
-                        try { result = Api.parseMeal(text) } catch (e: Exception) { error = e.message } finally { parsing = false }
+            Rise(0) {
+                RowSpaceBetween {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(26.dp).border(2.5.dp, p.ink, CircleShape), contentAlignment = Alignment.Center) { Box(Modifier.width(12.dp).height(2.5.dp).background(p.ink)) }
+                        Spacer(Modifier.width(8.dp))
+                        Text("Band Log", fontSize = 22.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink)
                     }
-                },
-                enabled = text.isNotBlank() && !parsing,
-            ) { Text(if (parsing) "Working out calories…" else "Log meal", fontWeight = FontWeight(700)) }
-            if (text.isNotBlank() && !parsing) OutlinedButton(onClick = { text = ""; result = null; error = null }) { Text("Clear") }
-        }
-        if (parsing) { Spacer(Modifier.height(10.dp)); LinearProgressIndicator(Modifier.fillMaxWidth()) }
-        ErrorNote(error, Modifier.padding(top = 10.dp))
-
-        val r = result
-        if (r != null) {
-            Spacer(Modifier.height(14.dp))
-            Overline("Review", color = cs.primary)
-            Spacer(Modifier.height(6.dp))
-            var items by remember(r) { mutableStateOf(r.items) }
-            items.forEachIndexed { idx, it ->
-                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(it.name + if (it.source == "estimated") "  ~est" else "", fontWeight = FontWeight(600), fontSize = 14.sp)
-                        Text("${it.calories.toInt()} kcal · P ${fmt(it.proteinG)} · C ${fmt(it.carbsG)} · F ${fmt(it.fatG)}", fontSize = 12.sp, color = cs.onSurfaceVariant)
+                    Row(
+                        Modifier.shadow(8.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow).background(p.card, CircleShape).padding(start = 9.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Flame(p.flame, 16.dp)
+                        Spacer(Modifier.width(5.dp))
+                        Text("${vm.weekStreak}", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink)
                     }
-                    var g by remember(it.id, idx) { mutableStateOf(fmt(it.grams)) }
-                    OutlinedTextField(
-                        g, { v -> g = v.filter { c -> c.isDigit() || c == '.' }; v.toDoubleOrNull()?.let { d -> items = items.toMutableList().also { l -> l[idx] = it.withGrams(d) } } },
-                        Modifier.width(88.dp), singleLine = true, suffix = { Text("g") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    )
-                    IconButton(onClick = { items = items.filterIndexed { i, _ -> i != idx } }) { Icon(Icons.Outlined.Delete, "Remove", tint = cs.onSurfaceVariant) }
                 }
+                ErrorNote(vm.error, Modifier.padding(top = 8.dp))
             }
-            if (r.assumptions.isNotEmpty()) {
-                Spacer(Modifier.height(6.dp))
-                r.assumptions.forEach { Text("• $it", fontSize = 12.sp, color = cs.onSurfaceVariant) }
-            }
-            if (r.unparsed.isNotEmpty()) Text("Ignored: ${r.unparsed.joinToString()}", fontSize = 12.sp, color = Warn)
-            Spacer(Modifier.height(10.dp))
-            RowSpaceBetween {
-                Text("${items.sumOf { it.calories }.toInt()} kcal · ${fmt(items.sumOf { it.proteinG })} g protein", fontWeight = FontWeight(700))
-                Button(
-                    onClick = {
-                        scope.launch {
-                            saving = true
-                            if (vm.saveMeal(date, text.trim(), items)) { text = ""; result = null } else error = vm.error
-                            saving = false
+        }
+        item { Rise(1) { WeekStrip(today, trained) } }
+        item {
+            Rise(2) {
+                Card(padding = 20.dp) {
+                    RowSpaceBetween {
+                        Column {
+                            Text("${(prof.calorieTarget - totals.calories).toInt().coerceAtLeast(0)}", fontSize = 40.sp, fontWeight = FontWeight(800), letterSpacing = (-1.5).sp, color = p.ink, lineHeight = 40.sp)
+                            Text("Calories left", fontSize = 14.sp, fontWeight = FontWeight(500), color = p.muted)
                         }
-                    },
-                    enabled = items.isNotEmpty() && !saving,
-                ) { Text(if (saving) "Saving…" else "Save", fontWeight = FontWeight(700)) }
+                        Ring((totals.calories / prof.calorieTarget).toFloat(), p.ink, 96.dp, 9.dp) { Icon(FlameIcon, null, tint = p.ink, modifier = Modifier.size(26.dp)) }
+                    }
+                }
+            }
+        }
+        item {
+            Rise(3) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    MacroCard(Modifier.weight(1f), "${(prof.proteinTargetG - totals.protein).toInt().coerceAtLeast(0)}g", "Protein left", (totals.protein / prof.proteinTargetG).toFloat(), p.red)
+                    MacroCard(Modifier.weight(1f), "${(prof.carbTargetG - totals.carbs).toInt().coerceAtLeast(0)}g", "Carbs left", (totals.carbs / prof.carbTargetG.coerceAtLeast(1)).toFloat(), p.orange)
+                    MacroCard(Modifier.weight(1f), "${(prof.fatTargetG - totals.fat).toInt().coerceAtLeast(0)}g", "Fat left", (totals.fat / prof.fatTargetG.coerceAtLeast(1)).toFloat(), p.blue)
+                }
+            }
+        }
+        item {
+            Rise(4) {
+                RowSpaceBetween {
+                    Text("Recently logged", fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.5).sp, color = p.ink)
+                    if (vm.loading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = p.muted)
+                }
+            }
+        }
+        if (todayWorkouts.isEmpty() && todayMeals.isEmpty()) item {
+            Rise(5) { Text("Nothing yet today. Tap + to log a workout or a meal.", color = p.muted, fontSize = 13.sp) }
+        }
+        items(todayWorkouts, key = { "w" + it.id }) { w -> Rise(5) { WorkoutRow(w) { onOpenWorkout(w) } } }
+        items(todayMeals, key = { "m" + it.id }) { m -> Rise(6) { MealRow(m) { vm.launch { vm.deleteMeal(m.id) } } } }
+    }
+}
+
+@Composable
+private fun WeekStrip(today: String, trained: Set<String>) {
+    val p = palette
+    val start = Dates.addDays(today, -6)
+    val fmt = DateTimeFormatter.ofPattern("EEEEE", Locale.ENGLISH)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        (0..6).forEach { i ->
+            val d = Dates.addDays(start, i.toLong())
+            val isToday = d == today
+            val did = d in trained
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                val circle = when {
+                    isToday -> Modifier.border(2.dp, p.ink, CircleShape)
+                    did -> Modifier.background(p.greenBg, CircleShape).border(1.5.dp, p.green, CircleShape)
+                    else -> Modifier.border(1.5.dp, p.hair, CircleShape)
+                }
+                Box(circle.size(30.dp), contentAlignment = Alignment.Center) {
+                    Text(Dates.parse(d).format(fmt), fontSize = 12.sp, fontWeight = if (isToday) FontWeight(700) else FontWeight(600), color = if (isToday) p.ink else if (did) p.green else p.muted)
+                }
+                Text("${Dates.parse(d).dayOfMonth}", fontSize = 13.sp, fontWeight = if (isToday) FontWeight(700) else FontWeight(500), color = if (isToday) p.ink else p.muted)
             }
         }
     }
 }
 
-fun fmt(d: Double): String = if (d == d.toLong().toDouble()) d.toLong().toString() else String.format(java.util.Locale.US, "%.1f", d)
+@Composable
+private fun MacroCard(modifier: Modifier, value: String, label: String, fraction: Float, color: Color) {
+    val p = palette
+    Card(modifier, padding = 12.dp) {
+        Text(value, fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink)
+        Text(label, fontSize = 12.sp, color = p.muted)
+        Spacer(Modifier.height(10.dp))
+        Ring(fraction, color, 56.dp, 6.dp, Modifier.align(Alignment.CenterHorizontally)) { Box(Modifier.size(8.dp).background(color, CircleShape)) }
+    }
+}
+
+@Composable
+fun WorkoutRow(w: Workout, onClick: () -> Unit) {
+    val p = palette
+    Card(onClick = onClick, padding = 14.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconTile(DumbbellIcon, p.ink, p.card2)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                RowSpaceBetween {
+                    Text(Dates.relative(w.date), fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink)
+                    Text(w.bandLevel + (w.resistanceKg?.let { " · ${fmt(it)} kg" } ?: ""), fontSize = 12.sp, color = p.muted)
+                }
+                Text(w.muscles.joinToString(" · "), fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    w.minutes?.let { Text("$it mins", fontSize = 12.sp, color = p.muted) }
+                    if (w.exercises.isNotBlank()) Text(w.exercises, fontSize = 12.sp, color = p.muted, maxLines = 1)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MealRow(m: Meal, onDelete: () -> Unit) {
+    val p = palette
+    Card(padding = 14.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconTile(BowlIcon, p.orange, p.orangeBg)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                RowSpaceBetween {
+                    Text(m.items.joinToString(", ") { it.name }.ifBlank { "Meal" }, fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1, modifier = Modifier.weight(1f))
+                    Text(timeOf(m.createdAt), fontSize = 12.sp, color = p.muted)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(FlameIcon, null, tint = p.ink, modifier = Modifier.size(15.dp))
+                    Text(" ${m.calories.toInt()} calories", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    MacroDot("${fmt(m.protein)}g", p.red)
+                    MacroDot("${fmt(m.items.sumOf { it.carbsG })}g", p.orange)
+                    MacroDot("${fmt(m.items.sumOf { it.fatG })}g", p.blue)
+                }
+            }
+            IconButton(onClick = onDelete, Modifier.size(32.dp)) { Icon(Icons.Outlined.Delete, "Delete", tint = p.muted) }
+        }
+    }
+}
+
+private fun timeOf(iso: String): String = runCatching {
+    java.time.OffsetDateTime.parse(iso.replace(" ", "T").let { if (it.endsWith("Z") || it.contains("+")) it else it + "Z" })
+        .atZoneSameInstant(java.time.ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("h:mm a", Locale.ENGLISH))
+}.getOrDefault("")
+
+fun fmt(d: Double): String = if (d == d.toLong().toDouble()) d.toLong().toString() else String.format(Locale.US, "%.1f", d)

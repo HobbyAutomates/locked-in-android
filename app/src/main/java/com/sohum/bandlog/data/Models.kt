@@ -100,6 +100,10 @@ data class Profile(
     val proteinTargetG: Int = 120,
     val calorieTarget: Int = 2200,
 ) {
+    /** Derived macro targets (Cal AI-style cards): fat 25% of calories, carbs the remainder. */
+    val fatTargetG: Int get() = (calorieTarget * 0.25 / 9).toInt()
+    val carbTargetG: Int get() = ((calorieTarget - proteinTargetG * 4 - fatTargetG * 9) / 4).coerceAtLeast(0)
+
     companion object {
         fun from(o: JSONObject) = Profile(
             weeklyWorkoutTarget = o.optInt("weekly_workout_target", 3),

@@ -31,7 +31,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sohum.bandlog.data.SupabaseAuth
 import com.sohum.bandlog.ui.components.ErrorNote
-import com.sohum.bandlog.ui.components.Overline
 import kotlinx.coroutines.launch
 
 @Composable
@@ -64,7 +63,7 @@ fun LoginScreen(onSignedIn: () -> Unit) {
         Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(horizontal = 24.dp),
         verticalArrangement = Arrangement.Center,
     ) {
-        Overline("Band Log", color = cs.primary)
+        Text("BAND LOG", fontSize = 11.sp, fontWeight = FontWeight(700), letterSpacing = 1.5.sp, color = cs.onSurfaceVariant)
         Spacer(Modifier.height(6.dp))
         Text(if (creating) "Create account" else "Sign in", fontSize = 30.sp, fontWeight = FontWeight(800), letterSpacing = (-1).sp)
         Text("One sign-in on this phone. You'll stay logged in.", color = cs.onSurfaceVariant, fontSize = 13.sp)

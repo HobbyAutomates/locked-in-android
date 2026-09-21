@@ -1,6 +1,9 @@
 package com.sohum.bandlog.ui.settings
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -9,24 +12,28 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.Logout
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sohum.bandlog.BuildConfig
@@ -35,67 +42,103 @@ import com.sohum.bandlog.data.Session
 import com.sohum.bandlog.ui.AppViewModel
 import com.sohum.bandlog.ui.UpdateViewModel
 import com.sohum.bandlog.ui.components.Card
+import com.sohum.bandlog.ui.components.DumbbellIcon
 import com.sohum.bandlog.ui.components.ErrorNote
-import com.sohum.bandlog.ui.components.Overline
-import com.sohum.bandlog.ui.components.SectionGap
+import com.sohum.bandlog.ui.components.FlameIcon
+import com.sohum.bandlog.ui.components.Hair
+import com.sohum.bandlog.ui.components.PillButton
+import com.sohum.bandlog.ui.components.Rise
+import com.sohum.bandlog.ui.components.RowSpaceBetween
+import com.sohum.bandlog.ui.components.ScreenTitle
+import com.sohum.bandlog.ui.log.NumberField
+import com.sohum.bandlog.ui.theme.palette
+import com.sohum.bandlog.util.ThemeMode
 import kotlinx.coroutines.launch
 
 @Composable
-fun SettingsScreen(vm: AppViewModel, updateVm: UpdateViewModel) {
-    val cs = MaterialTheme.colorScheme
+fun SettingsScreen(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: ThemeMode, onThemeMode: (ThemeMode) -> Unit) {
+    val p = palette
     val scope = rememberCoroutineScope()
-    val p = vm.profile
-    var weekly by remember(p) { mutableStateOf(p.weeklyWorkoutTarget.toString()) }
-    var protein by remember(p) { mutableStateOf(p.proteinTargetG.toString()) }
-    var calories by remember(p) { mutableStateOf(p.calorieTarget.toString()) }
+    val prof = vm.profile
+    var weekly by remember(prof) { mutableStateOf(prof.weeklyWorkoutTarget.toString()) }
+    var protein by remember(prof) { mutableStateOf(prof.proteinTargetG.toString()) }
+    var calories by remember(prof) { mutableStateOf(prof.calorieTarget.toString()) }
     var saved by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
+    val dirty = weekly != prof.weeklyWorkoutTarget.toString() || protein != prof.proteinTargetG.toString() || calories != prof.calorieTarget.toString()
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(PaddingValues(16.dp, 12.dp, 16.dp, 96.dp))) {
-        Overline("Settings", color = cs.primary)
-        Text("Targets", fontSize = 26.sp, fontWeight = FontWeight(800), letterSpacing = (-0.8).sp)
-        SectionGap()
-        Card {
-            OutlinedTextField(weekly, { weekly = it.filter(Char::isDigit) }, Modifier.fillMaxWidth(), label = { Text("Workouts per week") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-            Spacer(Modifier.height(10.dp))
-            OutlinedTextField(protein, { protein = it.filter(Char::isDigit) }, Modifier.fillMaxWidth(), label = { Text("Protein per day (g)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-            Spacer(Modifier.height(10.dp))
-            OutlinedTextField(calories, { calories = it.filter(Char::isDigit) }, Modifier.fillMaxWidth(), label = { Text("Calories per day (kcal)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-            Spacer(Modifier.height(12.dp))
-            ErrorNote(vm.error)
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Button(
-                    onClick = {
-                        scope.launch {
-                            busy = true; saved = false
-                            val ok = vm.saveTargets(Profile(weekly.toIntOrNull() ?: 3, protein.toIntOrNull() ?: 120, calories.toIntOrNull() ?: 2200))
-                            saved = ok; busy = false
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(PaddingValues(16.dp, 12.dp, 16.dp, 110.dp)), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Rise(0) { ScreenTitle("Settings") }
+        Rise(1) {
+            Card {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(52.dp).background(p.card2, CircleShape), contentAlignment = Alignment.Center) { Text((Session.email ?: "?").take(1).uppercase(), fontSize = 20.sp, fontWeight = FontWeight(700), color = p.ink) }
+                    Spacer(Modifier.width(14.dp))
+                    Column { Text("Sohum", fontSize = 17.sp, fontWeight = FontWeight(700), color = p.ink); Text(Session.email ?: "—", fontSize = 13.sp, color = p.muted) }
+                }
+            }
+        }
+        Rise(2) {
+            Card(padding = 0.dp) {
+                Column(Modifier.padding(horizontal = 16.dp)) {
+                    Text("Daily targets", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
+                    SettingRow(DumbbellIcon, p.ink, "Workouts per week") { NumberField(weekly, { weekly = it.filter(Char::isDigit) }, "") }
+                    Hair()
+                    SettingRow(FlameIcon, p.red, "Protein") { NumberField(protein, { protein = it.filter(Char::isDigit) }, "g") }
+                    Hair()
+                    SettingRow(FlameIcon, p.ink, "Calories") { NumberField(calories, { calories = it.filter(Char::isDigit) }, "kcal") }
+                    ErrorNote(vm.error, Modifier.padding(bottom = 12.dp))
+                }
+            }
+        }
+        if (dirty || saved) Rise(2) {
+            PillButton(if (busy) "Saving…" else if (saved && !dirty) "Saved" else "Save targets", enabled = !busy && dirty, onClick = {
+                scope.launch {
+                    busy = true; saved = false
+                    saved = vm.saveTargets(Profile(weekly.toIntOrNull() ?: 3, protein.toIntOrNull() ?: 120, calories.toIntOrNull() ?: 2200))
+                    busy = false
+                }
+            })
+        }
+        Rise(3) {
+            Card(padding = 0.dp) {
+                Column(Modifier.padding(horizontal = 16.dp)) {
+                    SettingRow(Icons.Outlined.DarkMode, p.ink, "Appearance") {
+                        Row(Modifier.background(p.card2, CircleShape).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            ThemeMode.entries.forEach { m ->
+                                val sel = m == themeMode
+                                Box(Modifier.height(28.dp).background(if (sel) p.btn else Color.Transparent, CircleShape).clickable { onThemeMode(m) }.padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
+                                    Text(m.name.lowercase().replaceFirstChar { it.uppercase() }, fontSize = 12.sp, fontWeight = FontWeight(600), color = if (sel) p.btnInk else p.muted)
+                                }
+                            }
                         }
-                    },
-                    enabled = !busy,
-                ) { Text(if (busy) "Saving…" else "Save targets", fontWeight = FontWeight(700)) }
-                if (saved) Text("Saved", color = cs.tertiary, modifier = Modifier.padding(top = 12.dp))
+                    }
+                    Hair()
+                    SettingRow(Icons.Outlined.Refresh, p.ink, "Check for updates", onClick = { updateVm.check() }) {
+                        Text(
+                            when { updateVm.checking -> "Checking…"; updateVm.upToDate -> "v${BuildConfig.VERSION_NAME} · up to date"; else -> "v${BuildConfig.VERSION_NAME}" },
+                            fontSize = 13.sp, fontWeight = FontWeight(600), color = if (updateVm.upToDate) p.green else p.muted,
+                        )
+                    }
+                    Hair()
+                    SettingRow(Icons.Outlined.Logout, p.ink, "Sign out", onClick = { vm.signOut() }) { Text("›", fontSize = 16.sp, color = p.muted) }
+                }
             }
         }
-        SectionGap()
-        Card {
-            Overline("Account")
-            Spacer(Modifier.height(6.dp))
-            Text(Session.email ?: "—", fontWeight = FontWeight(600))
-            Text("Signed in on this phone. Sign out only if you want to switch accounts.", fontSize = 12.sp, color = cs.onSurfaceVariant)
-            Spacer(Modifier.height(8.dp))
-            TextButton(onClick = { vm.signOut() }) { Text("Sign out", color = cs.error) }
-        }
-        SectionGap()
-        Card {
-            Overline("App")
-            Spacer(Modifier.height(6.dp))
-            Text("Band Log ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", fontWeight = FontWeight(600))
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(onClick = { updateVm.check() }, enabled = !updateVm.checking) { Text(if (updateVm.checking) "Checking…" else "Check for updates") }
-                if (updateVm.upToDate) Text("Up to date", color = cs.tertiary, modifier = Modifier.padding(top = 12.dp))
+    }
+}
+
+@Composable
+private fun SettingRow(icon: ImageVector, tint: Color, label: String, onClick: (() -> Unit)? = null, trailing: @Composable () -> Unit) {
+    val p = palette
+    Box(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier) {
+        RowSpaceBetween {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 13.dp)) {
+                Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(10.dp))
+                Text(label, fontSize = 15.sp, fontWeight = FontWeight(500), color = p.ink)
             }
+            trailing()
         }
     }
 }
