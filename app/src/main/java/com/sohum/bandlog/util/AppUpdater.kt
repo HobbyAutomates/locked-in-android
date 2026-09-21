@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit
  */
 object AppUpdater {
 
-    data class Update(val versionCode: Int, val versionName: String, val url: String)
+    data class Update(val versionCode: Int, val versionName: String, val url: String, val notes: String = "")
 
     // Generous read timeout for the ~4 MB APK; no overall callTimeout so a slow link isn't cut off.
     private val client = OkHttpClient.Builder()
@@ -40,7 +40,7 @@ object AppUpdater {
                 val o = JSONObject(res.body?.string().orEmpty())
                 val code = o.getInt("versionCode")
                 if (code > BuildConfig.VERSION_CODE) {
-                    Update(code, o.optString("versionName", "$code"), o.getString("url"))
+                    Update(code, o.optString("versionName", "$code"), o.getString("url"), o.optString("notes", ""))
                 } else null
             }
         } catch (_: Exception) {

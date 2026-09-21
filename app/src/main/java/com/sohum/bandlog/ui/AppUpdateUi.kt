@@ -96,6 +96,10 @@ fun UpdateDialog(vm: UpdateViewModel) {
         text = {
             Column {
                 Text("Version ${update.versionName} is ready to install.")
+                if (update.notes.isNotBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(update.notes, fontSize = 13.sp)
+                }
                 if (vm.downloading) {
                     Spacer(Modifier.height(14.dp))
                     LinearProgressIndicator({ vm.progress }, Modifier.fillMaxWidth())

@@ -25,7 +25,9 @@ curl -fsS -X POST "$BASE/$APK_NAME" \
   -H "Content-Type: application/vnd.android.package-archive" \
   --data-binary @"$APK" >/dev/null
 
-printf '{"versionCode": %s, "versionName": "%s", "url": "%s/%s"}' "$VCODE" "$VNAME" "$PUBLIC" "$APK_NAME" > /tmp/bandlog-version.json
+# Optional release notes: NOTES="..." ./publish.sh  (shown in the in-app update dialog)
+NOTES_JSON=$(printf '%s' "${NOTES:-}" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+printf '{"versionCode": %s, "versionName": "%s", "url": "%s/%s", "notes": %s}' "$VCODE" "$VNAME" "$PUBLIC" "$APK_NAME" "$NOTES_JSON" > /tmp/bandlog-version.json
 curl -fsS -X POST "$BASE/bandlog-version.json" \
   -H "Authorization: Bearer $SUPABASE_SERVICE_KEY" -H "x-upsert: true" \
   -H "cache-control: max-age=0" \
