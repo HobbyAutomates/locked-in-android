@@ -70,9 +70,9 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit) {
             Rise(0) {
                 RowSpaceBetween {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(26.dp).border(2.5.dp, p.ink, CircleShape), contentAlignment = Alignment.Center) { Box(Modifier.width(12.dp).height(2.5.dp).background(p.ink)) }
+                        Icon(com.sohum.bandlog.ui.components.LockIcon, null, tint = p.ink, modifier = Modifier.size(26.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Band Log", fontSize = 22.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink)
+                        Text("Locked In", fontSize = 22.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink)
                     }
                     Row(
                         Modifier.shadow(8.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow).background(p.card, CircleShape).padding(start = 9.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
@@ -92,8 +92,11 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit) {
                 Card(padding = 20.dp) {
                     RowSpaceBetween {
                         Column {
-                            Text("${(prof.calorieTarget - totals.calories).toInt().coerceAtLeast(0)}", fontSize = 40.sp, fontWeight = FontWeight(800), letterSpacing = (-1.5).sp, color = p.ink, lineHeight = 40.sp)
-                            Text("Calories left", fontSize = 14.sp, fontWeight = FontWeight(500), color = p.muted)
+                            Text("${(prof.calorieTarget + vm.burnedKcal - totals.calories).toInt().coerceAtLeast(0)}", fontSize = 40.sp, fontWeight = FontWeight(800), letterSpacing = (-1.5).sp, color = p.ink, lineHeight = 40.sp)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Calories left", fontSize = 14.sp, fontWeight = FontWeight(500), color = p.muted)
+                                if (vm.burnedKcal > 0) Box(Modifier.padding(start = 8.dp).background(p.card2, CircleShape).padding(8.dp, 3.dp)) { Text("+${vm.burnedKcal.toInt()}", fontSize = 11.sp, fontWeight = FontWeight(700), color = p.ink) }
+                            }
                         }
                         Ring((totals.calories / prof.calorieTarget).toFloat(), p.ink, 96.dp, 9.dp) { Icon(FlameIcon, null, tint = p.ink, modifier = Modifier.size(26.dp)) }
                     }
@@ -106,6 +109,22 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit) {
                     MacroCard(Modifier.weight(1f), "${(prof.proteinTargetG - totals.protein).toInt().coerceAtLeast(0)}g", "Protein left", (totals.protein / prof.proteinTargetG).toFloat(), p.red)
                     MacroCard(Modifier.weight(1f), "${(prof.carbTargetG - totals.carbs).toInt().coerceAtLeast(0)}g", "Carbs left", (totals.carbs / prof.carbTargetG.coerceAtLeast(1)).toFloat(), p.orange)
                     MacroCard(Modifier.weight(1f), "${(prof.fatTargetG - totals.fat).toInt().coerceAtLeast(0)}g", "Fat left", (totals.fat / prof.fatTargetG.coerceAtLeast(1)).toFloat(), p.blue)
+                }
+            }
+        }
+        vm.healthToday?.let { h ->
+            item {
+                Rise(4) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Card(Modifier.weight(1f), padding = 14.dp) {
+                            Text(String.format(Locale.US, "%,d", h.steps), fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink)
+                            Text("Steps today", fontSize = 12.sp, color = p.muted)
+                        }
+                        Card(Modifier.weight(1f), padding = 14.dp) {
+                            Row(verticalAlignment = Alignment.CenterVertically) { Icon(FlameIcon, null, tint = p.ink, modifier = Modifier.size(16.dp)); Text(" ${h.activeKcal.toInt()}", fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink) }
+                            Text("Calories burned", fontSize = 12.sp, color = p.muted)
+                        }
+                    }
                 }
             }
         }

@@ -11,6 +11,9 @@ object ThemePrefs {
         ThemeMode.valueOf(context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString("theme", "AUTO") ?: "AUTO")
     }.getOrDefault(ThemeMode.AUTO)
 
+    fun burned(context: Context): Boolean = context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getBoolean("add_burned", false)
+    fun setBurned(context: Context, on: Boolean) { context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putBoolean("add_burned", on).apply() }
+
     fun set(context: Context, mode: ThemeMode) {
         context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putString("theme", mode.name).apply()
     }

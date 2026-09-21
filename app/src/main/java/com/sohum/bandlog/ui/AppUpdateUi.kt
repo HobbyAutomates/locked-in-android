@@ -106,7 +106,7 @@ fun UpdateDialog(vm: UpdateViewModel) {
                     Text("Downloading… ${(vm.progress * 100).toInt()}%", fontSize = 12.sp)
                 } else if (vm.needsPermission) {
                     Spacer(Modifier.height(10.dp))
-                    Text("Turn on “Allow from this source” for Band Log, come back, and tap Update again.", fontSize = 12.sp)
+                    Text("Turn on “Allow from this source” for Locked In, come back, and tap Update again.", fontSize = 12.sp)
                 }
             }
         },

@@ -51,7 +51,7 @@ object AppUpdater {
     /** Download the APK to cache, reporting 0f..1f progress. */
     suspend fun download(context: Context, update: Update, onProgress: (Float) -> Unit): File = withContext(Dispatchers.IO) {
         val dir = File(context.cacheDir, "updates").apply { mkdirs() }
-        val out = File(dir, "BandLog.apk")
+        val out = File(dir, "LockedIn.apk")
         val req = Request.Builder().url(update.url).get().build()
         client.newCall(req).execute().use { res ->
             if (!res.isSuccessful) throw RuntimeException("Download failed (${res.code})")

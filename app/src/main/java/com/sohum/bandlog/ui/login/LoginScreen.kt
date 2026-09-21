@@ -63,7 +63,7 @@ fun LoginScreen(onSignedIn: () -> Unit) {
         Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(horizontal = 24.dp),
         verticalArrangement = Arrangement.Center,
     ) {
-        Text("BAND LOG", fontSize = 11.sp, fontWeight = FontWeight(700), letterSpacing = 1.5.sp, color = cs.onSurfaceVariant)
+        Text("LOCKED IN", fontSize = 11.sp, fontWeight = FontWeight(700), letterSpacing = 1.5.sp, color = cs.onSurfaceVariant)
         Spacer(Modifier.height(6.dp))
         Text(if (creating) "Create account" else "Sign in", fontSize = 30.sp, fontWeight = FontWeight(800), letterSpacing = (-1).sp)
         Text("One sign-in on this phone. You'll stay logged in.", color = cs.onSurfaceVariant, fontSize = 13.sp)

@@ -24,8 +24,8 @@ android {
         applicationId = "com.sohum.bandlog"
         minSdk = 31
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 5
+        versionName = "1.4"
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
         // The Railway web app; /api/parse-meal holds the Anthropic key server-side.
@@ -72,6 +72,9 @@ dependencies {
 
     // HTTP client for Supabase REST/Auth and the meal-parse API
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // Health Connect: steps + calories in, band sessions out (covers Google Fit and Samsung Health)
+    implementation("androidx.health.connect:connect-client:1.1.0-alpha07")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

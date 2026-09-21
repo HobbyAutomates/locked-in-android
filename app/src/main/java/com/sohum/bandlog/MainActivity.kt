@@ -96,7 +96,7 @@ class MainActivity : ComponentActivity() {
             BandLogTheme(dark = dark) {
                 val vm: AppViewModel = viewModel()
                 val updateVm: UpdateViewModel = viewModel()
-                LaunchedEffect(Unit) { updateVm.checkOnce(); if (vm.signedIn) vm.refresh() }
+                LaunchedEffect(Unit) { updateVm.checkOnce(); vm.addBurnedBack = ThemePrefs.burned(this@MainActivity); if (vm.signedIn) { vm.refresh(); vm.refreshHealth(this@MainActivity) } }
                 Surface(Modifier.fillMaxSize(), color = palette.bg) {
                     if (!vm.signedIn) LoginScreen(onSignedIn = { vm.onSignedIn() })
                     else MainShell(vm, updateVm, themeMode) { themeMode = it; ThemePrefs.set(this, it) }
@@ -117,7 +117,7 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
     val p = palette
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var log by remember { mutableStateOf<LogRequest?>(null) }
-    val tabs = listOf(Tab("Home", Icons.Outlined.Home), Tab("Calendar", Icons.Outlined.CalendarMonth), Tab("Progress", Icons.Outlined.SignalCellularAlt), Tab("Settings", Icons.Outlined.Settings))
+    val tabs = listOf(Tab("Home", Icons.Outlined.Home), Tab("Calendar", Icons.Outlined.CalendarMonth), Tab("Scan", com.sohum.bandlog.ui.components.ScanIcon), Tab("Progress", Icons.Outlined.SignalCellularAlt), Tab("Settings", Icons.Outlined.Settings))
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
@@ -125,7 +125,8 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
                 when (tab) {
                     0 -> TodayScreen(vm) { w -> log = LogRequest(w, Dates.today(), false) }
                     1 -> CalendarScreen(vm) { w, d -> log = LogRequest(w, d, false) }
-                    2 -> ProgressScreen(vm)
+                    2 -> com.sohum.bandlog.ui.scan.ScanTab()
+                    3 -> ProgressScreen(vm)
                     else -> SettingsScreen(vm, updateVm, themeMode, onThemeMode)
                 }
             }
@@ -138,7 +139,7 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
                     Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 76.dp, top = 10.dp).navigationBarsPadding().padding(bottom = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
                         tabs.forEachIndexed { i, t ->
                             val sel = tab == i
-                            Column(Modifier.clickable { tab = i }.padding(horizontal = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Column(Modifier.clickable { tab = i }.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                                 Icon(t.icon, t.label, tint = if (sel) p.ink else p.muted, modifier = Modifier.size(24.dp))
                                 Text(t.label, fontSize = 11.sp, fontWeight = FontWeight(600), color = if (sel) p.ink else p.muted)
                             }

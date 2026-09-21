@@ -67,7 +67,6 @@ import com.sohum.bandlog.ui.components.Rise
 import com.sohum.bandlog.ui.components.RowSpaceBetween
 import com.sohum.bandlog.ui.components.Segmented
 import com.sohum.bandlog.ui.components.Chip as SelChip
-import com.sohum.bandlog.ui.scan.ScanForm
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -99,13 +98,9 @@ fun LogScreen(vm: AppViewModel, existing: Workout?, initialDate: String, startOn
             Spacer(Modifier.width(40.dp))
         }
         if (existing == null) {
-            Box(Modifier.padding(16.dp, 8.dp)) { Segmented(listOf("Workout", "Meal", "Scan label"), seg, { seg = it }) }
+            Box(Modifier.padding(16.dp, 8.dp)) { Segmented(listOf("Workout", "Meal"), seg, { seg = it }) }
         }
-        when {
-            existing != null || seg == 0 -> WorkoutForm(vm, existing, initialDate, onClose)
-            seg == 1 -> MealForm(vm, initialDate, onClose)
-            else -> ScanForm()
-        }
+        if (existing != null || seg == 0) WorkoutForm(vm, existing, initialDate, onClose) else MealForm(vm, initialDate, onClose)
     }
 }
 
@@ -124,6 +119,7 @@ private fun WorkoutForm(vm: AppViewModel, existing: Workout?, initialDate: Strin
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var pickDate by remember { mutableStateOf(false) }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
 
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp, 6.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -189,8 +185,9 @@ private fun WorkoutForm(vm: AppViewModel, existing: Workout?, initialDate: Strin
                 if (muscles.isEmpty()) { error = "Pick at least one muscle"; return@PillButton }
                 scope.launch {
                     busy = true; error = null
-                    val ok = vm.saveWorkout(existing?.id, date, Muscles.ALL.filter { it in muscles }, band, kg.toDoubleOrNull(), minutes.toIntOrNull(), exercises.trim(), notes.trim())
-                    if (ok) onClose() else { error = vm.error; busy = false }
+                    val picked = Muscles.ALL.filter { it in muscles }
+                    val ok = vm.saveWorkout(existing?.id, date, picked, band, kg.toDoubleOrNull(), minutes.toIntOrNull(), exercises.trim(), notes.trim())
+                    if (ok) { if (existing == null) vm.pushSessionToHealth(ctx, picked, minutes.toIntOrNull(), date); onClose() } else { error = vm.error; busy = false }
                 }
             })
         }

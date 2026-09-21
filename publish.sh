@@ -17,9 +17,9 @@ VCODE=$(grep -oE 'versionCode = [0-9]+' app/build.gradle.kts | grep -oE '[0-9]+'
 BASE="${SUPABASE_URL%/}/storage/v1/object/app"
 PUBLIC="${SUPABASE_URL%/}/storage/v1/object/public/app"
 
-echo "Publishing Band Log v$VNAME (versionCode $VCODE)…"
+echo "Publishing Locked In v$VNAME (versionCode $VCODE)…"
 
-APK_NAME="BandLog-$VCODE.apk"
+APK_NAME="LockedIn-$VCODE.apk"
 curl -fsS -X POST "$BASE/$APK_NAME" \
   -H "Authorization: Bearer $SUPABASE_SERVICE_KEY" -H "x-upsert: true" \
   -H "Content-Type: application/vnd.android.package-archive" \

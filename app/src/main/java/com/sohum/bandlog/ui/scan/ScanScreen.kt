@@ -64,6 +64,18 @@ import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.File
 
+/** Bottom-nav tab: title + the scanner. */
+@Composable
+fun ScanTab() {
+    Column(Modifier.fillMaxSize()) {
+        Column(Modifier.padding(16.dp, 12.dp, 16.dp, 0.dp)) {
+            com.sohum.bandlog.ui.components.ScreenTitle("Scan")
+            Text("Ingredients list or nutrition panel", fontSize = 13.sp, color = palette.muted)
+        }
+        Box(Modifier.weight(1f).padding(bottom = 96.dp)) { ScanForm() }
+    }
+}
+
 /** Take a photo of an ingredients / nutrition label → Haiku reads it, researches the product, reports. */
 @Composable
 fun ScanForm() {

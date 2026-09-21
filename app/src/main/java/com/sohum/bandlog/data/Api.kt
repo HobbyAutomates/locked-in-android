@@ -121,13 +121,14 @@ object Api {
 
     // ---- meal parsing (web app → Haiku) ----
 
-    private suspend fun api(path: String, payload: JSONObject, label: String): JSONObject {
+    private suspend fun api(path: String, payload: JSONObject, label: String, timeoutSec: Long = 60): JSONObject {
         SupabaseAuth.ensureFresh()
         val token = Session.accessToken ?: throw AuthException("Not signed in")
         val apiBase = BuildConfig.API_BASE.trimEnd('/')
         if (apiBase.isBlank()) throw ApiException("API_BASE is not set in this build")
         val r = Request.Builder().url("$apiBase/api/$path").header("Authorization", "Bearer $token").post(json(payload.toString())).build()
-        val body = client.newCall(r).execute().use { res ->
+        val c = if (timeoutSec == 60L) client else client.newBuilder().callTimeout(timeoutSec, TimeUnit.SECONDS).readTimeout(timeoutSec, TimeUnit.SECONDS).build()
+        val body = c.newCall(r).execute().use { res ->
             val b = res.body?.string().orEmpty()
             if (!res.isSuccessful) {
                 val msg = runCatching { JSONObject(b).optString("error") }.getOrNull().orEmpty()
@@ -162,7 +163,8 @@ object Api {
 
     /** Photo of an ingredients / nutrition label → verdict report (Haiku vision + web research). */
     suspend fun scanLabel(jpegBase64: String, note: String): LabelReport = withContext(Dispatchers.IO) {
-        LabelReport.from(api("scan-label", JSONObject().put("image", jpegBase64).put("media_type", "image/jpeg").put("note", note), "Scan"))
+        // Vision + web research can take a while; give this one call a longer leash than the rest.
+        LabelReport.from(api("scan-label", JSONObject().put("image", jpegBase64).put("media_type", "image/jpeg").put("note", note), "Scan", timeoutSec = 180))
     }
 
     // ---- saved meals (one-tap repeat dinners) ----

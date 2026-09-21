@@ -7,7 +7,14 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Label scanner uses the system camera app via ACTION_IMAGE_CAPTURE; no CAMERA permission needed. -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />
-    <queries><intent><action android:name="android.media.action.IMAGE_CAPTURE" /></intent></queries>
+    <queries>
+        <intent><action android:name="android.media.action.IMAGE_CAPTURE" /></intent>
+        <package android:name="com.google.android.apps.healthdata" />
+    </queries>
+    <!-- Health Connect: steps + active calories in, band sessions out. -->
+    <uses-permission android:name="android.permission.health.READ_STEPS" />
+    <uses-permission android:name="android.permission.health.READ_ACTIVE_CALORIES_BURNED" />
+    <uses-permission android:name="android.permission.health.WRITE_EXERCISE" />
 
     <application
         android:allowBackup="true"
@@ -39,6 +46,19 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+            </intent-filter>
         </activity>
+        <activity-alias
+            android:name="ViewPermissionUsageActivity"
+            android:exported="true"
+            android:targetActivity=".MainActivity"
+            android:permission="android.permission.START_VIEW_PERMISSION_USAGE">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+            </intent-filter>
+        </activity-alias>
     </application>
 </manifest>

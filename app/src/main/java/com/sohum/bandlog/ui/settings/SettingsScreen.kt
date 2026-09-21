@@ -20,6 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Logout
+import androidx.compose.material.icons.outlined.MonitorHeart
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -112,6 +113,21 @@ fun SettingsScreen(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Theme
                                 }
                             }
                         }
+                    }
+                    Hair()
+                    val ctx = androidx.compose.ui.platform.LocalContext.current
+                    val healthLauncher = androidx.activity.compose.rememberLauncherForActivityResult(androidx.health.connect.client.PermissionController.createRequestPermissionResultContract()) { vm.refreshHealth(ctx) }
+                    val hcAvailable = remember { com.sohum.bandlog.util.Health.available(ctx) }
+                    SettingRow(Icons.Outlined.MonitorHeart, p.red, "Health Connect", onClick = {
+                        if (!hcAvailable) runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("market://details?id=com.google.android.apps.healthdata"))) }
+                        else healthLauncher.launch(com.sohum.bandlog.util.Health.PERMISSIONS)
+                    }) {
+                        Text(when { !hcAvailable -> "Install"; vm.healthConnected -> "Connected"; else -> "Connect" }, fontSize = 13.sp, fontWeight = FontWeight(600), color = if (vm.healthConnected) p.green else p.muted)
+                    }
+                    Hair()
+                    SettingRow(FlameIcon, p.ink, "Add burned calories back") {
+                        androidx.compose.material3.Switch(vm.addBurnedBack, { vm.addBurnedBack = it; com.sohum.bandlog.util.ThemePrefs.setBurned(ctx, it) }, enabled = vm.healthConnected,
+                            colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = p.btn, checkedThumbColor = p.btnInk))
                     }
                     Hair()
                     SettingRow(Icons.Outlined.Refresh, p.ink, "Check for updates", onClick = { updateVm.check() }) {

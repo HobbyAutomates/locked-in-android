@@ -61,6 +61,14 @@ val ThumbDownIcon: ImageVector by lazy {
     stroke("ThumbDown") { moveTo(17f, 14f); verticalLineTo(3f); moveTo(21f, 12f); verticalLineTo(5f); arcTo(2f, 2f, 0f, false, false, 19f, 3f); horizontalLineTo(17f); moveTo(17f, 14f); lineTo(13f, 21f); arcTo(2f, 2f, 0f, false, true, 11f, 19f); verticalLineTo(15f); horizontalLineTo(5f); arcTo(2f, 2f, 0f, false, true, 3f, 12.7f); lineTo(4.5f, 4.7f); arcTo(2f, 2f, 0f, false, true, 6.5f, 3f); horizontalLineTo(17f) }
 }
 
+/** The Locked In mark: padlock with a band-shaped shackle. */
+val LockIcon: ImageVector by lazy {
+    ImageVector.Builder("Lock", 24.dp, 24.dp, 108f, 108f).apply {
+        path(fill = null, stroke = SolidColor(Color.Black), strokeLineWidth = 9f, strokeLineCap = StrokeCap.Round) { moveTo(40f, 52f); verticalLineTo(40f); arcTo(14f, 14f, 0f, false, true, 68f, 40f); verticalLineTo(52f) }
+        path(fill = SolidColor(Color.Black)) { moveTo(34f, 50f); horizontalLineTo(74f); arcTo(5f, 5f, 0f, false, true, 79f, 55f); verticalLineTo(79f); arcTo(5f, 5f, 0f, false, true, 74f, 84f); horizontalLineTo(34f); arcTo(5f, 5f, 0f, false, true, 29f, 79f); verticalLineTo(55f); arcTo(5f, 5f, 0f, false, true, 34f, 50f); close() }
+    }.build()
+}
+
 /** Microphone for the dictation card. */
 val MicIcon: ImageVector by lazy {
     stroke("Mic") {

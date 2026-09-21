@@ -49,6 +49,28 @@ class AppViewModel : ViewModel() {
 
     fun dismissCelebration() { celebrate = null }
 
+    // ---- Health Connect (Google Fit / Samsung Health) ----
+    var healthConnected by mutableStateOf(false); private set
+    var healthToday by mutableStateOf<com.sohum.bandlog.util.Health.Today?>(null); private set
+    var addBurnedBack by mutableStateOf(false)
+    /** Calories burned today that count toward the target when the toggle is on. */
+    val burnedKcal: Double get() = if (addBurnedBack) healthToday?.activeKcal ?: 0.0 else 0.0
+
+    fun refreshHealth(context: android.content.Context) {
+        viewModelScope.launch {
+            val ctx = context.applicationContext
+            if (!com.sohum.bandlog.util.Health.available(ctx)) { healthConnected = false; return@launch }
+            healthConnected = com.sohum.bandlog.util.Health.hasPermissions(ctx)
+            healthToday = if (healthConnected) com.sohum.bandlog.util.Health.today(ctx) else null
+        }
+    }
+
+    /** Called after a workout save; mirrors it into Health Connect when connected. */
+    fun pushSessionToHealth(context: android.content.Context, muscles: List<String>, minutes: Int?, date: String) {
+        if (!healthConnected) return
+        viewModelScope.launch { com.sohum.bandlog.util.Health.writeSession(context.applicationContext, "Bands: " + muscles.joinToString(", "), minutes ?: 30, date) }
+    }
+
     /** Cal AI-style optimistic log: the row appears instantly; Haiku prices it in the background. */
     fun quickLogMeal(text: String, date: String) {
         pendingMeals = pendingMeals + text
