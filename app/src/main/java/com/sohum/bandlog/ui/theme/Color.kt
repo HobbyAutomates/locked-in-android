@@ -23,9 +23,10 @@ val LightPalette = Palette(
     purple = Color(0xFF7A5AF8), purpleBg = Color(0xFFECE7FE), flame = Color(0xFFFF6A00), shadow = Color(0x33111111),
 )
 
+// Cal AI's Android dark mode: a pure-black page with iOS-style elevated greys on top.
 val DarkPalette = Palette(
-    bg = Color(0xFF0B0B0C), card = Color(0xFF1A1A1C), card2 = Color(0xFF26262A), ink = Color(0xFFF5F5F7), muted = Color(0xFF9A9AA0),
-    hair = Color(0xFF2C2C30), track = Color(0xFF2C2C30), btn = Color(0xFFF5F5F7), btnInk = Color(0xFF0B0B0C),
+    bg = Color(0xFF000000), card = Color(0xFF1C1C1E), card2 = Color(0xFF2C2C2E), ink = Color(0xFFF5F5F7), muted = Color(0xFF9A9AA0),
+    hair = Color(0xFF2C2C2E), track = Color(0xFF2C2C2E), btn = Color(0xFFF5F5F7), btnInk = Color(0xFF000000),
     red = Color(0xFFFF6B6B), redBg = Color(0x29FF6B6B), orange = Color(0xFFF5A623), orangeBg = Color(0x29F5A623),
     blue = Color(0xFF5B9BF0), blueBg = Color(0x295B9BF0), green = Color(0xFF4CD964), greenBg = Color(0x294CD964),
     purple = Color(0xFFA78BFA), purpleBg = Color(0x29A78BFA), flame = Color(0xFFFF7A1A), shadow = Color(0xE6000000),

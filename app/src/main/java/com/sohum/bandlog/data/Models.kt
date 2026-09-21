@@ -99,16 +99,67 @@ data class Profile(
     val weeklyWorkoutTarget: Int = 3,
     val proteinTargetG: Int = 120,
     val calorieTarget: Int = 2200,
+    val name: String = "",
+    /** ISO yyyy-MM-dd. */
+    val dob: String? = null,
+    /** male | female | other */
+    val gender: String? = null,
+    val heightCm: Double? = null,
+    val weightKg: Double? = null,
+    val goalWeightKg: Double? = null,
+    /** lose | maintain | gain */
+    val goalType: String = "maintain",
+    val goalSpeedKgWk: Double = 0.5,
+    val stepGoal: Int = 8000,
+    /** Explicit macro goals; null falls back to the derived formula. */
+    val carbTargetGSet: Int? = null,
+    val fatTargetGSet: Int? = null,
+    /** Raw `{"breakfast":{"on":true,"time":"08:30"},…}`; parsed by util/Reminders. */
+    val remindersJson: String = "",
 ) {
-    /** Derived macro targets (Cal AI-style cards): fat 25% of calories, carbs the remainder. */
-    val fatTargetG: Int get() = (calorieTarget * 0.25 / 9).toInt()
-    val carbTargetG: Int get() = ((calorieTarget - proteinTargetG * 4 - fatTargetG * 9) / 4).coerceAtLeast(0)
+    /** Macro targets (Cal AI-style cards): explicit if set, else fat 25% of calories and carbs the remainder. */
+    val fatTargetG: Int get() = fatTargetGSet ?: (calorieTarget * 0.25 / 9).toInt()
+    val carbTargetG: Int get() = carbTargetGSet ?: ((calorieTarget - proteinTargetG * 4 - fatTargetG * 9) / 4).coerceAtLeast(0)
+
+    /** Whole years from [dob], or null when no birthday is set. */
+    val age: Int?
+        get() = dob?.let {
+            runCatching { java.time.Period.between(java.time.LocalDate.parse(it), java.time.LocalDate.now()).years }
+                .getOrNull()?.takeIf { y -> y in 1..120 }
+        }
 
     companion object {
+        private fun JSONObject.dbl(k: String): Double? = if (isNull(k)) null else optDouble(k).takeIf { !it.isNaN() }
+        private fun JSONObject.str(k: String): String? = if (isNull(k)) null else optString(k).ifBlank { null }
+
         fun from(o: JSONObject) = Profile(
             weeklyWorkoutTarget = o.optInt("weekly_workout_target", 3),
             proteinTargetG = o.optInt("protein_target_g", 120),
             calorieTarget = o.optInt("calorie_target", 2200),
+            name = o.str("name").orEmpty(),
+            dob = o.str("dob")?.take(10),
+            gender = o.str("gender"),
+            heightCm = o.dbl("height_cm"),
+            weightKg = o.dbl("weight_kg"),
+            goalWeightKg = o.dbl("goal_weight_kg"),
+            goalType = o.str("goal_type") ?: "maintain",
+            goalSpeedKgWk = o.dbl("goal_speed_kg_wk") ?: 0.5,
+            stepGoal = if (o.isNull("step_goal")) 8000 else o.optInt("step_goal", 8000).coerceAtLeast(500),
+            carbTargetGSet = if (o.isNull("carb_target_g")) null else o.optInt("carb_target_g").takeIf { it > 0 },
+            fatTargetGSet = if (o.isNull("fat_target_g")) null else o.optInt("fat_target_g").takeIf { it > 0 },
+            remindersJson = if (o.isNull("reminders")) "" else o.opt("reminders")?.toString().orEmpty(),
+        )
+    }
+}
+
+/** One row of `bandlog.weight_log`. */
+data class WeightEntry(val id: String, val date: String, val weightKg: Double, val note: String) {
+    companion object {
+        fun from(o: JSONObject) = WeightEntry(
+            id = o.getString("id"),
+            date = o.getString("date"),
+            weightKg = o.optDouble("weight_kg", 0.0),
+            note = if (o.isNull("note")) "" else o.optString("note"),
         )
     }
 }

@@ -45,20 +45,77 @@ object Api {
 
     // ---- profile ----
 
+    private const val PROFILE_COLS =
+        "weekly_workout_target,protein_target_g,calorie_target,name,dob,gender,height_cm,weight_kg," +
+            "goal_weight_kg,goal_type,goal_speed_kg_wk,step_goal,carb_target_g,fat_target_g,reminders"
+
     suspend fun profile(): Profile = withContext(Dispatchers.IO) {
-        val body = run(rest("profiles?select=weekly_workout_target,protein_target_g,calorie_target&limit=1").get().build(), "Load profile")
+        val body = run(rest("profiles?select=$PROFILE_COLS&limit=1").get().build(), "Load profile")
         val arr = JSONArray(body)
         if (arr.length() == 0) Profile() else Profile.from(arr.getJSONObject(0))
     }
 
+    /** Upsert on the profile's PK; every column round-trips so a partial edit never drops the rest. */
     suspend fun saveProfile(p: Profile) = withContext(Dispatchers.IO) {
         val uid = Session.userId ?: throw AuthException("Not signed in")
         val payload = JSONObject().put("id", uid)
             .put("weekly_workout_target", p.weeklyWorkoutTarget)
             .put("protein_target_g", p.proteinTargetG)
-            .put("calorie_target", p.calorieTarget).toString()
-        run(rest("profiles").header("Prefer", "resolution=merge-duplicates").post(json(payload)).build(), "Save targets")
+            .put("calorie_target", p.calorieTarget)
+            .put("name", p.name.ifBlank { JSONObject.NULL })
+            .put("dob", p.dob ?: JSONObject.NULL)
+            .put("gender", p.gender ?: JSONObject.NULL)
+            .put("height_cm", p.heightCm ?: JSONObject.NULL)
+            .put("weight_kg", p.weightKg ?: JSONObject.NULL)
+            .put("goal_weight_kg", p.goalWeightKg ?: JSONObject.NULL)
+            .put("goal_type", p.goalType)
+            .put("goal_speed_kg_wk", p.goalSpeedKgWk)
+            .put("step_goal", p.stepGoal)
+            .put("carb_target_g", p.carbTargetGSet ?: JSONObject.NULL)
+            .put("fat_target_g", p.fatTargetGSet ?: JSONObject.NULL)
+            .put("reminders", if (p.remindersJson.isBlank()) JSONObject.NULL else JSONObject(p.remindersJson))
+            .toString()
+        run(rest("profiles").header("Prefer", "resolution=merge-duplicates").post(json(payload)).build(), "Save profile")
         Unit
+    }
+
+    // ---- weight log ----
+
+    suspend fun weights(): List<WeightEntry> = withContext(Dispatchers.IO) {
+        val body = run(rest("weight_log?select=id,date,weight_kg,note&order=date.desc,created_at.desc&limit=400").get().build(), "Load weight history")
+        val arr = JSONArray(body)
+        (0 until arr.length()).map { WeightEntry.from(arr.getJSONObject(it)) }
+    }
+
+    /** Logs a weigh-in and mirrors it onto `profiles.weight_kg` so every screen agrees. */
+    suspend fun logWeight(date: String, kg: Double, note: String) = withContext(Dispatchers.IO) {
+        val uid = Session.userId ?: throw AuthException("Not signed in")
+        val payload = JSONObject().put("user_id", uid).put("date", date).put("weight_kg", kg)
+            .put("note", note.ifBlank { JSONObject.NULL }).toString()
+        run(rest("weight_log").post(json(payload)).build(), "Log weight")
+        run(rest("profiles?id=eq.$uid").patch(json(JSONObject().put("weight_kg", kg).toString())).build(), "Update weight")
+        Unit
+    }
+
+    suspend fun deleteWeight(id: String) = withContext(Dispatchers.IO) {
+        run(rest("weight_log?id=eq.$id").delete().build(), "Delete weigh-in"); Unit
+    }
+
+    // ---- badge totals ----
+
+    /** Every workout date ever (badges need the longest run, not just the 120-day window). */
+    suspend fun allWorkoutDates(): List<String> = withContext(Dispatchers.IO) {
+        val body = run(rest("workouts?select=date&order=date.asc").get().build(), "Load workout history")
+        val arr = JSONArray(body)
+        (0 until arr.length()).map { arr.getJSONObject(it).getString("date") }
+    }
+
+    /** Lifetime row count via PostgREST's `Content-Range` header (no rows transferred). */
+    suspend fun countRows(table: String): Int = withContext(Dispatchers.IO) {
+        val req = rest("$table?select=id").header("Prefer", "count=exact").header("Range", "0-0").get().build()
+        client.newCall(req).execute().use { res ->
+            if (!res.isSuccessful) 0 else res.header("Content-Range")?.substringAfter('/')?.trim()?.toIntOrNull() ?: 0
+        }
     }
 
     // ---- workouts ----
