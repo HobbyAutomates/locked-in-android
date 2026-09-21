@@ -38,7 +38,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.SignalCellularAlt
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
@@ -72,8 +72,15 @@ import com.sohum.bandlog.ui.components.Hair
 import com.sohum.bandlog.ui.components.Motion
 import com.sohum.bandlog.ui.log.LogScreen
 import com.sohum.bandlog.ui.login.LoginScreen
+import com.sohum.bandlog.ui.profile.GoalWeightScreen
+import com.sohum.bandlog.ui.profile.NutritionGoalsScreen
+import com.sohum.bandlog.ui.profile.PersonalDetailsScreen
+import com.sohum.bandlog.ui.profile.ProfilePage
+import com.sohum.bandlog.ui.profile.ProfileScreen
+import com.sohum.bandlog.ui.profile.RemindersScreen
+import com.sohum.bandlog.ui.profile.WeightHistoryScreen
+import com.sohum.bandlog.ui.progress.BadgesScreen
 import com.sohum.bandlog.ui.progress.ProgressScreen
-import com.sohum.bandlog.ui.settings.SettingsScreen
 import com.sohum.bandlog.ui.theme.BandLogTheme
 import com.sohum.bandlog.ui.theme.palette
 import com.sohum.bandlog.ui.today.TodayScreen
@@ -83,9 +90,15 @@ import com.sohum.bandlog.util.ThemePrefs
 
 class MainActivity : ComponentActivity() {
 
+    /** Bumped when a meal-reminder notification is tapped; the shell opens Log → Meal. */
+    private val openMealTick = mutableIntStateOf(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Session.init(this)
+        handleIntent(intent)
+        // A reboot or update clears AlarmManager; re-arm here too in case the receiver was missed.
+        runCatching { com.sohum.bandlog.alarm.MealAlarms.rescheduleAll(this) }
         enableEdgeToEdge()
         setContent {
             var themeMode by remember { mutableStateOf(ThemePrefs.get(this)) }
@@ -99,11 +112,26 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(Unit) { updateVm.checkOnce(); vm.addBurnedBack = ThemePrefs.burned(this@MainActivity); if (vm.signedIn) { vm.refresh(); vm.refreshHealth(this@MainActivity) } }
                 Surface(Modifier.fillMaxSize(), color = palette.bg) {
                     if (!vm.signedIn) LoginScreen(onSignedIn = { vm.onSignedIn() })
-                    else MainShell(vm, updateVm, themeMode) { themeMode = it; ThemePrefs.set(this, it) }
+                    else MainShell(vm, updateVm, themeMode, openMealTick.intValue) { themeMode = it; ThemePrefs.set(this, it) }
                 }
                 UpdateDialog(updateVm)
             }
         }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(i: android.content.Intent?) {
+        if (i?.getStringExtra(EXTRA_OPEN) == OPEN_MEAL) openMealTick.intValue++
+    }
+
+    companion object {
+        const val EXTRA_OPEN = "open"
+        const val OPEN_MEAL = "meal"
     }
 }
 
@@ -112,12 +140,21 @@ private data class LogRequest(val workout: Workout?, val date: String, val meal:
 
 private data class Tab(val label: String, val icon: ImageVector)
 
+/** A full-screen page pushed over the tab shell (Profile detail screens, Badges). */
+private enum class Page { PERSONAL, GOALS, GOAL_WEIGHT, REMINDERS, WEIGHT_HISTORY, BADGES }
+
 @Composable
-private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: ThemeMode, onThemeMode: (ThemeMode) -> Unit) {
+private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: ThemeMode, openMealTick: Int, onThemeMode: (ThemeMode) -> Unit) {
     val p = palette
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var log by remember { mutableStateOf<LogRequest?>(null) }
-    val tabs = listOf(Tab("Home", Icons.Outlined.Home), Tab("Calendar", Icons.Outlined.CalendarMonth), Tab("Scan", com.sohum.bandlog.ui.components.ScanIcon), Tab("Progress", Icons.Outlined.SignalCellularAlt), Tab("Settings", Icons.Outlined.Settings))
+    var page by remember { mutableStateOf<Page?>(null) }
+    val tabs = listOf(Tab("Home", Icons.Outlined.Home), Tab("Calendar", Icons.Outlined.CalendarMonth), Tab("Scan", com.sohum.bandlog.ui.components.ScanIcon), Tab("Progress", Icons.Outlined.SignalCellularAlt), Tab("Profile", Icons.Outlined.Person))
+
+    // A tapped meal reminder lands straight on the Meal form.
+    LaunchedEffect(openMealTick) {
+        if (openMealTick > 0) { page = null; log = LogRequest(null, Dates.today(), true) }
+    }
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
@@ -126,8 +163,16 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
                     0 -> TodayScreen(vm) { w -> log = LogRequest(w, Dates.today(), false) }
                     1 -> CalendarScreen(vm) { w, d -> log = LogRequest(w, d, false) }
                     2 -> com.sohum.bandlog.ui.scan.ScanTab()
-                    3 -> ProgressScreen(vm)
-                    else -> SettingsScreen(vm, updateVm, themeMode, onThemeMode)
+                    3 -> ProgressScreen(vm) { page = Page.BADGES }
+                    else -> ProfileScreen(vm, updateVm, themeMode, onThemeMode) { target ->
+                        page = when (target) {
+                            ProfilePage.PERSONAL -> Page.PERSONAL
+                            ProfilePage.GOALS -> Page.GOALS
+                            ProfilePage.GOAL_WEIGHT -> Page.GOAL_WEIGHT
+                            ProfilePage.REMINDERS -> Page.REMINDERS
+                            ProfilePage.WEIGHT_HISTORY -> Page.WEIGHT_HISTORY
+                        }
+                    }
                 }
             }
         }
@@ -151,6 +196,25 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
         }
 
         vm.celebrate?.let { c -> CelebrationModal(c) { vm.dismissCelebration() } }
+
+        // Profile detail pages, pushed with the same motion as the Log page.
+        AnimatedContent(
+            targetState = page, label = "page",
+            transitionSpec = { (slideInVertically(Motion.spatial()) { it / 3 } + fadeIn(Motion.effects())).togetherWith(slideOutVertically(Motion.spatialFast()) { it / 3 } + fadeOut(Motion.effectsFast())) },
+        ) { current ->
+            if (current != null) {
+                BackHandler { page = null }
+                val back = { page = null }
+                when (current) {
+                    Page.PERSONAL -> PersonalDetailsScreen(vm, back) { page = Page.GOAL_WEIGHT }
+                    Page.GOALS -> NutritionGoalsScreen(vm, back) { page = Page.PERSONAL }
+                    Page.GOAL_WEIGHT -> GoalWeightScreen(vm, back)
+                    Page.REMINDERS -> RemindersScreen(vm, back)
+                    Page.WEIGHT_HISTORY -> WeightHistoryScreen(vm, back)
+                    Page.BADGES -> BadgesScreen(vm, back)
+                }
+            }
+        }
 
         AnimatedContent(
             targetState = log, label = "log",
