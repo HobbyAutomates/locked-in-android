@@ -30,6 +30,12 @@ class AppViewModel : ViewModel() {
     var profile by mutableStateOf(Profile()); private set
     var workouts by mutableStateOf<List<Workout>>(emptyList()); private set
     var meals by mutableStateOf<List<Meal>>(emptyList()); private set
+    var weights by mutableStateOf<List<com.sohum.bandlog.data.WeightEntry>>(emptyList()); private set
+
+    /** Lifetime figures behind the badges; loaded lazily when the Badges page opens. */
+    var totalMeals by mutableStateOf(0); private set
+    var allWorkoutDates by mutableStateOf<List<String>>(emptyList()); private set
+    var badgesLoading by mutableStateOf(false); private set
 
     val today: String get() = Dates.today()
     val workoutDates: List<String> get() = workouts.map { it.date }.distinct()
@@ -65,6 +71,8 @@ class AppViewModel : ViewModel() {
             if (healthConnected) {
                 val r = com.sohum.bandlog.util.Health.todayResult(ctx)
                 healthToday = r.getOrNull(); healthError = r.exceptionOrNull()?.let { "Health Connect read failed: ${it.message}" }
+                // Stamp today's burn so the Weekly Energy chart has a history to draw.
+                healthToday?.let { com.sohum.bandlog.util.BurnedCache.put(ctx, Dates.today(), it.activeKcal) }
             } else { healthToday = null; healthError = null }
         }
     }
@@ -104,7 +112,8 @@ class AppViewModel : ViewModel() {
                     val p = async { Api.profile() }
                     val w = async { Api.workouts(from, t) }
                     val m = async { Api.meals(from, t) }
-                    profile = p.await(); workouts = w.await(); meals = m.await()
+                    val g = async { runCatching { Api.weights() }.getOrDefault(weights) }
+                    profile = p.await(); workouts = w.await(); meals = m.await(); weights = g.await()
                 }
                 loadedOnce = true
             } catch (e: AuthException) {
@@ -144,13 +153,74 @@ class AppViewModel : ViewModel() {
     suspend fun deleteMeal(id: String) = mutate { Api.deleteMeal(id) }
     suspend fun saveTargets(p: Profile) = mutate { Api.saveProfile(p) }
 
+    /** Saves the whole profile (Personal details, goals, reminders all go through here). */
+    suspend fun saveProfile(p: Profile): Boolean {
+        val ok = mutate { Api.saveProfile(p) }
+        // Show the new values immediately even if the background refresh is still in flight.
+        if (ok) profile = p
+        return ok
+    }
+
+    // ---- weight log ----
+
+    fun loadWeights() { viewModelScope.launch { runCatching { weights = Api.weights() } } }
+
+    suspend fun logWeight(date: String, kg: Double, note: String): Boolean {
+        val ok = mutate { Api.logWeight(date, kg, note) }
+        if (ok) runCatching { weights = Api.weights() }
+        return ok
+    }
+
+    suspend fun deleteWeight(id: String): Boolean {
+        val ok = mutate { Api.deleteWeight(id) }
+        if (ok) runCatching { weights = Api.weights() }
+        return ok
+    }
+
+    // ---- badges ----
+
+    /** Days in the loaded window whose logged calories landed within ±10% of the target. */
+    val calorieGoalDays: Int
+        get() {
+            val target = profile.calorieTarget.toDouble()
+            if (target <= 0) return 0
+            return meals.groupBy { it.date }
+                .count { (_, m) ->
+                    val kcal = m.sumOf { meal -> meal.calories }
+                    kcal > 0 && kotlin.math.abs(kcal - target) <= target * 0.10
+                }
+        }
+
+    val badgeProgress: com.sohum.bandlog.util.Badges.Progress
+        get() = com.sohum.bandlog.util.Badges.Progress(
+            streakDays = com.sohum.bandlog.util.Badges.longestDayRun(allWorkoutDates.ifEmpty { workoutDates }),
+            meals = maxOf(totalMeals, meals.size),
+            goalDays = calorieGoalDays,
+        )
+
+    fun loadBadgeTotals() {
+        if (badgesLoading) return
+        viewModelScope.launch {
+            badgesLoading = true
+            runCatching {
+                coroutineScope {
+                    val d = async { Api.allWorkoutDates() }
+                    val c = async { Api.countRows("meals") }
+                    allWorkoutDates = d.await(); totalMeals = c.await()
+                }
+            }
+            badgesLoading = false
+        }
+    }
+
     /** Fire a suspend mutation from a composable that has no scope of its own. */
     fun launch(block: suspend () -> Unit) { viewModelScope.launch { block() } }
 
     fun signOut() {
         viewModelScope.launch {
             SupabaseAuth.signOut()
-            signedIn = false; workouts = emptyList(); meals = emptyList(); profile = Profile(); loadedOnce = false
+            signedIn = false; workouts = emptyList(); meals = emptyList(); weights = emptyList()
+            profile = Profile(); loadedOnce = false; totalMeals = 0; allWorkoutDates = emptyList()
         }
     }
 }

@@ -15,13 +15,20 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -42,6 +49,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -178,3 +186,75 @@ fun RowSpaceBetween(content: @Composable () -> Unit) {
 
 @Composable
 fun Hair() = Box(Modifier.fillMaxWidth().height(1.dp).background(palette.hair))
+
+/**
+ * Full-screen sub-page chassis shared by every Profile detail screen: floating back pill,
+ * centred title, then a scrolling body. Same shape as the Log page so pushes feel consistent.
+ */
+@Composable
+fun SubPage(
+    title: String,
+    onBack: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val p = palette
+    Column(Modifier.fillMaxSize().background(p.bg).statusBarsPadding()) {
+        Row(Modifier.fillMaxWidth().padding(16.dp, 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(40.dp).shadow(8.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow)
+                    .background(p.card, CircleShape).clickable(onClick = onBack),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Outlined.ArrowBack, "Back", tint = p.ink, modifier = Modifier.size(18.dp)) }
+            Text(title, Modifier.weight(1f), textAlign = TextAlign.Center, fontSize = 17.sp, fontWeight = FontWeight(700), color = p.ink)
+            Box(Modifier.size(40.dp))
+        }
+        Column(
+            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(PaddingValues(16.dp, 6.dp, 16.dp, 32.dp)),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            content = content,
+        )
+    }
+}
+
+/** A label + trailing control row, 13 dp tall gutters, used inside grouped cards. */
+@Composable
+fun SettingRow(
+    icon: ImageVector? = null,
+    tint: Color = palette.ink,
+    label: String,
+    subtitle: String? = null,
+    onClick: (() -> Unit)? = null,
+    trailing: @Composable () -> Unit = {},
+) {
+    val p = palette
+    Box(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 13.dp).weight(1f)) {
+                if (icon != null) {
+                    Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
+                    Box(Modifier.size(10.dp))
+                }
+                Column {
+                    Text(label, fontSize = 15.sp, fontWeight = FontWeight(500), color = p.ink)
+                    if (subtitle != null) Text(subtitle, fontSize = 12.sp, color = p.muted)
+                }
+            }
+            trailing()
+        }
+    }
+}
+
+/** The "›" affordance on rows that push a new page. */
+@Composable
+fun Chevron() = Text("›", fontSize = 18.sp, fontWeight = FontWeight(500), color = palette.muted)
+
+/** Small grey group heading above a card, e.g. "Account". */
+@Composable
+fun GroupLabel(text: String) = Text(
+    text.uppercase(),
+    fontSize = 11.sp,
+    fontWeight = FontWeight(700),
+    letterSpacing = 0.8.sp,
+    color = palette.muted,
+    modifier = Modifier.padding(start = 4.dp, top = 4.dp),
+)

@@ -79,6 +79,91 @@ val StepsIcon: ImageVector by lazy {
     }
 }
 
+/**
+ * Goal-speed slider animals, drawn as simple silhouettes so the three read at a glance:
+ * a hunched sloth, an upright rabbit, a stretched-out cheetah.
+ */
+val SlothIcon: ImageVector by lazy {
+    stroke("Sloth") {
+        // Round body hugging a branch, with a low, heavy head.
+        moveTo(4f, 6f); horizontalLineTo(20f)
+        moveTo(9f, 6f); verticalLineTo(9f); moveTo(16f, 6f); verticalLineTo(9f)
+        moveTo(12.5f, 9f); curveTo(16f, 9f, 18f, 11.5f, 18f, 14.5f); curveTo(18f, 17.5f, 16f, 20f, 12.5f, 20f)
+        curveTo(9f, 20f, 7f, 17.5f, 7f, 14.5f); curveTo(7f, 11.5f, 9f, 9f, 12.5f, 9f); close()
+        moveTo(10.5f, 14f); horizontalLineTo(10.6f); moveTo(14.5f, 14f); horizontalLineTo(14.6f)
+    }
+}
+
+val RabbitIcon: ImageVector by lazy {
+    stroke("Rabbit") {
+        // Two tall ears over a compact sitting body.
+        moveTo(9f, 10f); curveTo(8f, 7f, 8f, 4f, 9.5f, 3f); curveTo(11f, 4f, 11f, 7f, 10.5f, 10f)
+        moveTo(14.5f, 10f); curveTo(15.5f, 7f, 15.5f, 4f, 14f, 3f); curveTo(12.5f, 4f, 12.5f, 7f, 13f, 10f)
+        moveTo(12f, 10f); curveTo(15.5f, 10f, 18f, 12.5f, 18f, 16f); curveTo(18f, 19f, 15.5f, 21f, 12f, 21f)
+        curveTo(8.5f, 21f, 6f, 19f, 6f, 16f); curveTo(6f, 12.5f, 8.5f, 10f, 12f, 10f); close()
+        moveTo(10f, 15f); horizontalLineTo(10.1f); moveTo(14f, 15f); horizontalLineTo(14.1f)
+    }
+}
+
+val CheetahIcon: ImageVector by lazy {
+    stroke("Cheetah") {
+        // Long low back, small head forward, legs mid-stride, tail streaming behind.
+        moveTo(3f, 15f); curveTo(5f, 11f, 9f, 10f, 13f, 10f); curveTo(16f, 10f, 18f, 9f, 19f, 7f)
+        moveTo(19f, 7f); lineTo(21.5f, 7.5f)
+        moveTo(3f, 15f); curveTo(2f, 16f, 1.5f, 17f, 2f, 18f)
+        moveTo(6f, 13.5f); lineTo(5f, 19f); moveTo(9.5f, 12.5f); lineTo(9f, 19f)
+        moveTo(13.5f, 11.5f); lineTo(14.5f, 18f); moveTo(16.5f, 9.5f); lineTo(18f, 15f)
+    }
+}
+
+/** Share arrow for earned badges. */
+val ShareIcon: ImageVector by lazy {
+    stroke("Share") {
+        moveTo(12f, 3f); verticalLineTo(15f); moveTo(8f, 7f); lineTo(12f, 3f); lineTo(16f, 7f)
+        moveTo(5f, 13f); verticalLineTo(19f); arcTo(2f, 2f, 0f, false, false, 7f, 21f); horizontalLineTo(17f)
+        arcTo(2f, 2f, 0f, false, false, 19f, 19f); verticalLineTo(13f)
+    }
+}
+
+/** Bathroom scale for the weight rows. */
+val ScaleIcon: ImageVector by lazy {
+    stroke("Scale") {
+        moveTo(5f, 4f); horizontalLineTo(19f); arcTo(2f, 2f, 0f, false, true, 21f, 6f); verticalLineTo(18f)
+        arcTo(2f, 2f, 0f, false, true, 19f, 20f); horizontalLineTo(5f); arcTo(2f, 2f, 0f, false, true, 3f, 18f)
+        verticalLineTo(6f); arcTo(2f, 2f, 0f, false, true, 5f, 4f); close()
+        moveTo(8f, 9f); curveTo(8f, 7f, 10f, 6.5f, 12f, 6.5f); curveTo(14f, 6.5f, 16f, 7f, 16f, 9f)
+        moveTo(12f, 9f); verticalLineTo(13f)
+    }
+}
+
+/** Ruler for the height row. */
+val RulerIcon: ImageVector by lazy {
+    stroke("Ruler") {
+        moveTo(4f, 8f); horizontalLineTo(20f); arcTo(1f, 1f, 0f, false, true, 21f, 9f); verticalLineTo(15f)
+        arcTo(1f, 1f, 0f, false, true, 20f, 16f); horizontalLineTo(4f); arcTo(1f, 1f, 0f, false, true, 3f, 15f)
+        verticalLineTo(9f); arcTo(1f, 1f, 0f, false, true, 4f, 8f); close()
+        moveTo(7f, 8f); verticalLineTo(12f); moveTo(11f, 8f); verticalLineTo(12f); moveTo(15f, 8f); verticalLineTo(12f); moveTo(19f, 8f); verticalLineTo(12f)
+    }
+}
+
+/** Pencil used on the "tap to edit" rows. */
+val PencilIcon: ImageVector by lazy {
+    stroke("Pencil") {
+        moveTo(4f, 20f); lineTo(4.8f, 16.2f); lineTo(16.5f, 4.5f); arcTo(2.1f, 2.1f, 0f, false, true, 19.5f, 7.5f)
+        lineTo(7.8f, 19.2f); close()
+        moveTo(14.5f, 6.5f); lineTo(17.5f, 9.5f)
+    }
+}
+
+/** Target rings for the goal / nutrition rows. */
+val TargetIcon: ImageVector by lazy {
+    stroke("Target") {
+        moveTo(12f, 3f); arcTo(9f, 9f, 0f, true, true, 11.9f, 3f); close()
+        moveTo(12f, 7.5f); arcTo(4.5f, 4.5f, 0f, true, true, 11.9f, 7.5f); close()
+        moveTo(12f, 11f); horizontalLineTo(12.1f)
+    }
+}
+
 /** Microphone for the dictation card. */
 val MicIcon: ImageVector by lazy {
     stroke("Mic") {
