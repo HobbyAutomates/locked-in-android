@@ -52,6 +52,7 @@ class AppViewModel : ViewModel() {
     // ---- Health Connect (Google Fit / Samsung Health) ----
     var healthConnected by mutableStateOf(false); private set
     var healthToday by mutableStateOf<com.sohum.bandlog.util.Health.Today?>(null); private set
+    var healthError by mutableStateOf<String?>(null); private set
     var addBurnedBack by mutableStateOf(false)
     /** Calories burned today that count toward the target when the toggle is on. */
     val burnedKcal: Double get() = if (addBurnedBack) healthToday?.activeKcal ?: 0.0 else 0.0
@@ -61,7 +62,10 @@ class AppViewModel : ViewModel() {
             val ctx = context.applicationContext
             if (!com.sohum.bandlog.util.Health.available(ctx)) { healthConnected = false; return@launch }
             healthConnected = com.sohum.bandlog.util.Health.hasPermissions(ctx)
-            healthToday = if (healthConnected) com.sohum.bandlog.util.Health.today(ctx) else null
+            if (healthConnected) {
+                val r = com.sohum.bandlog.util.Health.todayResult(ctx)
+                healthToday = r.getOrNull(); healthError = r.exceptionOrNull()?.let { "Health Connect read failed: ${it.message}" }
+            } else { healthToday = null; healthError = null }
         }
     }
 

@@ -144,7 +144,7 @@ fun ScanForm() {
                                 } catch (e: Exception) { error = e.message } finally { busy = false }
                             }
                         })
-                        if (busy) { Spacer(Modifier.height(10.dp)); LinearProgressIndicator(Modifier.fillMaxWidth(), color = p.ink, trackColor = p.track); Text("Usually 15–40 s — it may search the web for recalls and lab tests.", fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(top = 6.dp)) }
+                        if (busy) { Spacer(Modifier.height(10.dp)); LinearProgressIndicator(Modifier.fillMaxWidth(), color = p.ink, trackColor = p.track); Text("Reading the label → researching the brand → writing your report. 20–45 s.", fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(top = 6.dp)) }
                     }
                 }
             }
@@ -250,14 +250,14 @@ private fun decodeScaled(ctx: Context, uri: Uri): Bitmap? {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
     var sample = 1
-    while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 1600) sample *= 2
+    while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 2200) sample *= 2
     val opts = BitmapFactory.Options().apply { inSampleSize = sample }
     return ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
 }
 
 private fun toJpegBase64(b: Bitmap): String {
     val out = ByteArrayOutputStream()
-    b.compress(Bitmap.CompressFormat.JPEG, 82, out)
+    b.compress(Bitmap.CompressFormat.JPEG, 88, out)
     return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
 }
 

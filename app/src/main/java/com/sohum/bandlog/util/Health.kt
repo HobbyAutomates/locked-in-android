@@ -30,18 +30,20 @@ object Health {
 
     private fun client(context: Context) = HealthConnectClient.getOrCreate(context)
 
+    /** Connected = at least the steps read permission is granted (others are nice-to-have). */
     suspend fun hasPermissions(context: Context): Boolean =
-        runCatching { client(context).permissionController.getGrantedPermissions().containsAll(PERMISSIONS) }.getOrDefault(false)
+        runCatching { client(context).permissionController.getGrantedPermissions().contains(HealthPermission.getReadPermission(StepsRecord::class)) }.getOrDefault(false)
 
-    suspend fun today(context: Context): Today? = runCatching {
+    suspend fun todayResult(context: Context): Result<Today> = runCatching {
         val zone = ZoneId.systemDefault()
         val start = LocalDate.now().atStartOfDay(zone).toInstant()
         val range = TimeRangeFilter.between(start, Instant.now())
         val c = client(context)
         val steps = c.aggregate(AggregateRequest(setOf(StepsRecord.COUNT_TOTAL), range))[StepsRecord.COUNT_TOTAL] ?: 0L
-        val kcal = c.aggregate(AggregateRequest(setOf(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL), range))[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]?.inKilocalories ?: 0.0
+        // Active calories may be un-granted or absent; never let that hide the steps.
+        val kcal = runCatching { c.aggregate(AggregateRequest(setOf(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL), range))[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]?.inKilocalories }.getOrNull() ?: 0.0
         Today(steps, kcal)
-    }.getOrNull()
+    }
 
     /** Push a saved band session so it shows up in Samsung Health / Fit. Ends now, starts [minutes] ago. */
     suspend fun writeSession(context: Context, title: String, minutes: Int, date: String) = runCatching {

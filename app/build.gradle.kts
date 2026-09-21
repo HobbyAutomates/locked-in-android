@@ -24,8 +24,8 @@ android {
         applicationId = "com.sohum.bandlog"
         minSdk = 31
         targetSdk = 34
-        versionCode = 5
-        versionName = "1.4"
+        versionCode = 6
+        versionName = "1.4.1"
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
         // The Railway web app; /api/parse-meal holds the Anthropic key server-side.

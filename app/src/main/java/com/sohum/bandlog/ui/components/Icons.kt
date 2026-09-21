@@ -69,6 +69,16 @@ val LockIcon: ImageVector by lazy {
     }.build()
 }
 
+/** Footprints for the steps card. */
+val StepsIcon: ImageVector by lazy {
+    stroke("Steps") {
+        moveTo(6f, 3f); curveTo(8f, 3f, 9f, 5f, 9f, 8f); curveTo(9f, 11f, 8f, 13f, 6.5f, 13f); curveTo(5f, 13f, 4f, 11f, 4f, 8f); curveTo(4f, 5f, 4.5f, 3f, 6f, 3f); close()
+        moveTo(5f, 15f); horizontalLineTo(8f); verticalLineTo(17f); horizontalLineTo(5f); close()
+        moveTo(18f, 7f); curveTo(20f, 7f, 20f, 9f, 20f, 12f); curveTo(20f, 15f, 19f, 17f, 17.5f, 17f); curveTo(16f, 17f, 15f, 15f, 15f, 12f); curveTo(15f, 9f, 16f, 7f, 18f, 7f); close()
+        moveTo(16f, 19f); horizontalLineTo(19f); verticalLineTo(21f); horizontalLineTo(16f); close()
+    }
+}
+
 /** Microphone for the dictation card. */
 val MicIcon: ImageVector by lazy {
     stroke("Mic") {

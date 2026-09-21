@@ -59,11 +59,15 @@ import java.util.Locale
 fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit) {
     val p = palette
     val today = vm.today
-    val totals = totalsFor(vm.meals, today)
+    var selected by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(today) }
+    val isToday = selected == today
+    val totals = totalsFor(vm.meals, selected)
     val prof = vm.profile
-    val todayMeals = vm.meals.filter { it.date == today }
-    val todayWorkouts = vm.workouts.filter { it.date == today }
+    val todayMeals = vm.meals.filter { it.date == selected }
+    val todayWorkouts = vm.workouts.filter { it.date == selected }
     val trained = vm.workoutDates.toSet()
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    androidx.compose.runtime.LaunchedEffect(Unit) { vm.refreshHealth(ctx) }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 110.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
@@ -86,16 +90,16 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit) {
                 ErrorNote(vm.error, Modifier.padding(top = 8.dp))
             }
         }
-        item { Rise(1) { WeekStrip(today, trained) } }
+        item { Rise(1) { WeekStrip(today, selected, trained) { selected = it } } }
         item {
             Rise(2) {
                 Card(padding = 20.dp) {
                     RowSpaceBetween {
                         Column {
-                            Text("${(prof.calorieTarget + vm.burnedKcal - totals.calories).toInt().coerceAtLeast(0)}", fontSize = 40.sp, fontWeight = FontWeight(800), letterSpacing = (-1.5).sp, color = p.ink, lineHeight = 40.sp)
+                            Text("${(prof.calorieTarget + (if (isToday) vm.burnedKcal else 0.0) - totals.calories).toInt().coerceAtLeast(0)}", fontSize = 40.sp, fontWeight = FontWeight(800), letterSpacing = (-1.5).sp, color = p.ink, lineHeight = 40.sp)
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Calories left", fontSize = 14.sp, fontWeight = FontWeight(500), color = p.muted)
-                                if (vm.burnedKcal > 0) Box(Modifier.padding(start = 8.dp).background(p.card2, CircleShape).padding(8.dp, 3.dp)) { Text("+${vm.burnedKcal.toInt()}", fontSize = 11.sp, fontWeight = FontWeight(700), color = p.ink) }
+                                Text(if (isToday) "Calories left" else "Calories left · ${Dates.short(selected)}", fontSize = 14.sp, fontWeight = FontWeight(500), color = p.muted)
+                                if (isToday && vm.burnedKcal > 0) Box(Modifier.padding(start = 8.dp).background(p.card2, CircleShape).padding(8.dp, 3.dp)) { Text("+${vm.burnedKcal.toInt()}", fontSize = 11.sp, fontWeight = FontWeight(700), color = p.ink) }
                             }
                         }
                         Ring((totals.calories / prof.calorieTarget).toFloat(), p.ink, 96.dp, 9.dp) { Icon(FlameIcon, null, tint = p.ink, modifier = Modifier.size(26.dp)) }
@@ -112,18 +116,36 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit) {
                 }
             }
         }
-        vm.healthToday?.let { h ->
+        if (vm.healthConnected && isToday) {
+            val h = vm.healthToday
             item {
                 Rise(4) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Card(Modifier.weight(1f), padding = 14.dp) {
-                            Text(String.format(Locale.US, "%,d", h.steps), fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink)
-                            Text("Steps today", fontSize = 12.sp, color = p.muted)
+                    Column {
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Card(Modifier.weight(1f), padding = 14.dp) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Ring(((h?.steps ?: 0L) / 8000f).coerceIn(0f, 1f), p.green, 44.dp, 5.dp) { Icon(com.sohum.bandlog.ui.components.StepsIcon, null, tint = p.green, modifier = Modifier.size(16.dp)) }
+                                    Spacer(Modifier.width(10.dp))
+                                    Column {
+                                        Text(String.format(Locale.US, "%,d", h?.steps ?: 0L), fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink)
+                                        Text("Steps today", fontSize = 12.sp, color = p.muted)
+                                    }
+                                }
+                            }
+                            Card(Modifier.weight(1f), padding = 14.dp) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Ring(((h?.activeKcal ?: 0.0) / 400.0).toFloat().coerceIn(0f, 1f), p.orange, 44.dp, 5.dp) { Icon(FlameIcon, null, tint = p.orange, modifier = Modifier.size(16.dp)) }
+                                    Spacer(Modifier.width(10.dp))
+                                    Column {
+                                        Text("${(h?.activeKcal ?: 0.0).toInt()}", fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink)
+                                        Text("kcal burned", fontSize = 12.sp, color = p.muted)
+                                    }
+                                }
+                            }
                         }
-                        Card(Modifier.weight(1f), padding = 14.dp) {
-                            Row(verticalAlignment = Alignment.CenterVertically) { Icon(FlameIcon, null, tint = p.ink, modifier = Modifier.size(16.dp)); Text(" ${h.activeKcal.toInt()}", fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink) }
-                            Text("Calories burned", fontSize = 12.sp, color = p.muted)
-                        }
+                        val err = vm.healthError
+                        if (err != null) Text(err, fontSize = 12.sp, color = p.red, modifier = Modifier.padding(top = 6.dp, start = 4.dp))
+                        else if ((h?.steps ?: 0L) == 0L) Text("No steps in Health Connect yet. In Samsung Health / Google Fit, turn on syncing to Health Connect (Settings → Health Connect), then pull to refresh here.", fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(top = 6.dp, start = 4.dp))
                     }
                 }
             }
@@ -131,14 +153,14 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit) {
         item {
             Rise(4) {
                 RowSpaceBetween {
-                    Text("Recently logged", fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.5).sp, color = p.ink)
+                    Text(if (isToday) "Recently logged" else Dates.long(selected), fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.5).sp, color = p.ink)
                     if (vm.loading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = p.muted)
                 }
             }
         }
-        items(vm.pendingMeals, key = { "p$it" }) { txt -> Rise(5) { PendingMealRow(txt) } }
-        if (todayWorkouts.isEmpty() && todayMeals.isEmpty() && vm.pendingMeals.isEmpty()) item {
-            Rise(5) { Text("Nothing yet today. Tap + to log a workout or a meal.", color = p.muted, fontSize = 13.sp) }
+        if (isToday) items(vm.pendingMeals, key = { "p$it" }) { txt -> Rise(5) { PendingMealRow(txt) } }
+        if (todayWorkouts.isEmpty() && todayMeals.isEmpty() && (!isToday || vm.pendingMeals.isEmpty())) item {
+            Rise(5) { Text(if (isToday) "Nothing yet today. Tap + to log a workout or a meal." else "Nothing logged on ${Dates.long(selected)}.", color = p.muted, fontSize = 13.sp) }
         }
         items(todayWorkouts, key = { "w" + it.id }) { w -> Rise(5) { WorkoutRow(w) { onOpenWorkout(w) } } }
         items(todayMeals, key = { "m" + it.id }) { m -> Rise(6) { MealRow(m, onDelete = { vm.launch { vm.deleteMeal(m.id) } }, onFeedback = { r -> vm.launch { runCatching { com.sohum.bandlog.data.Api.feedback(r, m.rawText, m.id) } } }) } }
@@ -165,7 +187,7 @@ private fun PendingMealRow(text: String) {
 }
 
 @Composable
-private fun WeekStrip(today: String, trained: Set<String>) {
+private fun WeekStrip(today: String, selected: String, trained: Set<String>, onSelect: (String) -> Unit) {
     val p = palette
     val start = Dates.addDays(today, -6)
     val fmt = DateTimeFormatter.ofPattern("EEEEE", Locale.ENGLISH)
@@ -173,17 +195,22 @@ private fun WeekStrip(today: String, trained: Set<String>) {
         (0..6).forEach { i ->
             val d = Dates.addDays(start, i.toLong())
             val isToday = d == today
+            val isSel = d == selected
             val did = d in trained
-            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(
+                Modifier.weight(1f).clickable { onSelect(d) },
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
                 val circle = when {
-                    isToday -> Modifier.border(2.dp, p.ink, CircleShape)
+                    isSel -> Modifier.background(p.btn, CircleShape)
                     did -> Modifier.background(p.greenBg, CircleShape).border(1.5.dp, p.green, CircleShape)
+                    isToday -> Modifier.border(2.dp, p.ink, CircleShape)
                     else -> Modifier.border(1.5.dp, p.hair, CircleShape)
                 }
                 Box(circle.size(30.dp), contentAlignment = Alignment.Center) {
-                    Text(Dates.parse(d).format(fmt), fontSize = 12.sp, fontWeight = if (isToday) FontWeight(700) else FontWeight(600), color = if (isToday) p.ink else if (did) p.green else p.muted)
+                    Text(Dates.parse(d).format(fmt), fontSize = 12.sp, fontWeight = if (isSel || isToday) FontWeight(700) else FontWeight(600), color = when { isSel -> p.btnInk; did -> p.green; isToday -> p.ink; else -> p.muted })
                 }
-                Text("${Dates.parse(d).dayOfMonth}", fontSize = 13.sp, fontWeight = if (isToday) FontWeight(700) else FontWeight(500), color = if (isToday) p.ink else p.muted)
+                Text("${Dates.parse(d).dayOfMonth}", fontSize = 13.sp, fontWeight = if (isSel || isToday) FontWeight(700) else FontWeight(500), color = if (isSel || isToday) p.ink else p.muted)
             }
         }
     }
