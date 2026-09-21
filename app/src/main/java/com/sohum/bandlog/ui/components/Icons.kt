@@ -42,6 +42,25 @@ val BowlIcon: ImageVector by lazy {
     }
 }
 
+/** Viewfinder brackets for the label scanner. */
+val ScanIcon: ImageVector by lazy {
+    stroke("Scan") {
+        moveTo(4f, 9f); verticalLineTo(6f); arcTo(2f, 2f, 0f, false, true, 6f, 4f); horizontalLineTo(9f)
+        moveTo(15f, 4f); horizontalLineTo(18f); arcTo(2f, 2f, 0f, false, true, 20f, 6f); verticalLineTo(9f)
+        moveTo(20f, 15f); verticalLineTo(18f); arcTo(2f, 2f, 0f, false, true, 18f, 20f); horizontalLineTo(15f)
+        moveTo(9f, 20f); horizontalLineTo(6f); arcTo(2f, 2f, 0f, false, true, 4f, 18f); verticalLineTo(15f)
+        moveTo(7f, 12f); horizontalLineTo(17f)
+    }
+}
+
+/** Thumbs for the AI feedback row. */
+val ThumbUpIcon: ImageVector by lazy {
+    stroke("ThumbUp") { moveTo(7f, 10f); verticalLineTo(21f); moveTo(3f, 12f); verticalLineTo(19f); arcTo(2f, 2f, 0f, false, false, 5f, 21f); horizontalLineTo(7f); moveTo(7f, 10f); lineTo(11f, 3f); arcTo(2f, 2f, 0f, false, true, 13f, 5f); verticalLineTo(9f); horizontalLineTo(19f); arcTo(2f, 2f, 0f, false, true, 21f, 11.3f); lineTo(19.5f, 19.3f); arcTo(2f, 2f, 0f, false, true, 17.5f, 21f); horizontalLineTo(7f) }
+}
+val ThumbDownIcon: ImageVector by lazy {
+    stroke("ThumbDown") { moveTo(17f, 14f); verticalLineTo(3f); moveTo(21f, 12f); verticalLineTo(5f); arcTo(2f, 2f, 0f, false, false, 19f, 3f); horizontalLineTo(17f); moveTo(17f, 14f); lineTo(13f, 21f); arcTo(2f, 2f, 0f, false, true, 11f, 19f); verticalLineTo(15f); horizontalLineTo(5f); arcTo(2f, 2f, 0f, false, true, 3f, 12.7f); lineTo(4.5f, 4.7f); arcTo(2f, 2f, 0f, false, true, 6.5f, 3f); horizontalLineTo(17f) }
+}
+
 /** Microphone for the dictation card. */
 val MicIcon: ImageVector by lazy {
     stroke("Mic") {

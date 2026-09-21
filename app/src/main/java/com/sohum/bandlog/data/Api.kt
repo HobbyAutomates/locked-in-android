@@ -121,23 +121,31 @@ object Api {
 
     // ---- meal parsing (web app → Haiku) ----
 
-    suspend fun parseMeal(text: String): ParseResult = withContext(Dispatchers.IO) {
+    private suspend fun api(path: String, payload: JSONObject, label: String): JSONObject {
         SupabaseAuth.ensureFresh()
         val token = Session.accessToken ?: throw AuthException("Not signed in")
         val apiBase = BuildConfig.API_BASE.trimEnd('/')
         if (apiBase.isBlank()) throw ApiException("API_BASE is not set in this build")
-        val r = Request.Builder().url("$apiBase/api/parse-meal")
-            .header("Authorization", "Bearer $token")
-            .post(json(JSONObject().put("text", text).toString())).build()
+        val r = Request.Builder().url("$apiBase/api/$path").header("Authorization", "Bearer $token").post(json(payload.toString())).build()
         val body = client.newCall(r).execute().use { res ->
             val b = res.body?.string().orEmpty()
             if (!res.isSuccessful) {
                 val msg = runCatching { JSONObject(b).optString("error") }.getOrNull().orEmpty()
-                throw ApiException(if (msg.isNotBlank()) msg else "Parse failed (${res.code})")
+                throw ApiException(if (msg.isNotBlank()) msg else "$label failed (${res.code})")
             }
             b
         }
-        val o = JSONObject(body)
+        return JSONObject(body)
+    }
+
+    /** [correction] + [previous] = the "Fix issue" path: re-parse with the user's note about what was wrong. */
+    suspend fun parseMeal(text: String, correction: String? = null, previous: List<MealItem>? = null): ParseResult = withContext(Dispatchers.IO) {
+        val payload = JSONObject().put("text", text)
+        if (!correction.isNullOrBlank()) {
+            payload.put("correction", correction)
+            payload.put("previous", JSONArray().apply { previous?.forEach { put(JSONObject().put("name", it.name).put("grams", it.grams).put("calories", it.calories).put("protein_g", it.proteinG)) } })
+        }
+        val o = api("parse-meal", payload, "Parse")
         val items = o.optJSONArray("items") ?: JSONArray()
         fun strings(k: String) = o.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
         ParseResult(
@@ -146,4 +154,33 @@ object Api {
             unparsed = strings("unparsed"),
         )
     }
+
+    /** 👍/👎 on a parsed meal. */
+    suspend fun feedback(rating: String, rawText: String, mealId: String?, correction: String = "") = withContext(Dispatchers.IO) {
+        api("feedback", JSONObject().put("rating", rating).put("raw_text", rawText).put("meal_id", mealId ?: JSONObject.NULL).put("correction", correction), "Feedback"); Unit
+    }
+
+    /** Photo of an ingredients / nutrition label → verdict report (Haiku vision + web research). */
+    suspend fun scanLabel(jpegBase64: String, note: String): LabelReport = withContext(Dispatchers.IO) {
+        LabelReport.from(api("scan-label", JSONObject().put("image", jpegBase64).put("media_type", "image/jpeg").put("note", note), "Scan"))
+    }
+
+    // ---- saved meals (one-tap repeat dinners) ----
+
+    suspend fun savedMeals(): List<SavedMeal> = withContext(Dispatchers.IO) {
+        val body = run(rest("saved_meals?select=id,name,items,calories,protein_g&order=created_at.desc").get().build(), "Load saved meals")
+        val arr = JSONArray(body)
+        (0 until arr.length()).map { SavedMeal.from(arr.getJSONObject(it)) }
+    }
+
+    suspend fun saveSavedMeal(name: String, items: List<MealItem>) = withContext(Dispatchers.IO) {
+        val uid = Session.userId ?: throw AuthException("Not signed in")
+        val arr = JSONArray().apply {
+            items.forEach { put(JSONObject().put("food_id", it.foodId ?: JSONObject.NULL).put("name", it.name).put("grams", it.grams).put("calories", it.calories).put("protein_g", it.proteinG).put("carbs_g", it.carbsG).put("fat_g", it.fatG).put("source", it.source)) }
+        }
+        val payload = JSONObject().put("user_id", uid).put("name", name).put("items", arr).put("calories", items.sumOf { it.calories }).put("protein_g", items.sumOf { it.proteinG }).toString()
+        run(rest("saved_meals").post(json(payload)).build(), "Save meal template"); Unit
+    }
+
+    suspend fun deleteSavedMeal(id: String) = withContext(Dispatchers.IO) { run(rest("saved_meals?id=eq.$id").delete().build(), "Delete saved meal"); Unit }
 }

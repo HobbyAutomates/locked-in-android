@@ -2,6 +2,7 @@ package com.sohum.bandlog.ui.today
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +25,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
@@ -113,11 +117,31 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit) {
                 }
             }
         }
-        if (todayWorkouts.isEmpty() && todayMeals.isEmpty()) item {
+        items(vm.pendingMeals, key = { "p$it" }) { txt -> Rise(5) { PendingMealRow(txt) } }
+        if (todayWorkouts.isEmpty() && todayMeals.isEmpty() && vm.pendingMeals.isEmpty()) item {
             Rise(5) { Text("Nothing yet today. Tap + to log a workout or a meal.", color = p.muted, fontSize = 13.sp) }
         }
         items(todayWorkouts, key = { "w" + it.id }) { w -> Rise(5) { WorkoutRow(w) { onOpenWorkout(w) } } }
-        items(todayMeals, key = { "m" + it.id }) { m -> Rise(6) { MealRow(m) { vm.launch { vm.deleteMeal(m.id) } } } }
+        items(todayMeals, key = { "m" + it.id }) { m -> Rise(6) { MealRow(m, onDelete = { vm.launch { vm.deleteMeal(m.id) } }, onFeedback = { r -> vm.launch { runCatching { com.sohum.bandlog.data.Api.feedback(r, m.rawText, m.id) } } }) } }
+    }
+}
+
+/** Shimmering placeholder while Haiku prices a quick-logged meal in the background. */
+@Composable
+private fun PendingMealRow(text: String) {
+    val p = palette
+    val t = androidx.compose.animation.core.rememberInfiniteTransition(label = "shimmer")
+    val a by t.animateFloat(0.35f, 0.9f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(700), androidx.compose.animation.core.RepeatMode.Reverse), label = "alpha")
+    Card(padding = 14.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(56.dp).background(p.card2.copy(alpha = a), androidx.compose.foundation.shape.RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = p.muted) }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(text, fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1)
+                Box(Modifier.fillMaxWidth(0.5f).height(12.dp).background(p.card2.copy(alpha = a), CircleShape))
+                Text("Working out the calories… you can leave the app.", fontSize = 12.sp, color = p.muted)
+            }
+        }
     }
 }
 
@@ -180,8 +204,9 @@ fun WorkoutRow(w: Workout, onClick: () -> Unit) {
 }
 
 @Composable
-fun MealRow(m: Meal, onDelete: () -> Unit) {
+fun MealRow(m: Meal, onDelete: () -> Unit, onFeedback: ((String) -> Unit)? = null) {
     val p = palette
+    var voted by androidx.compose.runtime.remember(m.id) { androidx.compose.runtime.mutableStateOf<String?>(null) }
     Card(padding = 14.dp) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconTile(BowlIcon, p.orange, p.orangeBg)
@@ -202,6 +227,20 @@ fun MealRow(m: Meal, onDelete: () -> Unit) {
                 }
             }
             IconButton(onClick = onDelete, Modifier.size(32.dp)) { Icon(Icons.Outlined.Delete, "Delete", tint = p.muted) }
+        }
+        if (onFeedback != null) {
+            Spacer(Modifier.height(8.dp))
+            RowSpaceBetween {
+                Text(if (voted == null) "How did the AI do?" else "Thanks — noted", fontSize = 12.sp, color = p.muted)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("up" to com.sohum.bandlog.ui.components.ThumbUpIcon, "down" to com.sohum.bandlog.ui.components.ThumbDownIcon).forEach { (r, icon) ->
+                        val sel = voted == r
+                        Box(Modifier.size(30.dp).background(if (sel) p.btn else p.card2, CircleShape).then(Modifier.clickable(enabled = voted == null) { voted = r; onFeedback(r) }), contentAlignment = Alignment.Center) {
+                            Icon(icon, r, tint = if (sel) p.btnInk else p.muted, modifier = Modifier.size(15.dp))
+                        }
+                    }
+                }
+            }
         }
     }
 }

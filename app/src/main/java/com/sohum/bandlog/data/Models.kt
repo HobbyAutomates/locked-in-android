@@ -115,6 +115,64 @@ data class Profile(
 
 data class ParseResult(val items: List<MealItem>, val assumptions: List<String>, val unparsed: List<String>)
 
+/** A repeatable meal ("rice dal eggs whey") saved for one-tap logging. */
+data class SavedMeal(val id: String, val name: String, val items: List<MealItem>, val calories: Double, val proteinG: Double) {
+    companion object {
+        fun from(o: JSONObject): SavedMeal {
+            val arr = o.optJSONArray("items") ?: JSONArray()
+            return SavedMeal(
+                id = o.getString("id"), name = o.optString("name"),
+                items = (0 until arr.length()).map { MealItem.from(arr.getJSONObject(it)) },
+                calories = o.optDouble("calories", 0.0), proteinG = o.optDouble("protein_g", 0.0),
+            )
+        }
+    }
+}
+
+/** Result of scanning a packaged food's label. */
+data class LabelReport(
+    val id: String?,
+    val product: String,
+    val readable: Boolean,
+    val verdict: String,          // safe | caution | unsafe | misleading | fake
+    val verdictReason: String,
+    val per100: Map<String, Double>,
+    val servingG: Double?,
+    val proteinRating: String,    // excellent | good | average | poor
+    val proteinPerServing: Double?,
+    val proteinQuality: String,
+    val proteinNote: String,
+    val concerns: List<Triple<String, String, String>>, // ingredient, issue, severity
+    val claims: List<Triple<String, String, String>>,   // claim, status, why
+    val research: List<String>,
+    val suggestions: List<String>,
+    val alternatives: List<String>,
+) {
+    companion object {
+        fun from(o: JSONObject): LabelReport {
+            fun strings(k: String) = o.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()
+            fun triples(k: String, a: String, b: String, c: String) = o.optJSONArray(k)?.let { arr ->
+                (0 until arr.length()).map { i -> val x = arr.getJSONObject(i); Triple(x.optString(a), x.optString(b), x.optString(c)) }
+            } ?: emptyList()
+            val p = o.optJSONObject("protein") ?: JSONObject()
+            val n = o.optJSONObject("per_100g") ?: JSONObject()
+            return LabelReport(
+                id = o.optString("id").ifBlank { null },
+                product = o.optString("product"), readable = o.optBoolean("readable", true),
+                verdict = o.optString("verdict", "caution"), verdictReason = o.optString("verdict_reason"),
+                per100 = n.keys().asSequence().associateWith { n.optDouble(it) }.filterValues { !it.isNaN() },
+                servingG = if (o.isNull("serving_g")) null else o.optDouble("serving_g"),
+                proteinRating = p.optString("rating", "average"),
+                proteinPerServing = if (p.isNull("per_serving_g")) null else p.optDouble("per_serving_g"),
+                proteinQuality = p.optString("quality"), proteinNote = p.optString("note"),
+                concerns = triples("concerns", "ingredient", "issue", "severity"),
+                claims = triples("claims", "claim", "status", "why"),
+                research = strings("research"), suggestions = strings("suggestions"), alternatives = strings("alternatives"),
+            )
+        }
+    }
+}
+
 data class Totals(val calories: Double, val protein: Double, val carbs: Double, val fat: Double)
 
 fun totalsFor(meals: List<Meal>, date: String): Totals {

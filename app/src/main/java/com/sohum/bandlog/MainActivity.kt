@@ -17,12 +17,14 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -147,6 +149,8 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
             }
         }
 
+        vm.celebrate?.let { c -> CelebrationModal(c) { vm.dismissCelebration() } }
+
         AnimatedContent(
             targetState = log, label = "log",
             transitionSpec = { (slideInVertically(Motion.spatial()) { it / 3 } + fadeIn(Motion.effects())).togetherWith(slideOutVertically(Motion.spatialFast()) { it / 3 } + fadeOut(Motion.effectsFast())) },
@@ -155,6 +159,38 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
                 BackHandler { log = null }
                 LogScreen(vm, req.workout, req.date, req.meal, onClose = { log = null })
             }
+        }
+    }
+}
+
+/** Cal AI-style streak celebration after a saved session: flame, count, this week's dots. */
+@Composable
+private fun CelebrationModal(c: AppViewModel.Celebration, onDismiss: () -> Unit) {
+    val p = palette
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier.fillMaxWidth().background(p.card, androidx.compose.foundation.shape.RoundedCornerShape(28.dp)).padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                com.sohum.bandlog.ui.components.Flame(p.flame, 96.dp)
+                Text("${c.thisWeek}", fontSize = 26.sp, fontWeight = FontWeight(800), color = androidx.compose.ui.graphics.Color.White, modifier = Modifier.padding(top = 18.dp))
+            }
+            Text(
+                if (c.hitTarget) "Week target hit!" else "Session ${c.thisWeek} of ${c.target}",
+                fontSize = 22.sp, fontWeight = FontWeight(800), letterSpacing = (-0.5).sp, color = p.flame, modifier = Modifier.padding(top = 8.dp),
+            )
+            Text(
+                if (c.hitTarget) "${c.streakWeeks}-week streak. You're on fire — keep it rolling." else "${c.target - c.thisWeek} more this week keeps the ${c.streakWeeks}-week streak alive.",
+                fontSize = 14.sp, color = p.muted, modifier = Modifier.padding(top = 6.dp, bottom = 16.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                repeat(c.target) { i ->
+                    Box(Modifier.size(14.dp).let { m -> if (i < c.thisWeek) m.background(p.flame, CircleShape) else m.border(2.dp, p.flame, CircleShape) })
+                }
+            }
+            Spacer(Modifier.height(20.dp))
+            com.sohum.bandlog.ui.components.PillButton("Continue", onDismiss)
         }
     }
 }

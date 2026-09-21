@@ -5,6 +5,9 @@
     <!-- One-tap in-app updater: download a newer build and hand it to the system installer. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Label scanner uses the system camera app via ACTION_IMAGE_CAPTURE; no CAMERA permission needed. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <queries><intent><action android:name="android.media.action.IMAGE_CAPTURE" /></intent></queries>
 
     <application
         android:allowBackup="true"

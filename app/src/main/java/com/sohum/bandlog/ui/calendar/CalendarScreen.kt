@@ -113,7 +113,7 @@ fun CalendarScreen(vm: AppViewModel, onOpenWorkout: (Workout?, String) -> Unit) 
         val dayMeals = vm.meals.filter { it.date == selected }
         if (dayWorkouts.isEmpty() && dayMeals.isEmpty()) item { Text("Nothing logged.", color = p.muted, fontSize = 13.sp) }
         items(dayWorkouts, key = { "w" + it.id }) { w -> Rise(3) { WorkoutRow(w) { onOpenWorkout(w, selected) } } }
-        items(dayMeals, key = { "m" + it.id }) { m -> Rise(4) { MealRow(m) { vm.launch { vm.deleteMeal(m.id) } } } }
+        items(dayMeals, key = { "m" + it.id }) { m -> Rise(4) { MealRow(m, onDelete = { vm.launch { vm.deleteMeal(m.id) } }) } }
     }
 }
 

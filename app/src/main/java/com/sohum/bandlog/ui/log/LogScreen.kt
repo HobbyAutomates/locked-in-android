@@ -66,6 +66,15 @@ import com.sohum.bandlog.ui.components.PillButton
 import com.sohum.bandlog.ui.components.Rise
 import com.sohum.bandlog.ui.components.RowSpaceBetween
 import com.sohum.bandlog.ui.components.Segmented
+import com.sohum.bandlog.ui.components.Chip as SelChip
+import com.sohum.bandlog.ui.scan.ScanForm
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.material3.TextButton as M3TextButton
 import com.sohum.bandlog.ui.theme.palette
 import com.sohum.bandlog.ui.today.fmt
 import com.sohum.bandlog.util.Dates
@@ -90,9 +99,13 @@ fun LogScreen(vm: AppViewModel, existing: Workout?, initialDate: String, startOn
             Spacer(Modifier.width(40.dp))
         }
         if (existing == null) {
-            Box(Modifier.padding(16.dp, 8.dp)) { Segmented(listOf("Workout", "Meal"), seg, { seg = it }) }
+            Box(Modifier.padding(16.dp, 8.dp)) { Segmented(listOf("Workout", "Meal", "Scan label"), seg, { seg = it }) }
         }
-        if (seg == 0 || existing != null) WorkoutForm(vm, existing, initialDate, onClose) else MealForm(vm, initialDate, onClose)
+        when {
+            existing != null || seg == 0 -> WorkoutForm(vm, existing, initialDate, onClose)
+            seg == 1 -> MealForm(vm, initialDate, onClose)
+            else -> ScanForm()
+        }
     }
 }
 
@@ -203,9 +216,30 @@ private fun MealForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
     var items by remember { mutableStateOf<List<MealItem>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
+    var fixText by remember { mutableStateOf("") }
+    var fixing by remember { mutableStateOf(false) }
+    var savedName by remember { mutableStateOf("") }
+    var showSaveAs by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { vm.loadSavedMeals() }
 
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp, 6.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            if (vm.savedMeals.isNotEmpty() && result == null) Rise(0) {
+                Column {
+                    Text("Saved meals · one tap", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted, modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
+                    vm.savedMeals.chunked(2).forEach { row ->
+                        Row(Modifier.padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            row.forEach { sm ->
+                                Card(Modifier.weight(1f), padding = 12.dp, onClick = { text = sm.name; items = sm.items; result = ParseResult(sm.items, emptyList(), emptyList()) }) {
+                                    Text(sm.name, fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1)
+                                    Text("${sm.calories.toInt()} kcal · ${fmt(sm.proteinG)} g P", fontSize = 12.sp, color = p.muted)
+                                }
+                            }
+                            if (row.size == 1) Spacer(Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
             Rise(0) {
                 Card {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -231,6 +265,11 @@ private fun MealForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
                             try { result = Api.parseMeal(text); items = result!!.items } catch (e: Exception) { error = e.message } finally { parsing = false }
                         }
                     })
+                    if (result == null) {
+                        Spacer(Modifier.height(8.dp))
+                        // Cal AI-style: log instantly, Haiku prices it in the background, row appears on Home right away.
+                        PillButton("Log now, review later", enabled = text.isNotBlank() && !parsing, height = 44.dp, bg = p.card2, fg = p.ink, onClick = { vm.quickLogMeal(text.trim(), date); onClose() })
+                    }
                     if (parsing) { Spacer(Modifier.height(10.dp)); LinearProgressIndicator(Modifier.fillMaxWidth(), color = p.ink, trackColor = p.track) }
                 }
             }
@@ -252,7 +291,19 @@ private fun MealForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
                                         }
                                     }
                                     var g by remember(idx, r) { mutableStateOf(fmt(it.grams)) }
-                                    NumberField(g, { v -> g = v.filter { c -> c.isDigit() || c == '.' }; g.toDoubleOrNull()?.let { d -> items = items.toMutableList().also { l -> l[idx] = it.withGrams(d) } } }, "g")
+                                    // Delta badge: shows "+99 kcal" in black for a moment after a grams edit.
+                                    var delta by remember(idx, r) { mutableStateOf(0) }
+                                    var showDelta by remember(idx, r) { mutableStateOf(false) }
+                                    LaunchedEffect(delta) { if (delta != 0) { showDelta = true; kotlinx.coroutines.delay(1400); showDelta = false } }
+                                    AnimatedVisibility(showDelta, enter = scaleIn() + fadeIn(), exit = fadeOut() + scaleOut()) {
+                                        Box(Modifier.padding(end = 6.dp).background(if (delta > 0) p.btn else p.card2, CircleShape).padding(8.dp, 3.dp)) {
+                                            Text((if (delta > 0) "+" else "") + "$delta kcal", fontSize = 11.sp, fontWeight = FontWeight(700), color = if (delta > 0) p.btnInk else p.ink)
+                                        }
+                                    }
+                                    NumberField(g, { v ->
+                                        g = v.filter { c -> c.isDigit() || c == '.' }
+                                        g.toDoubleOrNull()?.let { d -> val next = it.withGrams(d); delta = (next.calories - it.calories).toInt(); items = items.toMutableList().also { l -> l[idx] = next } }
+                                    }, "g")
                                     IconButton(onClick = { items = items.filterIndexed { i, _ -> i != idx } }, Modifier.size(32.dp)) { Icon(Icons.Outlined.Delete, "Remove", tint = p.muted) }
                                 }
                             }
@@ -261,6 +312,38 @@ private fun MealForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
                 }
                 if (r.assumptions.isNotEmpty() || r.unparsed.isNotEmpty()) Rise(3) {
                     Text((r.assumptions + r.unparsed.map { "Ignored: $it" }).joinToString(" · "), fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(horizontal = 4.dp))
+                }
+                // "Fix issue": say what's wrong in plain words; Haiku re-parses with that in view.
+                Rise(4) {
+                    Card(padding = 12.dp) {
+                        Text("Something wrong? Tell me and I'll redo it", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted)
+                        Spacer(Modifier.height(6.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.weight(1f).background(p.card2, RoundedCornerShape(12.dp)).padding(10.dp)) {
+                                BasicTextField(fixText, { fixText = it }, Modifier.fillMaxWidth(), textStyle = TextStyle(fontSize = 14.sp, color = p.ink), cursorBrush = SolidColor(p.ink),
+                                    decorationBox = { inner -> if (fixText.isEmpty()) Text("e.g. it was two scoops, and the rice was raw", fontSize = 14.sp, color = p.muted); inner() })
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            PillButton(if (fixing) "…" else "Fix", enabled = fixText.isNotBlank() && !fixing, modifier = Modifier.width(64.dp), height = 40.dp, onClick = {
+                                scope.launch {
+                                    fixing = true; error = null
+                                    try { val fixed = Api.parseMeal(text, fixText, items); result = fixed; items = fixed.items; fixText = "" } catch (e: Exception) { error = e.message } finally { fixing = false }
+                                }
+                            })
+                        }
+                    }
+                }
+                Rise(5) {
+                    if (showSaveAs) Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.weight(1f).background(p.card2, RoundedCornerShape(12.dp)).padding(10.dp)) {
+                            BasicTextField(savedName, { savedName = it }, Modifier.fillMaxWidth(), textStyle = TextStyle(fontSize = 14.sp, color = p.ink), cursorBrush = SolidColor(p.ink),
+                                decorationBox = { inner -> if (savedName.isEmpty()) Text("Name it, e.g. Dinner usual", fontSize = 14.sp, color = p.muted); inner() })
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        PillButton("Save", enabled = savedName.isNotBlank(), modifier = Modifier.width(72.dp), height = 40.dp, onClick = {
+                            scope.launch { runCatching { Api.saveSavedMeal(savedName.trim(), items); vm.loadSavedMeals(); showSaveAs = false; savedName = "" }.onFailure { error = it.message } }
+                        })
+                    } else M3TextButton(onClick = { showSaveAs = true }) { Text("Save as a repeat meal", color = p.muted, fontSize = 13.sp) }
                 }
             }
         }

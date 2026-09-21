@@ -39,6 +39,32 @@ class AppViewModel : ViewModel() {
     val mealStreak: Int get() = Streaks.dayStreak(mealDates)
     val thisWeek: Int get() = Streaks.thisWeekCount(workoutDates)
 
+    /** Meals being parsed + saved in the background ("log now, review later"). Shown as shimmer rows. */
+    var pendingMeals by mutableStateOf<List<String>>(emptyList()); private set
+    /** Set when a workout save bumps the week count / streak; the shell shows the celebration modal. */
+    var celebrate by mutableStateOf<Celebration?>(null); private set
+    var savedMeals by mutableStateOf<List<com.sohum.bandlog.data.SavedMeal>>(emptyList()); private set
+
+    data class Celebration(val streakWeeks: Int, val thisWeek: Int, val target: Int, val hitTarget: Boolean)
+
+    fun dismissCelebration() { celebrate = null }
+
+    /** Cal AI-style optimistic log: the row appears instantly; Haiku prices it in the background. */
+    fun quickLogMeal(text: String, date: String) {
+        pendingMeals = pendingMeals + text
+        viewModelScope.launch {
+            try {
+                val parsed = Api.parseMeal(text)
+                if (parsed.items.isNotEmpty()) Api.saveMeal(date, text, parsed.items)
+                else error = "Couldn't find any food in “${text.take(40)}”"
+                refresh()
+            } catch (e: Exception) { error = e.message ?: "Couldn't log that meal" }
+            finally { pendingMeals = pendingMeals - text }
+        }
+    }
+
+    fun loadSavedMeals() { viewModelScope.launch { runCatching { savedMeals = Api.savedMeals() } } }
+
     fun onSignedIn() { signedIn = true; refresh() }
 
     fun refresh() {
@@ -74,7 +100,18 @@ class AppViewModel : ViewModel() {
     suspend fun saveWorkout(
         id: String?, date: String, muscles: List<String>, band: String,
         kg: Double?, minutes: Int?, exercises: String, notes: String,
-    ) = mutate { Api.saveWorkout(id, date, muscles, band, kg, minutes, exercises, notes) }
+    ): Boolean {
+        val before = thisWeek; val beforeStreak = weekStreak
+        val ok = mutate { Api.saveWorkout(id, date, muscles, band, kg, minutes, exercises, notes) }
+        // refresh() runs async inside mutate; wait for it so the counts below are fresh.
+        if (ok && id == null) {
+            kotlinx.coroutines.delay(50)
+            while (loading) kotlinx.coroutines.delay(50)
+            val target = profile.weeklyWorkoutTarget
+            if (thisWeek > before) celebrate = Celebration(weekStreak, thisWeek, target, hitTarget = thisWeek >= target && before < target || weekStreak > beforeStreak)
+        }
+        return ok
+    }
 
     suspend fun deleteWorkout(id: String) = mutate { Api.deleteWorkout(id) }
     suspend fun saveMeal(date: String, raw: String, items: List<MealItem>) = mutate { Api.saveMeal(date, raw, items) }
