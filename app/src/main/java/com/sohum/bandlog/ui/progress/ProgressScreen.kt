@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -52,8 +54,9 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 @Composable
-fun ProgressScreen(vm: AppViewModel) {
+fun ProgressScreen(vm: AppViewModel, onOpenBadges: () -> Unit) {
     val p = palette
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     val today = Dates.today()
     var weekBack by remember { mutableIntStateOf(0) }
     val ws = Dates.addDays(Dates.weekStart(today), -7L * weekBack)
@@ -69,6 +72,7 @@ fun ProgressScreen(vm: AppViewModel) {
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 110.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item { Rise(0) { ScreenTitle("Progress") } }
+        item { Rise(1) { WeightCard(vm) } }
         item {
             Rise(1) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -98,7 +102,9 @@ fun ProgressScreen(vm: AppViewModel) {
                 }
             }
         }
+        item { Rise(2) { BadgesCard(vm, onOpenBadges) } }
         item { Rise(2) { Segmented(listOf("This week", "Last week", "2 wks ago", "3 wks ago"), weekBack, { weekBack = it }, height = 34.dp) } }
+        item { Rise(3) { WeeklyEnergyCard(vm, days, ctx) } }
         item {
             Rise(3) {
                 Card {
@@ -128,6 +134,174 @@ fun ProgressScreen(vm: AppViewModel) {
                 }
             }
         }
+    }
+}
+
+/** Current vs goal weight, with a hairline sparkline of the last ten weigh-ins. */
+@Composable
+private fun WeightCard(vm: AppViewModel) {
+    val p = palette
+    val rows = vm.weights
+    val current = rows.firstOrNull()?.weightKg ?: vm.profile.weightKg
+    val goal = vm.profile.goalWeightKg
+    // weights arrive newest-first; the sparkline reads left-to-right in time order.
+    val spark = rows.take(10).map { it.weightKg }.reversed()
+
+    Card {
+        RowSpaceBetween {
+            Column {
+                Text("Weight", fontSize = 13.sp, fontWeight = FontWeight(500), color = p.muted)
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        current?.let { com.sohum.bandlog.ui.today.fmt(it) } ?: "—",
+                        fontSize = 30.sp, fontWeight = FontWeight(800), letterSpacing = (-1).sp, color = p.ink, lineHeight = 30.sp,
+                    )
+                    Text(
+                        if (goal != null) " kg  ·  goal ${com.sohum.bandlog.ui.today.fmt(goal)} kg" else " kg",
+                        fontSize = 13.sp, color = p.muted,
+                    )
+                }
+            }
+            if (spark.size >= 2) Sparkline(spark, p.ink, Modifier.size(96.dp, 40.dp))
+        }
+        if (rows.isEmpty()) {
+            Spacer(Modifier.height(6.dp))
+            Text("Log a weigh-in from Profile → Weight history.", fontSize = 12.sp, color = p.muted)
+        }
+    }
+}
+
+/** How many medals are unlocked; taps through to the full grid. */
+@Composable
+private fun BadgesCard(vm: AppViewModel, onOpen: () -> Unit) {
+    val p = palette
+    val progress = vm.badgeProgress
+    val earned = com.sohum.bandlog.util.Badges.earnedCount(progress)
+    LaunchedEffect(Unit) { vm.loadBadgeTotals() }
+    Card(onClick = onOpen, padding = 14.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            HexMedal(earned, earned > 0, 48.dp)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Badges", fontSize = 16.sp, fontWeight = FontWeight(700), color = p.ink)
+                Text(
+                    "$earned of ${com.sohum.bandlog.util.Badges.ALL.size} earned",
+                    fontSize = 12.sp, color = p.muted,
+                )
+            }
+            Text("›", fontSize = 18.sp, color = p.muted)
+        }
+    }
+}
+
+/**
+ * Weekly Energy: calories eaten vs burned for the selected week. Burned comes from the local
+ * Health Connect cache (we only ever get today's figure live), so older days read 0 until the
+ * app has seen them.
+ */
+@Composable
+private fun WeeklyEnergyCard(vm: AppViewModel, days: List<String>, ctx: android.content.Context) {
+    val p = palette
+    val consumed = days.map { totalsFor(vm.meals, it).calories }
+    val burned = remember(days) { com.sohum.bandlog.util.BurnedCache.forDates(ctx, days) }
+        .toMutableList()
+        .also { list ->
+            // Today's number is fresher in memory than in the cache.
+            val i = days.indexOf(Dates.today())
+            if (i >= 0) vm.healthToday?.let { h -> if (h.activeKcal > 0) list[i] = h.activeKcal }
+        }
+    val totalIn = consumed.sum()
+    val totalOut = burned.sum()
+
+    Card {
+        Text("Weekly Energy", fontSize = 17.sp, fontWeight = FontWeight(700), color = p.ink)
+        Spacer(Modifier.height(12.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            EnergyStat("Consumed", totalIn, p.orange)
+            EnergyStat("Burned", totalOut, p.green)
+            EnergyStat("Net", totalIn - totalOut, p.ink)
+        }
+        Spacer(Modifier.height(16.dp))
+        LineChart(consumed, burned, p.orange, p.green, Modifier.fillMaxWidth().height(110.dp))
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            listOf("S", "M", "T", "W", "T", "F", "S").forEachIndexed { i, l ->
+                Text(
+                    l, Modifier.weight(1f), fontSize = 10.sp, textAlign = TextAlign.Center,
+                    color = if (days.getOrNull(i) == Dates.today()) p.ink else p.muted,
+                    fontWeight = if (days.getOrNull(i) == Dates.today()) FontWeight(700) else FontWeight(400),
+                )
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            MacroDot("Consumed", p.orange)
+            MacroDot("Burned", p.green)
+        }
+    }
+}
+
+@Composable
+private fun EnergyStat(label: String, value: Double, color: Color) {
+    val p = palette
+    Column {
+        Text(label, fontSize = 12.sp, color = p.muted)
+        Text(
+            "${value.toInt()}",
+            fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = color, lineHeight = 22.sp,
+        )
+        Text("kcal", fontSize = 11.sp, color = p.muted)
+    }
+}
+
+/** Two 7-point polylines on a shared scale, with a dot at each day. */
+@Composable
+private fun LineChart(a: List<Double>, b: List<Double>, colorA: Color, colorB: Color, modifier: Modifier) {
+    val p = palette
+    val max = maxOf(a.maxOrNull() ?: 0.0, b.maxOrNull() ?: 0.0, 1.0)
+    var go by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { delay(200); go = true }
+    val f by animateFloatAsState(if (go) 1f else 0f, Motion.spatialSlow(), label = "line")
+
+    androidx.compose.foundation.Canvas(modifier) {
+        val w = size.width
+        val h = size.height
+        // Faint baseline so an all-zero week still reads as a chart.
+        drawLine(p.hair, androidx.compose.ui.geometry.Offset(0f, h), androidx.compose.ui.geometry.Offset(w, h), strokeWidth = 1.5f)
+
+        fun points(values: List<Double>): List<androidx.compose.ui.geometry.Offset> =
+            values.mapIndexed { i, v ->
+                val x = if (values.size <= 1) 0f else w * i / (values.size - 1)
+                val y = h - (h * (v / max).toFloat() * f).coerceIn(0f, h)
+                androidx.compose.ui.geometry.Offset(x, y)
+            }
+
+        listOf(a to colorA, b to colorB).forEach { (values, color) ->
+            val pts = points(values)
+            val path = androidx.compose.ui.graphics.Path().apply {
+                pts.forEachIndexed { i, o -> if (i == 0) moveTo(o.x, o.y) else lineTo(o.x, o.y) }
+            }
+            drawPath(path, color, style = Stroke(width = 3f, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+            pts.forEach { o -> drawCircle(color, radius = 3.5f, center = o) }
+        }
+    }
+}
+
+/** Tiny line of the last few weigh-ins — no axes, just the shape of the trend. */
+@Composable
+private fun Sparkline(values: List<Double>, color: Color, modifier: Modifier) {
+    val lo = values.min()
+    val hi = values.max()
+    val span = (hi - lo).takeIf { it > 0.01 } ?: 1.0
+    androidx.compose.foundation.Canvas(modifier) {
+        val path = androidx.compose.ui.graphics.Path()
+        values.forEachIndexed { i, v ->
+            val x = if (values.size <= 1) 0f else size.width * i / (values.size - 1)
+            val y = size.height - (size.height * ((v - lo) / span).toFloat()).coerceIn(0f, size.height)
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        drawPath(path, color, style = Stroke(width = 2.5f, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
     }
 }
 

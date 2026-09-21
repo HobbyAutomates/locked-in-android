@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -67,7 +68,15 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit) {
     val todayWorkouts = vm.workouts.filter { it.date == selected }
     val trained = vm.workoutDates.toSet()
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    androidx.compose.runtime.LaunchedEffect(Unit) { vm.refreshHealth(ctx) }
+    // Steps and burned calories go stale while the app is backgrounded; re-read on every resume.
+    val owner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(owner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) vm.refreshHealth(ctx)
+        }
+        owner.lifecycle.addObserver(observer)
+        onDispose { owner.lifecycle.removeObserver(observer) }
+    }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 110.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
@@ -78,13 +87,27 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit) {
                         Spacer(Modifier.width(8.dp))
                         Text("Locked In", fontSize = 22.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink)
                     }
-                    Row(
-                        Modifier.shadow(8.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow).background(p.card, CircleShape).padding(start = 9.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Flame(p.flame, 16.dp)
-                        Spacer(Modifier.width(5.dp))
-                        Text("${vm.weekStreak}", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // Compose 1.6's PullToRefresh is still experimental, so Home gets an
+                        // explicit refresh button instead — same job, no API risk.
+                        Box(
+                            Modifier.size(34.dp).shadow(8.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow)
+                                .background(p.card, CircleShape)
+                                .clickable(enabled = !vm.loading) { vm.refresh(); vm.refreshHealth(ctx) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (vm.loading) CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 2.dp, color = p.muted)
+                            else Icon(Icons.Outlined.Refresh, "Refresh", tint = p.ink, modifier = Modifier.size(17.dp))
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Row(
+                            Modifier.shadow(8.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow).background(p.card, CircleShape).padding(start = 9.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Flame(p.flame, 16.dp)
+                            Spacer(Modifier.width(5.dp))
+                            Text("${vm.weekStreak}", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink)
+                        }
                     }
                 }
                 ErrorNote(vm.error, Modifier.padding(top = 8.dp))
@@ -110,9 +133,9 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit) {
         item {
             Rise(3) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    MacroCard(Modifier.weight(1f), "${(prof.proteinTargetG - totals.protein).toInt().coerceAtLeast(0)}g", "Protein left", (totals.protein / prof.proteinTargetG).toFloat(), p.red)
-                    MacroCard(Modifier.weight(1f), "${(prof.carbTargetG - totals.carbs).toInt().coerceAtLeast(0)}g", "Carbs left", (totals.carbs / prof.carbTargetG.coerceAtLeast(1)).toFloat(), p.orange)
-                    MacroCard(Modifier.weight(1f), "${(prof.fatTargetG - totals.fat).toInt().coerceAtLeast(0)}g", "Fat left", (totals.fat / prof.fatTargetG.coerceAtLeast(1)).toFloat(), p.blue)
+                    MacroCard(Modifier.weight(1f), "Protein", totals.protein, prof.proteinTargetG.toDouble(), p.red)
+                    MacroCard(Modifier.weight(1f), "Carbs", totals.carbs, prof.carbTargetG.toDouble(), p.orange)
+                    MacroCard(Modifier.weight(1f), "Fat", totals.fat, prof.fatTargetG.toDouble(), p.blue)
                 }
             }
         }
@@ -124,11 +147,11 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit) {
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             Card(Modifier.weight(1f), padding = 14.dp) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Ring(((h?.steps ?: 0L) / 8000f).coerceIn(0f, 1f), p.green, 44.dp, 5.dp) { Icon(com.sohum.bandlog.ui.components.StepsIcon, null, tint = p.green, modifier = Modifier.size(16.dp)) }
+                                    Ring(((h?.steps ?: 0L) / prof.stepGoal.toFloat()).coerceIn(0f, 1f), p.green, 44.dp, 5.dp) { Icon(com.sohum.bandlog.ui.components.StepsIcon, null, tint = p.green, modifier = Modifier.size(16.dp)) }
                                     Spacer(Modifier.width(10.dp))
                                     Column {
                                         Text(String.format(Locale.US, "%,d", h?.steps ?: 0L), fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink)
-                                        Text("Steps today", fontSize = 12.sp, color = p.muted)
+                                        Text("of ${String.format(Locale.US, "%,d", prof.stepGoal.toLong())} steps", fontSize = 12.sp, color = p.muted)
                                     }
                                 }
                             }
@@ -216,14 +239,35 @@ private fun WeekStrip(today: String, selected: String, trained: Set<String>, onS
     }
 }
 
+/**
+ * One macro card. Below target it counts down ("34g / Protein left"); once the target is passed
+ * it flips to the overshoot ("12g / Protein **over**") in the macro's own colour, like Cal AI.
+ */
 @Composable
-private fun MacroCard(modifier: Modifier, value: String, label: String, fraction: Float, color: Color) {
+private fun MacroCard(modifier: Modifier, macro: String, consumed: Double, target: Double, color: Color) {
     val p = palette
+    val safeTarget = target.coerceAtLeast(1.0)
+    val over = consumed > target && target > 0
+    val amount = if (over) consumed - target else target - consumed
     Card(modifier, padding = 12.dp) {
-        Text(value, fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink)
-        Text(label, fontSize = 12.sp, color = p.muted)
+        Text(
+            "${amount.toInt().coerceAtLeast(0)}g",
+            fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp,
+            color = if (over) color else p.ink,
+        )
+        Row {
+            Text("$macro ", fontSize = 12.sp, color = p.muted)
+            Text(
+                if (over) "over" else "left",
+                fontSize = 12.sp,
+                fontWeight = if (over) FontWeight(700) else FontWeight(400),
+                color = if (over) color else p.muted,
+            )
+        }
         Spacer(Modifier.height(10.dp))
-        Ring(fraction, color, 56.dp, 6.dp, Modifier.align(Alignment.CenterHorizontally)) { Box(Modifier.size(8.dp).background(color, CircleShape)) }
+        Ring((consumed / safeTarget).toFloat(), color, 56.dp, 6.dp, Modifier.align(Alignment.CenterHorizontally)) {
+            Box(Modifier.size(8.dp).background(color, CircleShape))
+        }
     }
 }
 
