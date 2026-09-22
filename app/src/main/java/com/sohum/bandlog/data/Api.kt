@@ -218,10 +218,14 @@ object Api {
         api("feedback", JSONObject().put("rating", rating).put("raw_text", rawText).put("meal_id", mealId ?: JSONObject.NULL).put("correction", correction), "Feedback"); Unit
     }
 
-    /** Photo of an ingredients / nutrition label → verdict report (Haiku vision + web research). */
-    suspend fun scanLabel(jpegBase64: String, note: String): LabelReport = withContext(Dispatchers.IO) {
-        // Vision + web research can take a while; give this one call a longer leash than the rest.
-        LabelReport.from(api("scan-label", JSONObject().put("image", jpegBase64).put("media_type", "image/jpeg").put("note", note), "Scan", timeoutSec = 180))
+    /**
+     * Label text (read on this phone by ML Kit) → verdict report. [jpegBase64] is only sent when
+     * the OCR came up short, in which case the server falls back to reading the photo itself.
+     */
+    suspend fun scanLabel(text: String, note: String, jpegBase64: String? = null): LabelReport = withContext(Dispatchers.IO) {
+        val payload = JSONObject().put("text", text).put("note", note)
+        if (jpegBase64 != null) payload.put("image", jpegBase64).put("media_type", "image/jpeg")
+        LabelReport.from(api("scan-label", payload, "Scan", timeoutSec = 120))
     }
 
     // ---- saved meals (one-tap repeat dinners) ----

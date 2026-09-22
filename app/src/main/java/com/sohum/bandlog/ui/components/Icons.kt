@@ -164,6 +164,51 @@ val TargetIcon: ImageVector by lazy {
     }
 }
 
+/** A filled teaspoon — one of these per spoon of sugar in the scan report. */
+val SpoonIcon: ImageVector by lazy {
+    ImageVector.Builder("Spoon", 24.dp, 24.dp, 24f, 24f).apply {
+        path(fill = SolidColor(Color.Black), pathFillType = PathFillType.NonZero) {
+            // Oval bowl on top of a short tapered handle.
+            moveTo(12f, 2f)
+            curveTo(15f, 2f, 16.8f, 4.6f, 16.8f, 7.4f)
+            curveTo(16.8f, 10.2f, 15f, 12.2f, 12f, 12.2f)
+            curveTo(9f, 12.2f, 7.2f, 10.2f, 7.2f, 7.4f)
+            curveTo(7.2f, 4.6f, 9f, 2f, 12f, 2f)
+            close()
+            moveTo(10.7f, 12.4f)
+            horizontalLineTo(13.3f)
+            lineTo(12.9f, 21.2f)
+            curveTo(12.9f, 22f, 12.5f, 22.4f, 12f, 22.4f)
+            curveTo(11.5f, 22.4f, 11.1f, 22f, 11.1f, 21.2f)
+            close()
+        }
+    }.build()
+}
+
+/** Tick used by the plan checklist and the claims rows. */
+val CheckIcon: ImageVector by lazy {
+    stroke("Check") { moveTo(5f, 12.5f); lineTo(10f, 17.5f); lineTo(19f, 6.5f) }
+}
+
+/** Cross for a claim the label doesn't support. */
+val CrossIcon: ImageVector by lazy {
+    stroke("Cross") { moveTo(6f, 6f); lineTo(18f, 18f); moveTo(18f, 6f); lineTo(6f, 18f) }
+}
+
+/** Question mark for an unclear claim. */
+val QuestionIcon: ImageVector by lazy {
+    stroke("Question") {
+        moveTo(9f, 9f); curveTo(9f, 6.8f, 10.5f, 5.5f, 12f, 5.5f); curveTo(13.8f, 5.5f, 15f, 6.8f, 15f, 8.5f)
+        curveTo(15f, 10.5f, 12f, 11f, 12f, 14f)
+        moveTo(12f, 18f); horizontalLineTo(12.1f)
+    }
+}
+
+/** Chevron used by the collapsible cards on the scan report. */
+val ChevronDownIcon: ImageVector by lazy {
+    stroke("ChevronDown") { moveTo(6f, 9.5f); lineTo(12f, 15.5f); lineTo(18f, 9.5f) }
+}
+
 /** Microphone for the dictation card. */
 val MicIcon: ImageVector by lazy {
     stroke("Mic") {

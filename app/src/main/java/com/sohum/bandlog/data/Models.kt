@@ -180,6 +180,46 @@ data class SavedMeal(val id: String, val name: String, val items: List<MealItem>
     }
 }
 
+/**
+ * The drawable half of a label report: numbers the app can paint straight onto the screen
+ * without doing any maths of its own. Everything defaults to zero so an older server (or a
+ * report saved before v1.6) still renders.
+ */
+data class Infographic(
+    val proteinPct: Int = 0,
+    val carbsPct: Int = 0,
+    val fatPct: Int = 0,
+    val caloriesPct: Int = 0,
+    val sugarTsp: Double = 0.0,
+    val sodiumPct: Int = 0,
+    val score: Int = 0,
+    val oneLiner: String = "",
+    /** yes | sometimes | skip */
+    val eatIt: String = "sometimes",
+) {
+    /** True once the server actually filled it in; older reports fall back to the plain layout. */
+    val present: Boolean get() = oneLiner.isNotBlank() || score > 0 || caloriesPct > 0
+
+    companion object {
+        fun from(o: JSONObject?): Infographic {
+            if (o == null) return Infographic()
+            val share = o.optJSONObject("serving_share") ?: JSONObject()
+            fun pct(k: String) = share.optInt(k, 0).coerceIn(0, 100)
+            return Infographic(
+                proteinPct = pct("protein_pct"),
+                carbsPct = pct("carbs_pct"),
+                fatPct = pct("fat_pct"),
+                caloriesPct = pct("calories_pct"),
+                sugarTsp = o.optDouble("sugar_teaspoons_per_serving", 0.0).let { if (it.isNaN() || it < 0) 0.0 else it },
+                sodiumPct = o.optInt("sodium_pct_of_2000mg", 0).coerceIn(0, 100),
+                score = o.optInt("score_out_of_10", 0).coerceIn(0, 10),
+                oneLiner = o.optString("one_liner").orEmpty(),
+                eatIt = o.optString("eat_it", "sometimes").ifBlank { "sometimes" },
+            )
+        }
+    }
+}
+
 /** Result of scanning a packaged food's label. */
 data class LabelReport(
     val id: String?,
@@ -198,6 +238,7 @@ data class LabelReport(
     val research: List<String>,
     val suggestions: List<String>,
     val alternatives: List<String>,
+    val infographic: Infographic,
 ) {
     companion object {
         fun from(o: JSONObject): LabelReport {
@@ -219,6 +260,7 @@ data class LabelReport(
                 concerns = triples("concerns", "ingredient", "issue", "severity"),
                 claims = triples("claims", "claim", "status", "why"),
                 research = strings("research"), suggestions = strings("suggestions"), alternatives = strings("alternatives"),
+                infographic = Infographic.from(o.optJSONObject("infographic")),
             )
         }
     }

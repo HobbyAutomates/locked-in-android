@@ -72,6 +72,7 @@ import com.sohum.bandlog.ui.components.Hair
 import com.sohum.bandlog.ui.components.Motion
 import com.sohum.bandlog.ui.log.LogScreen
 import com.sohum.bandlog.ui.login.LoginScreen
+import com.sohum.bandlog.ui.onboarding.OnboardingScreen
 import com.sohum.bandlog.ui.profile.GoalWeightScreen
 import com.sohum.bandlog.ui.profile.NutritionGoalsScreen
 import com.sohum.bandlog.ui.profile.PersonalDetailsScreen
@@ -111,8 +112,14 @@ class MainActivity : ComponentActivity() {
                 val updateVm: UpdateViewModel = viewModel()
                 LaunchedEffect(Unit) { updateVm.checkOnce(); vm.addBurnedBack = ThemePrefs.burned(this@MainActivity); if (vm.signedIn) { vm.refresh(); vm.refreshHealth(this@MainActivity) } }
                 Surface(Modifier.fillMaxSize(), color = palette.bg) {
-                    if (!vm.signedIn) LoginScreen(onSignedIn = { vm.onSignedIn() })
-                    else MainShell(vm, updateVm, themeMode, openMealTick.intValue) { themeMode = it; ThemePrefs.set(this, it) }
+                    when {
+                        !vm.signedIn -> LoginScreen(onSignedIn = { vm.onSignedIn() })
+                        // Hold the mark up for the moment between sign-in and the first profile read,
+                        // so a brand-new account never flashes the empty tab shell.
+                        !vm.loadedOnce && vm.error == null -> BootSplash()
+                        vm.needsOnboarding -> OnboardingScreen(vm, onDone = {}, onSkip = { vm.onboardingSkipped = true })
+                        else -> MainShell(vm, updateVm, themeMode, openMealTick.intValue) { themeMode = it; ThemePrefs.set(this, it) }
+                    }
                 }
                 UpdateDialog(updateVm)
             }
@@ -132,6 +139,15 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_OPEN = "open"
         const val OPEN_MEAL = "meal"
+    }
+}
+
+/** The mark on the page while the first profile read is in flight. */
+@Composable
+private fun BootSplash() {
+    val p = palette
+    Box(Modifier.fillMaxSize().background(p.bg), contentAlignment = Alignment.Center) {
+        Icon(com.sohum.bandlog.ui.components.LockIcon, null, tint = p.ink, modifier = Modifier.size(56.dp))
     }
 }
 

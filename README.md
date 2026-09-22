@@ -10,7 +10,16 @@ schema as the web app (`C:\Users\sohum\band-log-app`, live at https://web-produc
 - **Meals**: dictate into the box (Wispr Flow), tap **Log meal**. The text goes to the web app's
   `/api/parse-meal` with the user's token; Haiku + the food table return priced items; edit grams; Save.
 - **Workouts**: muscles, band level, kg, minutes, exercises, notes. Calendar shows muscle dots per day.
-- **Scan**: photograph a nutrition or ingredients label for a verdict report.
+- **Onboarding**: after sign-up (and on any sign-in where weight, height or birthday are still
+  empty) the app runs a Cal AI-shaped first run instead of the tab shell — gender, workouts a week,
+  goal, height & weight, birthday, target weight on a draggable ruler, pace on the sloth/rabbit/
+  cheetah slider, then what's getting in the way. It builds a plan on screen and saves the whole
+  profile plus the Auto Generate targets in one write. "Skip for now" on the first screen.
+- **Scan**: photograph a nutrition or ingredients label. ML Kit reads it **on the phone** (~8 s
+  end to end); the recognised words show in an editable "What I read" card so a misread digit can
+  be fixed before analysing. Only a short read (<120 characters) also uploads the photo. The report
+  is an infographic: score out of 10 in a ring, verdict meter, one serving as a share of your day,
+  sugar drawn as teaspoons, salt as a share of 2000 mg, protein gauge, traffic-light ingredients.
 - **Progress**: weight card with sparkline, week/day streak, badges card, Weekly Energy
   (consumed vs burned line chart), sessions/week bars, protein bars, rest per muscle.
 - **Badges**: twelve hex medals across three tiers — training streak (Rookie 3 → Immortal 1000),

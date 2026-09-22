@@ -55,6 +55,20 @@ class AppViewModel : ViewModel() {
 
     fun dismissCelebration() { celebrate = null }
 
+    // ---- first run ----
+
+    /** Set by the onboarding flow's "Skip for now"; lasts until the next sign-in. */
+    var onboardingSkipped by mutableStateOf(false)
+
+    /**
+     * Whether to show the onboarding flow instead of the tab shell. Completion isn't a column of
+     * its own — a profile that has a weight, a height and a birthday has been through the flow
+     * (or filled them in by hand), which is exactly what the plan generator needs.
+     */
+    val needsOnboarding: Boolean
+        get() = signedIn && loadedOnce && !onboardingSkipped &&
+            (profile.weightKg == null || profile.heightCm == null || profile.dob == null)
+
     // ---- Health Connect (Google Fit / Samsung Health) ----
     var healthConnected by mutableStateOf(false); private set
     var healthToday by mutableStateOf<com.sohum.bandlog.util.Health.Today?>(null); private set
@@ -221,6 +235,7 @@ class AppViewModel : ViewModel() {
             SupabaseAuth.signOut()
             signedIn = false; workouts = emptyList(); meals = emptyList(); weights = emptyList()
             profile = Profile(); loadedOnce = false; totalMeals = 0; allWorkoutDates = emptyList()
+            onboardingSkipped = false
         }
     }
 }

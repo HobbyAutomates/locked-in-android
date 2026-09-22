@@ -24,8 +24,8 @@ android {
         applicationId = "com.sohum.bandlog"
         minSdk = 31
         targetSdk = 34
-        versionCode = 7
-        versionName = "1.5"
+        versionCode = 8
+        versionName = "1.6"
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
         // The Railway web app; /api/parse-meal holds the Anthropic key server-side.
@@ -75,6 +75,10 @@ dependencies {
 
     // Health Connect: steps + calories in, band sessions out (covers Google Fit and Samsung Health)
     implementation("androidx.health.connect:connect-client:1.1.0-alpha07")
+
+    // On-device OCR for the label scanner. The Play-Services variant downloads the model on
+    // demand instead of baking it into the APK (same com.google.mlkit API as the Reminders app).
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
