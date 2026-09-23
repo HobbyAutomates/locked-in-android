@@ -178,7 +178,7 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
                 when (tab) {
                     0 -> TodayScreen(vm) { w -> log = LogRequest(w, Dates.today(), false) }
                     1 -> CalendarScreen(vm) { w, d -> log = LogRequest(w, d, false) }
-                    2 -> com.sohum.bandlog.ui.scan.ScanTab()
+                    2 -> com.sohum.bandlog.ui.scan.ScanTab(vm)
                     3 -> ProgressScreen(vm) { page = Page.BADGES }
                     else -> ProfileScreen(vm, updateVm, themeMode, onThemeMode) { target ->
                         page = when (target) {
