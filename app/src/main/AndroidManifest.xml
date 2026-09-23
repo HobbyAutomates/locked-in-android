@@ -29,8 +29,8 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.BandLog">
 
-        <!-- Ask Play Services to fetch the text-recognition model when the app first installs. -->
-        <meta-data android:name="com.google.mlkit.vision.DEPENDENCIES" android:value="ocr" />
+        <!-- Ask Play Services to fetch the text-recognition and barcode models when the app first installs. -->
+        <meta-data android:name="com.google.mlkit.vision.DEPENDENCIES" android:value="ocr,barcode" />
 
         <!-- Shares the downloaded update APK with the system installer via a content:// URI. -->
         <provider

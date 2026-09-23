@@ -24,8 +24,8 @@ android {
         applicationId = "com.sohum.bandlog"
         minSdk = 31
         targetSdk = 34
-        versionCode = 8
-        versionName = "1.6"
+        versionCode = 9
+        versionName = "1.7"
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
         // The Railway web app; /api/parse-meal holds the Anthropic key server-side.
@@ -79,6 +79,8 @@ dependencies {
     // On-device OCR for the label scanner. The Play-Services variant downloads the model on
     // demand instead of baking it into the APK (same com.google.mlkit API as the Reminders app).
     implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.1")
+    // On-device EAN/UPC reading for the barcode scanner (same Play-Services delivery as the OCR model).
+    implementation("com.google.android.gms:play-services-mlkit-barcode-scanning:18.3.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
