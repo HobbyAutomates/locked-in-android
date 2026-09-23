@@ -163,7 +163,7 @@ class AppViewModel : ViewModel() {
     }
 
     suspend fun deleteWorkout(id: String) = mutate { Api.deleteWorkout(id) }
-    suspend fun saveMeal(date: String, raw: String, items: List<MealItem>) = mutate { Api.saveMeal(date, raw, items) }
+    suspend fun saveMeal(date: String, raw: String, items: List<MealItem>, photoPath: String? = null) = mutate { Api.saveMeal(date, raw, items, photoPath) }
     suspend fun deleteMeal(id: String) = mutate { Api.deleteMeal(id) }
     suspend fun saveTargets(p: Profile) = mutate { Api.saveProfile(p) }
 

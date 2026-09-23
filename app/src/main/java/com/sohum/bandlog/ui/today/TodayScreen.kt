@@ -299,7 +299,8 @@ fun MealRow(m: Meal, onDelete: () -> Unit, onFeedback: ((String) -> Unit)? = nul
     var voted by androidx.compose.runtime.remember(m.id) { androidx.compose.runtime.mutableStateOf<String?>(null) }
     Card(padding = 14.dp) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconTile(BowlIcon, p.orange, p.orangeBg)
+            if (m.photoPath != null) com.sohum.bandlog.ui.components.RemoteImage(storagePath = m.photoPath, size = 56.dp, fallback = BowlIcon, fallbackTint = p.orange, fallbackBg = p.orangeBg)
+            else IconTile(BowlIcon, p.orange, p.orangeBg)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 RowSpaceBetween {

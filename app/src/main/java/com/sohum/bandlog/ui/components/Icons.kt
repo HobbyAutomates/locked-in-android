@@ -216,3 +216,34 @@ val MicIcon: ImageVector by lazy {
         moveTo(5f, 10f); arcTo(7f, 7f, 0f, false, false, 19f, 10f); moveTo(12f, 17f); verticalLineTo(22f)
     }
 }
+
+/** Barcode bars for the Barcode scan mode and history rows. */
+val BarcodeIcon: ImageVector by lazy {
+    stroke("Barcode") {
+        moveTo(4f, 6f); verticalLineTo(18f)
+        moveTo(8f, 6f); verticalLineTo(18f)
+        moveTo(11f, 6f); verticalLineTo(18f)
+        moveTo(15f, 6f); verticalLineTo(18f)
+        moveTo(17f, 6f); verticalLineTo(18f)
+        moveTo(20f, 6f); verticalLineTo(18f)
+    }
+}
+
+/** Camera for the Food photo scan mode. */
+val CameraIcon: ImageVector by lazy {
+    stroke("Camera") {
+        moveTo(4f, 8f); horizontalLineTo(7f); lineTo(9f, 5f); horizontalLineTo(15f); lineTo(17f, 8f); horizontalLineTo(20f)
+        arcTo(1f, 1f, 0f, false, true, 21f, 9f); verticalLineTo(18f); arcTo(1f, 1f, 0f, false, true, 20f, 19f)
+        horizontalLineTo(4f); arcTo(1f, 1f, 0f, false, true, 3f, 18f); verticalLineTo(9f); arcTo(1f, 1f, 0f, false, true, 4f, 8f); close()
+        moveTo(15.5f, 13f); arcTo(3.5f, 3.5f, 0f, true, true, 8.5f, 13f); arcTo(3.5f, 3.5f, 0f, true, true, 15.5f, 13f)
+    }
+}
+
+/** Clock-arrow for the History heading. */
+val HistoryIcon: ImageVector by lazy {
+    stroke("History") {
+        moveTo(3f, 12f); arcTo(9f, 9f, 0f, true, true, 6f, 18.7f)
+        moveTo(3f, 12f); horizontalLineTo(7f); moveTo(3f, 12f); verticalLineTo(8f)
+        moveTo(12f, 7f); verticalLineTo(12f); lineTo(15f, 14f)
+    }
+}

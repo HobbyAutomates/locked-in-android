@@ -40,18 +40,21 @@ data class MealItem(
     val confidence: Double?,
     /** Only set on freshly parsed (not yet saved) items: the words it came from. */
     val input: String = "",
+    /** Fibre / sugar / sodium / iron / calcium / vit C / potassium … already scaled to [grams]. */
+    val micros: Map<String, Double> = emptyMap(),
 ) {
     fun toJson(mealId: String, userId: String): JSONObject = JSONObject()
         .put("meal_id", mealId).put("user_id", userId)
         .put("food_id", foodId ?: JSONObject.NULL).put("name", name).put("grams", grams)
         .put("calories", calories).put("protein_g", proteinG).put("carbs_g", carbsG).put("fat_g", fatG)
         .put("source", source).put("confidence", confidence ?: JSONObject.NULL)
+        .put("micros", JSONObject(micros))
 
-    /** Re-price after the user edits grams (scales linearly). */
+    /** Re-price after the user edits grams (scales linearly, micros included). */
     fun withGrams(g: Double): MealItem {
         if (grams <= 0.0) return copy(grams = g)
         val k = g / grams
-        return copy(grams = g, calories = calories * k, proteinG = proteinG * k, carbsG = carbsG * k, fatG = fatG * k)
+        return copy(grams = g, calories = calories * k, proteinG = proteinG * k, carbsG = carbsG * k, fatG = fatG * k, micros = micros.mapValues { it.value * k })
     }
 
     companion object {
@@ -67,7 +70,13 @@ data class MealItem(
             source = o.optString("source", "table"),
             confidence = if (o.isNull("confidence")) null else o.optDouble("confidence"),
             input = o.optString("input", ""),
+            micros = micros(o.optJSONObject("micros")),
         )
+
+        fun micros(o: JSONObject?): Map<String, Double> {
+            if (o == null) return emptyMap()
+            return o.keys().asSequence().associateWith { o.optDouble(it) }.filterValues { !it.isNaN() }
+        }
     }
 }
 
@@ -77,6 +86,8 @@ data class Meal(
     val rawText: String,
     val createdAt: String,
     val items: List<MealItem>,
+    /** Storage path under meal-photos/ when the meal came from a plate photo. */
+    val photoPath: String? = null,
 ) {
     val calories get() = items.sumOf { it.calories }
     val protein get() = items.sumOf { it.proteinG }
@@ -90,6 +101,7 @@ data class Meal(
                 rawText = o.optString("raw_text", ""),
                 createdAt = o.optString("created_at", ""),
                 items = (0 until arr.length()).map { MealItem.from(arr.getJSONObject(it)) },
+                photoPath = if (o.isNull("photo_path")) null else o.optString("photo_path").ifBlank { null },
             )
         }
     }
@@ -220,13 +232,27 @@ data class Infographic(
     }
 }
 
-/** Result of scanning a packaged food's label. */
+/** How a product fits one way of eating: great | ok | weak, and the number that decides it. */
+data class Fit(val verdict: String, val why: String)
+
+/** Result of scanning a packaged food's label or barcode. */
 data class LabelReport(
     val id: String?,
+    /** label | barcode */
+    val kind: String,
+    /** protein | snack | cutting | bulking — the lens the report was written for. */
+    val lens: String,
     val product: String,
     val readable: Boolean,
-    val verdict: String,          // safe | caution | unsafe | misleading | fake
+    /** Two neutral sentences: what it is, what it's made of, who it suits. */
+    val whatItIs: String,
+    /** Safety / authenticity only — shown as "Trust". safe | caution | unsafe | misleading | fake */
+    val verdict: String,
     val verdictReason: String,
+    /** Keyed by lens. Empty on reports saved before v1.7. */
+    val fits: Map<String, Fit>,
+    val imageUrl: String?,
+    val barcode: String?,
     val per100: Map<String, Double>,
     val servingG: Double?,
     val proteinRating: String,    // excellent | good | average | poor
@@ -248,10 +274,17 @@ data class LabelReport(
             } ?: emptyList()
             val p = o.optJSONObject("protein") ?: JSONObject()
             val n = o.optJSONObject("per_100g") ?: JSONObject()
+            val f = o.optJSONObject("fits") ?: JSONObject()
             return LabelReport(
                 id = o.optString("id").ifBlank { null },
+                kind = o.optString("kind", "label").ifBlank { "label" },
+                lens = o.optString("lens", "protein").ifBlank { "protein" },
                 product = o.optString("product"), readable = o.optBoolean("readable", true),
+                whatItIs = o.optString("what_it_is"),
                 verdict = o.optString("verdict", "caution"), verdictReason = o.optString("verdict_reason"),
+                fits = f.keys().asSequence().mapNotNull { k -> f.optJSONObject(k)?.let { k to Fit(it.optString("verdict", "ok"), it.optString("why")) } }.toMap(),
+                imageUrl = if (o.isNull("image_url")) null else o.optString("image_url").ifBlank { null },
+                barcode = if (o.isNull("barcode")) null else o.optString("barcode").ifBlank { null },
                 per100 = n.keys().asSequence().associateWith { n.optDouble(it) }.filterValues { !it.isNaN() },
                 servingG = if (o.isNull("serving_g")) null else o.optDouble("serving_g"),
                 proteinRating = p.optString("rating", "average"),
@@ -263,6 +296,104 @@ data class LabelReport(
                 infographic = Infographic.from(o.optJSONObject("infographic")),
             )
         }
+    }
+}
+
+/** One food the plate photo recogniser found. Macros/micros are for THIS portion ([grams]). */
+data class PlateItem(
+    val name: String,
+    val grams: Double,
+    /** high | medium | low */
+    val confidence: String,
+    val calories: Double,
+    val proteinG: Double,
+    val carbsG: Double,
+    val fatG: Double,
+    val micros: Map<String, Double>,
+    /** table (numbers from the food database) | estimated (the model's own) */
+    val source: String,
+    val foodId: String?,
+) {
+    fun withGrams(g: Double): PlateItem {
+        if (grams <= 0.0) return copy(grams = g)
+        val k = g / grams
+        return copy(grams = g, calories = calories * k, proteinG = proteinG * k, carbsG = carbsG * k, fatG = fatG * k, micros = micros.mapValues { it.value * k })
+    }
+
+    fun toMealItem() = MealItem(
+        foodId = foodId, name = name, grams = grams, calories = calories, proteinG = proteinG, carbsG = carbsG, fatG = fatG,
+        source = source, confidence = when (confidence) { "high" -> 0.9; "medium" -> 0.6; else -> 0.3 }, micros = micros,
+    )
+
+    companion object {
+        fun from(o: JSONObject) = PlateItem(
+            name = o.optString("name", "food"),
+            grams = o.optDouble("grams", 0.0),
+            confidence = o.optString("confidence", "medium"),
+            calories = o.optDouble("calories", 0.0),
+            proteinG = o.optDouble("protein_g", 0.0),
+            carbsG = o.optDouble("carbs_g", 0.0),
+            fatG = o.optDouble("fat_g", 0.0),
+            micros = MealItem.micros(o.optJSONObject("micros")),
+            source = o.optString("source", "estimated"),
+            foodId = if (o.isNull("food_id")) null else o.optString("food_id").ifBlank { null },
+        )
+    }
+}
+
+/** Result of /api/photo-meal: the cross-checked items plus the model's raw view. */
+data class PlateEstimate(
+    val id: String?,
+    val items: List<PlateItem>,
+    val notes: List<String>,
+    val plateNote: String,
+    /** Set when the server stored the JPEG; "Save as meal" reuses it instead of uploading again. */
+    val photoPath: String?,
+    /** Signed URL for a stored plate photo (only on reports opened from History). */
+    val photoUrl: String? = null,
+) {
+    companion object {
+        fun from(o: JSONObject): PlateEstimate {
+            val arr = o.optJSONArray("items") ?: JSONArray()
+            val notes = o.optJSONArray("notes")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()
+            return PlateEstimate(
+                id = o.optString("id").ifBlank { null },
+                items = (0 until arr.length()).map { PlateItem.from(arr.getJSONObject(it)) },
+                notes = notes,
+                plateNote = o.optString("plate_note"),
+                photoPath = if (o.isNull("photo_path")) null else o.optString("photo_path").ifBlank { null },
+                photoUrl = if (o.isNull("photo_url")) null else o.optString("photo_url").ifBlank { null },
+            )
+        }
+    }
+}
+
+/** One row of the Scan tab's History list. */
+data class ScanHistoryItem(
+    val id: String,
+    /** label | barcode | photo */
+    val kind: String,
+    val lens: String,
+    val product: String,
+    val verdict: String,
+    val createdAt: String,
+    val score: Int?,
+    /** Open Food Facts picture for barcode scans; Storage path (needs signing) for photo scans. */
+    val imageUrl: String?,
+    val imagePath: String?,
+) {
+    companion object {
+        fun from(o: JSONObject) = ScanHistoryItem(
+            id = o.getString("id"),
+            kind = o.optString("kind", "label").ifBlank { "label" },
+            lens = o.optString("lens", "protein").ifBlank { "protein" },
+            product = o.optString("product"),
+            verdict = o.optString("verdict"),
+            createdAt = o.optString("created_at"),
+            score = if (o.isNull("score")) null else o.optString("score").toIntOrNull(),
+            imageUrl = if (o.isNull("image_url")) null else o.optString("image_url").ifBlank { null },
+            imagePath = if (o.isNull("image_path")) null else o.optString("image_path").ifBlank { null },
+        )
     }
 }
 

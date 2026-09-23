@@ -154,15 +154,15 @@ object Api {
     // ---- meals ----
 
     suspend fun meals(from: String, to: String): List<Meal> = withContext(Dispatchers.IO) {
-        val sel = "id,date,raw_text,created_at,meal_items(id,food_id,name,grams,calories,protein_g,carbs_g,fat_g,source,confidence)"
+        val sel = "id,date,raw_text,created_at,photo_path,meal_items(id,food_id,name,grams,calories,protein_g,carbs_g,fat_g,source,confidence,micros)"
         val body = run(rest("meals?select=$sel&date=gte.$from&date=lte.$to&order=created_at.desc").get().build(), "Load meals")
         val arr = JSONArray(body)
         (0 until arr.length()).map { Meal.from(arr.getJSONObject(it)) }
     }
 
-    suspend fun saveMeal(date: String, rawText: String, items: List<MealItem>) = withContext(Dispatchers.IO) {
+    suspend fun saveMeal(date: String, rawText: String, items: List<MealItem>, photoPath: String? = null) = withContext(Dispatchers.IO) {
         val uid = Session.userId ?: throw AuthException("Not signed in")
-        val mealPayload = JSONObject().put("user_id", uid).put("date", date).put("raw_text", rawText).toString()
+        val mealPayload = JSONObject().put("user_id", uid).put("date", date).put("raw_text", rawText).put("photo_path", photoPath ?: JSONObject.NULL).toString()
         val created = run(rest("meals").header("Prefer", "return=representation").post(json(mealPayload)).build(), "Save meal")
         val mealId = JSONArray(created).getJSONObject(0).getString("id")
         if (items.isNotEmpty()) {
@@ -186,6 +186,23 @@ object Api {
         val r = Request.Builder().url("$apiBase/api/$path").header("Authorization", "Bearer $token").post(json(payload.toString())).build()
         val c = if (timeoutSec == 60L) client else client.newBuilder().callTimeout(timeoutSec, TimeUnit.SECONDS).readTimeout(timeoutSec, TimeUnit.SECONDS).build()
         val body = c.newCall(r).execute().use { res ->
+            val b = res.body?.string().orEmpty()
+            if (!res.isSuccessful) {
+                val msg = runCatching { JSONObject(b).optString("error") }.getOrNull().orEmpty()
+                throw ApiException(if (msg.isNotBlank()) msg else "$label failed (${res.code})")
+            }
+            b
+        }
+        return JSONObject(body)
+    }
+
+    private suspend fun apiGet(path: String, label: String): JSONObject {
+        SupabaseAuth.ensureFresh()
+        val token = Session.accessToken ?: throw AuthException("Not signed in")
+        val apiBase = BuildConfig.API_BASE.trimEnd('/')
+        if (apiBase.isBlank()) throw ApiException("API_BASE is not set in this build")
+        val r = Request.Builder().url("$apiBase/api/$path").header("Authorization", "Bearer $token").get().build()
+        val body = client.newCall(r).execute().use { res ->
             val b = res.body?.string().orEmpty()
             if (!res.isSuccessful) {
                 val msg = runCatching { JSONObject(b).optString("error") }.getOrNull().orEmpty()
@@ -222,10 +239,77 @@ object Api {
      * Label text (read on this phone by ML Kit) → verdict report. [jpegBase64] is only sent when
      * the OCR came up short, in which case the server falls back to reading the photo itself.
      */
-    suspend fun scanLabel(text: String, note: String, jpegBase64: String? = null): LabelReport = withContext(Dispatchers.IO) {
-        val payload = JSONObject().put("text", text).put("note", note)
+    suspend fun scanLabel(text: String, note: String, jpegBase64: String? = null, lens: String = "protein"): LabelReport = withContext(Dispatchers.IO) {
+        val payload = JSONObject().put("text", text).put("note", note).put("lens", lens)
         if (jpegBase64 != null) payload.put("image", jpegBase64).put("media_type", "image/jpeg")
         LabelReport.from(api("scan-label", payload, "Scan", timeoutSec = 120))
+    }
+
+    /** EAN/UPC → Open Food Facts → the same report as a label. Null when the product isn't on OFF. */
+    suspend fun scanBarcode(barcode: String, lens: String, note: String = ""): LabelReport? = withContext(Dispatchers.IO) {
+        val o = api("scan-barcode", JSONObject().put("barcode", barcode).put("lens", lens).put("note", note), "Barcode", timeoutSec = 120)
+        if (o.has("found") && !o.optBoolean("found", true)) null else LabelReport.from(o)
+    }
+
+    /** A plate photo (JPEG, ≤ 1600 px) → per-item grams, macros and micros. */
+    suspend fun photoMeal(jpegBase64: String, note: String): PlateEstimate = withContext(Dispatchers.IO) {
+        PlateEstimate.from(api("photo-meal", JSONObject().put("image", jpegBase64).put("media_type", "image/jpeg").put("note", note), "Photo", timeoutSec = 120))
+    }
+
+    // ---- scan history ----
+
+    /** Latest scans, newest first. The score and OFF image come straight out of the report JSON. */
+    suspend fun scanHistory(limit: Int = 30): List<ScanHistoryItem> = withContext(Dispatchers.IO) {
+        val sel = "id,kind,lens,product,verdict,created_at,image_path,score:report->infographic->>score_out_of_10,image_url:report->>image_url"
+        val body = run(rest("label_scans?select=$sel&order=created_at.desc&limit=$limit").get().build(), "Load scan history")
+        val arr = JSONArray(body)
+        (0 until arr.length()).map { ScanHistoryItem.from(arr.getJSONObject(it)) }
+    }
+
+    /** The full stored report of one scan, with kind/lens/id merged in (and a signed photo URL for plate scans). */
+    suspend fun scanReport(id: String): JSONObject = withContext(Dispatchers.IO) {
+        apiGet("scans/$id", "Open scan")
+    }
+
+    suspend fun deleteScan(id: String) = withContext(Dispatchers.IO) {
+        run(rest("label_scans?id=eq.$id").delete().build(), "Delete scan"); Unit
+    }
+
+    // ---- meal photos (Supabase Storage, private bucket, one folder per user) ----
+
+    /** Uploads a JPEG to meal-photos/<user>/<uuid>.jpg with the user's own token; returns the path. */
+    suspend fun uploadMealPhoto(jpeg: ByteArray): String = withContext(Dispatchers.IO) {
+        SupabaseAuth.ensureFresh()
+        val token = Session.accessToken ?: throw AuthException("Not signed in")
+        val uid = Session.userId ?: throw AuthException("Not signed in")
+        val path = "$uid/${java.util.UUID.randomUUID()}.jpg"
+        val req = Request.Builder().url("$base/storage/v1/object/meal-photos/$path")
+            .header("apikey", key).header("Authorization", "Bearer $token")
+            .post(jpeg.toRequestBody("image/jpeg".toMediaType())).build()
+        run(req, "Upload photo")
+        path
+    }
+
+    /** A 1-hour signed URL for a meal-photos path, or null when signing fails. */
+    suspend fun signedPhotoUrl(path: String): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            SupabaseAuth.ensureFresh()
+            val token = Session.accessToken ?: throw AuthException("Not signed in")
+            val req = Request.Builder().url("$base/storage/v1/object/sign/meal-photos/$path")
+                .header("apikey", key).header("Authorization", "Bearer $token")
+                .post(json(JSONObject().put("expiresIn", 3600).toString())).build()
+            val signed = JSONObject(run(req, "Sign photo")).optString("signedURL")
+            if (signed.isBlank()) null else "$base/storage/v1${if (signed.startsWith("/")) signed else "/$signed"}"
+        }.getOrNull()
+    }
+
+    /** Fetches an image (signed Storage URL or an Open Food Facts picture) as a bitmap; null on any failure. */
+    suspend fun fetchBitmap(url: String): android.graphics.Bitmap? = withContext(Dispatchers.IO) {
+        runCatching {
+            client.newCall(Request.Builder().url(url).header("User-Agent", "LockedIn/1.7").get().build()).execute().use { res ->
+                if (!res.isSuccessful) null else res.body?.bytes()?.let { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size) }
+            }
+        }.getOrNull()
     }
 
     // ---- saved meals (one-tap repeat dinners) ----
