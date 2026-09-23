@@ -204,13 +204,17 @@ private fun BadgesCard(vm: AppViewModel, onOpen: () -> Unit) {
 private fun WeeklyEnergyCard(vm: AppViewModel, days: List<String>, ctx: android.content.Context) {
     val p = palette
     val consumed = days.map { totalsFor(vm.meals, it).calories }
-    val burned = remember(days) { com.sohum.bandlog.util.BurnedCache.forDates(ctx, days) }
+    val health = remember(days) { com.sohum.bandlog.util.BurnedCache.forDates(ctx, days) }
         .toMutableList()
         .also { list ->
             // Today's number is fresher in memory than in the cache.
             val i = days.indexOf(Dates.today())
             if (i >= 0) vm.healthToday?.let { h -> if (h.activeKcal > 0) list[i] = h.activeKcal }
         }
+    // Health Connect active kcal (where we have it) + logged exercise; band-workout rows are
+    // skipped while Health Connect is connected since the session is already in there.
+    val burned = days.mapIndexed { i, d -> health[i] + vm.exerciseKcal(d) }
+    val weekExercise = vm.exercises.filter { it.date in days }.sortedWith(compareByDescending<com.sohum.bandlog.data.ExerciseEntry> { it.date }.thenByDescending { it.createdAt })
     val totalIn = consumed.sum()
     val totalOut = burned.sum()
 
@@ -238,6 +242,25 @@ private fun WeeklyEnergyCard(vm: AppViewModel, days: List<String>, ctx: android.
         Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             MacroDot("Consumed", p.orange)
             MacroDot("Burned", p.green)
+        }
+        if (weekExercise.isNotEmpty()) {
+            Spacer(Modifier.height(14.dp))
+            Text("Exercise this week", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted)
+            Spacer(Modifier.height(4.dp))
+            weekExercise.take(8).forEach { e ->
+                RowSpaceBetween {
+                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                        Text(Dates.parse(e.date).format(DateTimeFormatter.ofPattern("EEE", Locale.ENGLISH)), fontSize = 12.sp, fontWeight = FontWeight(600), color = p.muted, modifier = Modifier.width(34.dp))
+                        Text(e.name.replaceFirstChar { it.uppercase() }, fontSize = 13.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1, modifier = Modifier.weight(1f))
+                    }
+                    Text("${e.minutes} min · ${e.kcal.toInt()} kcal", fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(start = 8.dp))
+                }
+                Spacer(Modifier.height(6.dp))
+            }
+            if (weekExercise.size > 8) Text("+${weekExercise.size - 8} more", fontSize = 12.sp, color = p.muted)
+        } else {
+            Spacer(Modifier.height(10.dp))
+            Text("Log a run, bands or any activity from + → Exercise and it lands here.", fontSize = 12.sp, color = p.muted)
         }
     }
 }

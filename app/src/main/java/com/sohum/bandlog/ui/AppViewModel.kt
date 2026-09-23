@@ -7,12 +7,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sohum.bandlog.data.Api
 import com.sohum.bandlog.data.AuthException
+import com.sohum.bandlog.data.ExerciseEntry
 import com.sohum.bandlog.data.Meal
 import com.sohum.bandlog.data.MealItem
 import com.sohum.bandlog.data.Profile
 import com.sohum.bandlog.data.Session
 import com.sohum.bandlog.data.SupabaseAuth
 import com.sohum.bandlog.data.Workout
+import com.sohum.bandlog.util.Burn
 import com.sohum.bandlog.util.Dates
 import com.sohum.bandlog.util.Streaks
 import kotlinx.coroutines.async
@@ -30,6 +32,8 @@ class AppViewModel : ViewModel() {
     var profile by mutableStateOf(Profile()); private set
     var workouts by mutableStateOf<List<Workout>>(emptyList()); private set
     var meals by mutableStateOf<List<Meal>>(emptyList()); private set
+    /** Calories-burned rows (logged exercise + the auto-burn each band workout writes). */
+    var exercises by mutableStateOf<List<ExerciseEntry>>(emptyList()); private set
     var weights by mutableStateOf<List<com.sohum.bandlog.data.WeightEntry>>(emptyList()); private set
 
     /** Lifetime figures behind the badges; loaded lazily when the Badges page opens. */
@@ -74,8 +78,19 @@ class AppViewModel : ViewModel() {
     var healthToday by mutableStateOf<com.sohum.bandlog.util.Health.Today?>(null); private set
     var healthError by mutableStateOf<String?>(null); private set
     var addBurnedBack by mutableStateOf(false)
+
+    /**
+     * Logged exercise kcal for [date]. When Health Connect is connected the band-workout rows are
+     * left out — we already wrote that session into Health Connect, so its active calories cover it.
+     */
+    fun exerciseKcal(date: String): Double =
+        exercises.filter { it.date == date && !(healthConnected && it.source == "workout") }.sumOf { it.kcal }
+
+    /** Everything burned today: Health Connect active kcal (if connected) plus logged exercise, deduplicated. */
+    val burnedToday: Double get() = (healthToday?.activeKcal ?: 0.0) + exerciseKcal(today)
+
     /** Calories burned today that count toward the target when the toggle is on. */
-    val burnedKcal: Double get() = if (addBurnedBack) healthToday?.activeKcal ?: 0.0 else 0.0
+    val burnedKcal: Double get() = if (addBurnedBack) burnedToday else 0.0
 
     fun refreshHealth(context: android.content.Context) {
         viewModelScope.launch {
@@ -127,7 +142,8 @@ class AppViewModel : ViewModel() {
                     val w = async { Api.workouts(from, t) }
                     val m = async { Api.meals(from, t) }
                     val g = async { runCatching { Api.weights() }.getOrDefault(weights) }
-                    profile = p.await(); workouts = w.await(); meals = m.await(); weights = g.await()
+                    val x = async { runCatching { Api.exercises(from, t) }.getOrDefault(exercises) }
+                    profile = p.await(); workouts = w.await(); meals = m.await(); weights = g.await(); exercises = x.await()
                 }
                 loadedOnce = true
             } catch (e: AuthException) {
@@ -151,7 +167,16 @@ class AppViewModel : ViewModel() {
         kg: Double?, minutes: Int?, exercises: String, notes: String,
     ): Boolean {
         val before = thisWeek; val beforeStreak = weekStreak
-        val ok = mutate { Api.saveWorkout(id, date, muscles, band, kg, minutes, exercises, notes) }
+        val ok = mutate {
+            val wid = Api.saveWorkout(id, date, muscles, band, kg, minutes, exercises, notes)
+            // Auto-burn: one exercise_log row per workout, tagged with the workout id in `note`.
+            // An edit replaces the row so minutes / band changes flow through to the burn.
+            runCatching {
+                if (id != null) Api.deleteWorkoutBurn(wid)
+                val mins = (minutes ?: 30).coerceAtLeast(1)
+                Api.saveExercise(date, Burn.bandCode(band), "Bands: " + muscles.joinToString(", "), mins, Burn.bandIntensity(band), Burn.bandKcal(band, profile.weightKg, mins), "workout", wid)
+            }
+        }
         // refresh() runs async inside mutate; wait for it so the counts below are fresh.
         if (ok && id == null) {
             kotlinx.coroutines.delay(50)
@@ -162,7 +187,16 @@ class AppViewModel : ViewModel() {
         return ok
     }
 
-    suspend fun deleteWorkout(id: String) = mutate { Api.deleteWorkout(id) }
+    suspend fun deleteWorkout(id: String) = mutate { runCatching { Api.deleteWorkoutBurn(id) }; Api.deleteWorkout(id) }
+
+    /** A burn logged from the Exercise tab (run, bands, an activity, a description, or a manual number). */
+    suspend fun saveExercise(date: String, activityCode: String?, name: String, minutes: Int, intensity: String, kcal: Double, source: String) =
+        mutate { Api.saveExercise(date, activityCode, name, minutes, intensity, kcal, source) }
+    suspend fun deleteExercise(id: String) = mutate { Api.deleteExercise(id) }
+    /** Every activity Haiku found in a description, saved as its own row. */
+    suspend fun saveDescribed(date: String, items: List<com.sohum.bandlog.data.DescribedExercise>) = mutate {
+        items.forEach { Api.saveExercise(date, it.activityCode, it.name, it.minutes, it.intensity, it.kcal, "describe") }
+    }
     suspend fun saveMeal(date: String, raw: String, items: List<MealItem>, photoPath: String? = null) = mutate { Api.saveMeal(date, raw, items, photoPath) }
     suspend fun deleteMeal(id: String) = mutate { Api.deleteMeal(id) }
     suspend fun saveTargets(p: Profile) = mutate { Api.saveProfile(p) }
@@ -233,7 +267,7 @@ class AppViewModel : ViewModel() {
     fun signOut() {
         viewModelScope.launch {
             SupabaseAuth.signOut()
-            signedIn = false; workouts = emptyList(); meals = emptyList(); weights = emptyList()
+            signedIn = false; workouts = emptyList(); meals = emptyList(); weights = emptyList(); exercises = emptyList()
             profile = Profile(); loadedOnce = false; totalMeals = 0; allWorkoutDates = emptyList()
             onboardingSkipped = false
         }

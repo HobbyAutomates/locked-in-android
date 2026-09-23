@@ -269,7 +269,6 @@ private fun PreferencesRows(vm: AppViewModel, themeMode: ThemeMode, onThemeMode:
         androidx.compose.material3.Switch(
             vm.addBurnedBack,
             { vm.addBurnedBack = it; com.sohum.bandlog.util.ThemePrefs.setBurned(ctx, it) },
-            enabled = vm.healthConnected,
             colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = p.btn, checkedThumbColor = p.btnInk),
         )
     }

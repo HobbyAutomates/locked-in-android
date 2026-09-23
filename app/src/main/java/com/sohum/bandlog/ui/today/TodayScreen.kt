@@ -57,7 +57,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 @Composable
-fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit) {
+fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit, onLogExercise: () -> Unit = {}) {
     val p = palette
     val today = vm.today
     var selected by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(today) }
@@ -66,6 +66,9 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit) {
     val prof = vm.profile
     val todayMeals = vm.meals.filter { it.date == selected }
     val todayWorkouts = vm.workouts.filter { it.date == selected }
+    // Band-workout burns ride on the workout row itself; everything else gets a row of its own.
+    val todayExercises = vm.exercises.filter { it.date == selected && it.source != "workout" }
+    val workoutBurn = vm.exercises.filter { it.date == selected && it.source == "workout" }.associate { it.note to it.kcal }
     val trained = vm.workoutDates.toSet()
     val ctx = androidx.compose.ui.platform.LocalContext.current
     // Steps and burned calories go stale while the app is backgrounded; re-read on every resume.
@@ -139,13 +142,14 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit) {
                 }
             }
         }
-        if (vm.healthConnected && isToday) {
+        if (isToday) {
             val h = vm.healthToday
+            val burned = vm.burnedToday
             item {
                 Rise(4) {
                     Column {
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Card(Modifier.weight(1f), padding = 14.dp) {
+                            if (vm.healthConnected) Card(Modifier.weight(1f), padding = 14.dp) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Ring(((h?.steps ?: 0L) / prof.stepGoal.toFloat()).coerceIn(0f, 1f), p.green, 44.dp, 5.dp) { Icon(com.sohum.bandlog.ui.components.StepsIcon, null, tint = p.green, modifier = Modifier.size(16.dp)) }
                                     Spacer(Modifier.width(10.dp))
@@ -155,20 +159,24 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit) {
                                     }
                                 }
                             }
-                            Card(Modifier.weight(1f), padding = 14.dp) {
+                            // Health Connect active kcal (when connected) + logged exercise, deduplicated in the view model.
+                            Card(Modifier.weight(1f), padding = 14.dp, onClick = onLogExercise) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Ring(((h?.activeKcal ?: 0.0) / 400.0).toFloat().coerceIn(0f, 1f), p.orange, 44.dp, 5.dp) { Icon(FlameIcon, null, tint = p.orange, modifier = Modifier.size(16.dp)) }
+                                    Ring((burned / 400.0).toFloat().coerceIn(0f, 1f), p.orange, 44.dp, 5.dp) { Icon(FlameIcon, null, tint = p.orange, modifier = Modifier.size(16.dp)) }
                                     Spacer(Modifier.width(10.dp))
-                                    Column {
-                                        Text("${(h?.activeKcal ?: 0.0).toInt()}", fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink)
-                                        Text("kcal burned", fontSize = 12.sp, color = p.muted)
+                                    Column(Modifier.weight(1f)) {
+                                        Text("${burned.toInt()}", fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink)
+                                        Text(if (vm.healthConnected) "kcal burned" else "kcal burned · log exercise", fontSize = 12.sp, color = p.muted, maxLines = 1)
                                     }
+                                    if (!vm.healthConnected) Text("›", fontSize = 18.sp, color = p.muted)
                                 }
                             }
                         }
                         val err = vm.healthError
-                        if (err != null) Text(err, fontSize = 12.sp, color = p.red, modifier = Modifier.padding(top = 6.dp, start = 4.dp))
-                        else if ((h?.steps ?: 0L) == 0L) Text("No steps in Health Connect yet. In Samsung Health / Google Fit, turn on syncing to Health Connect (Settings → Health Connect), then pull to refresh here.", fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(top = 6.dp, start = 4.dp))
+                        if (vm.healthConnected) {
+                            if (err != null) Text(err, fontSize = 12.sp, color = p.red, modifier = Modifier.padding(top = 6.dp, start = 4.dp))
+                            else if ((h?.steps ?: 0L) == 0L) Text("No steps in Health Connect yet. In Samsung Health / Google Fit, turn on syncing to Health Connect (Settings → Health Connect), then pull to refresh here.", fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(top = 6.dp, start = 4.dp))
+                        }
                     }
                 }
             }
@@ -182,10 +190,11 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit) {
             }
         }
         if (isToday) items(vm.pendingMeals, key = { "p$it" }) { txt -> Rise(5) { PendingMealRow(txt) } }
-        if (todayWorkouts.isEmpty() && todayMeals.isEmpty() && (!isToday || vm.pendingMeals.isEmpty())) item {
-            Rise(5) { Text(if (isToday) "Nothing yet today. Tap + to log a workout or a meal." else "Nothing logged on ${Dates.long(selected)}.", color = p.muted, fontSize = 13.sp) }
+        if (todayWorkouts.isEmpty() && todayMeals.isEmpty() && todayExercises.isEmpty() && (!isToday || vm.pendingMeals.isEmpty())) item {
+            Rise(5) { Text(if (isToday) "Nothing yet today. Tap + to log a workout, a meal or some exercise." else "Nothing logged on ${Dates.long(selected)}.", color = p.muted, fontSize = 13.sp) }
         }
-        items(todayWorkouts, key = { "w" + it.id }) { w -> Rise(5) { WorkoutRow(w) { onOpenWorkout(w) } } }
+        items(todayWorkouts, key = { "w" + it.id }) { w -> Rise(5) { WorkoutRow(w, burnKcal = workoutBurn[w.id]) { onOpenWorkout(w) } } }
+        items(todayExercises, key = { "e" + it.id }) { e -> Rise(5) { ExerciseRow(e) { vm.launch { vm.deleteExercise(e.id) } } } }
         items(todayMeals, key = { "m" + it.id }) { m -> Rise(6) { MealRow(m, onDelete = { vm.launch { vm.deleteMeal(m.id) } }, onFeedback = { r -> vm.launch { runCatching { com.sohum.bandlog.data.Api.feedback(r, m.rawText, m.id) } } }) } }
     }
 }
@@ -272,7 +281,7 @@ private fun MacroCard(modifier: Modifier, macro: String, consumed: Double, targe
 }
 
 @Composable
-fun WorkoutRow(w: Workout, onClick: () -> Unit) {
+fun WorkoutRow(w: Workout, burnKcal: Double? = null, onClick: () -> Unit) {
     val p = palette
     Card(onClick = onClick, padding = 14.dp) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -284,11 +293,44 @@ fun WorkoutRow(w: Workout, onClick: () -> Unit) {
                     Text(w.bandLevel + (w.resistanceKg?.let { " · ${fmt(it)} kg" } ?: ""), fontSize = 12.sp, color = p.muted)
                 }
                 Text(w.muscles.joinToString(" · "), fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (burnKcal != null && burnKcal > 0) Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(FlameIcon, null, tint = p.ink, modifier = Modifier.size(13.dp))
+                        Text(" ${burnKcal.toInt()} kcal", fontSize = 12.sp, fontWeight = FontWeight(700), color = p.ink)
+                    }
                     w.minutes?.let { Text("$it mins", fontSize = 12.sp, color = p.muted) }
                     if (w.exercises.isNotBlank()) Text(w.exercises, fontSize = 12.sp, color = p.muted, maxLines = 1)
                 }
             }
+        }
+    }
+}
+
+/** A logged burn (run / activity / described / manual): flame + calories, then intensity and minutes. */
+@Composable
+fun ExerciseRow(e: com.sohum.bandlog.data.ExerciseEntry, onDelete: () -> Unit) {
+    val p = palette
+    val isRun = e.activityCode == com.sohum.bandlog.util.Burn.RUN_CODE || e.name.contains("run", ignoreCase = true) || e.name.contains("jog", ignoreCase = true)
+    val isBands = e.activityCode?.startsWith("LI-BAND") == true || e.name.contains("lifting", ignoreCase = true) || e.name.contains("band", ignoreCase = true)
+    Card(padding = 14.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconTile(if (isBands) DumbbellIcon else com.sohum.bandlog.ui.components.RunIcon, if (isRun || isBands) p.ink else p.green, if (isRun || isBands) p.card2 else p.greenBg)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                RowSpaceBetween {
+                    Text(e.name.replaceFirstChar { it.uppercase() }, fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1, modifier = Modifier.weight(1f))
+                    Text(timeOf(e.createdAt), fontSize = 12.sp, color = p.muted)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(FlameIcon, null, tint = p.ink, modifier = Modifier.size(15.dp))
+                    Text(" ${e.kcal.toInt()} calories", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
+                }
+                Text(
+                    (if (e.source == "manual" && e.activityCode == null) "Manual" else "Intensity: ${com.sohum.bandlog.util.Burn.intensityLabel(e.intensity)}") + " · ${e.minutes} mins",
+                    fontSize = 12.sp, color = p.muted,
+                )
+            }
+            IconButton(onClick = onDelete, Modifier.size(32.dp)) { Icon(Icons.Outlined.Delete, "Delete", tint = p.muted) }
         }
     }
 }

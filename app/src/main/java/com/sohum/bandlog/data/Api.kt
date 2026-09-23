@@ -129,10 +129,11 @@ object Api {
         (0 until arr.length()).map { Workout.from(arr.getJSONObject(it)) }
     }
 
+    /** Inserts or updates a workout and returns its id. */
     suspend fun saveWorkout(
         id: String?, date: String, muscles: List<String>, bandLevel: String,
         resistanceKg: Double?, minutes: Int?, exercises: String, notes: String,
-    ) = withContext(Dispatchers.IO) {
+    ): String = withContext(Dispatchers.IO) {
         val uid = Session.userId ?: throw AuthException("Not signed in")
         val payload = JSONObject()
             .put("user_id", uid).put("date", date)
@@ -140,15 +141,70 @@ object Api {
             .put("resistance_kg", resistanceKg ?: JSONObject.NULL).put("minutes", minutes ?: JSONObject.NULL)
             .put("exercises", exercises).put("notes", notes)
         if (id == null) {
-            run(rest("workouts").post(json(payload.toString())).build(), "Save workout")
+            val created = run(rest("workouts").header("Prefer", "return=representation").post(json(payload.toString())).build(), "Save workout")
+            JSONArray(created).getJSONObject(0).getString("id")
         } else {
             run(rest("workouts?id=eq.$id").patch(json(payload.toString())).build(), "Update workout")
+            id
         }
-        Unit
     }
 
     suspend fun deleteWorkout(id: String) = withContext(Dispatchers.IO) {
         run(rest("workouts?id=eq.$id").delete().build(), "Delete workout"); Unit
+    }
+
+    // ---- exercise log (calories burned) ----
+
+    private const val EXERCISE_COLS = "id,date,activity_code,name,minutes,intensity,kcal,source,note,created_at"
+
+    suspend fun exercises(from: String, to: String): List<ExerciseEntry> = withContext(Dispatchers.IO) {
+        val body = run(rest("exercise_log?select=$EXERCISE_COLS&date=gte.$from&date=lte.$to&order=date.desc,created_at.desc").get().build(), "Load exercise")
+        val arr = JSONArray(body)
+        (0 until arr.length()).map { ExerciseEntry.from(arr.getJSONObject(it)) }
+    }
+
+    suspend fun saveExercise(
+        date: String, activityCode: String?, name: String, minutes: Int, intensity: String, kcal: Double, source: String, note: String = "",
+    ) = withContext(Dispatchers.IO) {
+        val uid = Session.userId ?: throw AuthException("Not signed in")
+        val payload = JSONObject().put("user_id", uid).put("date", date)
+            .put("activity_code", activityCode ?: JSONObject.NULL).put("name", name)
+            .put("minutes", minutes.coerceAtLeast(1)).put("intensity", intensity).put("kcal", kcal)
+            .put("source", source).put("note", note).toString()
+        run(rest("exercise_log").post(json(payload)).build(), "Log exercise"); Unit
+    }
+
+    suspend fun deleteExercise(id: String) = withContext(Dispatchers.IO) {
+        run(rest("exercise_log?id=eq.$id").delete().build(), "Delete exercise"); Unit
+    }
+
+    /** Removes the auto-burn row a band workout wrote (its note holds the workout id). */
+    suspend fun deleteWorkoutBurn(workoutId: String) = withContext(Dispatchers.IO) {
+        run(rest("exercise_log?source=eq.workout&note=eq.$workoutId").delete().build(), "Delete workout burn"); Unit
+    }
+
+    /** Codes shown before the user types anything: the everyday picks. */
+    private const val POPULAR_ACTIVITIES = "LI-17190,LI-17200,LI-17133,12150,LI-15150,LI-15030,LI-02101,LI-15551,01015,02020,02040,LI-05010"
+
+    /** Activity search: name / description substring or an exact tag. Blank query → the popular set. */
+    suspend fun searchActivities(q: String): List<Activity> = withContext(Dispatchers.IO) {
+        val term = q.trim().lowercase().replace(Regex("[^a-z0-9 -]"), "")
+        val path = if (term.isBlank()) "activities?select=*&code=in.($POPULAR_ACTIVITIES)&order=category.asc,met.asc"
+        else {
+            val enc = java.net.URLEncoder.encode("(name.ilike.*$term*,description.ilike.*$term*,tags.cs.{$term})", "UTF-8").replace("+", "%20")
+            "activities?select=*&or=$enc&order=name.asc,met.asc&limit=40"
+        }
+        val body = run(rest(path).get().build(), "Search activities")
+        val arr = JSONArray(body)
+        val rows = (0 until arr.length()).map { Activity.from(arr.getJSONObject(it)) }
+        if (term.isBlank()) rows.sortedBy { POPULAR_ACTIVITIES.split(",").indexOf(it.code).let { i -> if (i < 0) 99 else i } } else rows
+    }
+
+    /** "played badminton for an hour then walked home" → activities with minutes, intensity and kcal. */
+    suspend fun describeExercise(text: String): List<DescribedExercise> = withContext(Dispatchers.IO) {
+        val o = api("describe-exercise", JSONObject().put("text", text), "Describe exercise", timeoutSec = 90)
+        val arr = o.optJSONArray("items") ?: JSONArray()
+        (0 until arr.length()).map { DescribedExercise.from(arr.getJSONObject(it)) }
     }
 
     // ---- meals ----
@@ -306,7 +362,7 @@ object Api {
     /** Fetches an image (signed Storage URL or an Open Food Facts picture) as a bitmap; null on any failure. */
     suspend fun fetchBitmap(url: String): android.graphics.Bitmap? = withContext(Dispatchers.IO) {
         runCatching {
-            client.newCall(Request.Builder().url(url).header("User-Agent", "LockedIn/1.7").get().build()).execute().use { res ->
+            client.newCall(Request.Builder().url(url).header("User-Agent", "LockedIn/1.8").get().build()).execute().use { res ->
                 if (!res.isSuccessful) null else res.body?.bytes()?.let { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size) }
             }
         }.getOrNull()

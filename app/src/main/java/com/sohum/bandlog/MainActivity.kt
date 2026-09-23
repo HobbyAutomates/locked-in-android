@@ -152,7 +152,7 @@ private fun BootSplash() {
 }
 
 /** What the Log page was opened with. */
-private data class LogRequest(val workout: Workout?, val date: String, val meal: Boolean)
+private data class LogRequest(val workout: Workout?, val date: String, val meal: Boolean, val exercise: Boolean = false)
 
 private data class Tab(val label: String, val icon: ImageVector)
 
@@ -176,7 +176,7 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             Box(Modifier.weight(1f)) {
                 when (tab) {
-                    0 -> TodayScreen(vm) { w -> log = LogRequest(w, Dates.today(), false) }
+                    0 -> TodayScreen(vm, onOpenWorkout = { w -> log = LogRequest(w, Dates.today(), false) }, onLogExercise = { log = LogRequest(null, Dates.today(), false, exercise = true) })
                     1 -> CalendarScreen(vm) { w, d -> log = LogRequest(w, d, false) }
                     2 -> com.sohum.bandlog.ui.scan.ScanTab(vm)
                     3 -> ProgressScreen(vm) { page = Page.BADGES }
@@ -238,7 +238,7 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
         ) { req ->
             if (req != null) {
                 BackHandler { log = null }
-                LogScreen(vm, req.workout, req.date, req.meal, onClose = { log = null })
+                LogScreen(vm, req.workout, req.date, req.meal, onClose = { log = null }, startOnExercise = req.exercise)
             }
         }
     }

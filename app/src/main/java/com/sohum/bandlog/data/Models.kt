@@ -408,3 +408,80 @@ fun totalsFor(meals: List<Meal>, date: String): Totals {
         fat = items.sumOf { it.fatG },
     )
 }
+
+/** One row of `bandlog.activities` — a MET-table entry the user can log against. */
+data class Activity(
+    val code: String,
+    val name: String,
+    val description: String,
+    val met: Double,
+    val category: String,
+    val tags: List<String>,
+) {
+    /** "walking · brisk, 3.5-4 mph"; plain name when the description adds nothing. */
+    val label: String get() = if (description.isBlank() || description == "general") name else "$name · $description"
+
+    companion object {
+        fun from(o: JSONObject) = Activity(
+            code = o.getString("code"),
+            name = o.optString("name"),
+            description = if (o.isNull("description")) "" else o.optString("description"),
+            met = o.optDouble("met", 0.0),
+            category = o.optString("category"),
+            tags = o.optJSONArray("tags")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList(),
+        )
+    }
+}
+
+/** One row of `bandlog.exercise_log`: a burn the user logged (or a band workout wrote for them). */
+data class ExerciseEntry(
+    val id: String,
+    val date: String,
+    val activityCode: String?,
+    val name: String,
+    val minutes: Int,
+    /** low | medium | high */
+    val intensity: String,
+    val kcal: Double,
+    /** manual | workout | health | describe */
+    val source: String,
+    /** For source=workout this holds the workout id so a delete can find its row. */
+    val note: String,
+    val createdAt: String,
+) {
+    companion object {
+        fun from(o: JSONObject) = ExerciseEntry(
+            id = o.getString("id"),
+            date = o.getString("date"),
+            activityCode = if (o.isNull("activity_code")) null else o.optString("activity_code").ifBlank { null },
+            name = o.optString("name"),
+            minutes = o.optInt("minutes", 0),
+            intensity = o.optString("intensity", "medium").ifBlank { "medium" },
+            kcal = o.optDouble("kcal", 0.0),
+            source = o.optString("source", "manual").ifBlank { "manual" },
+            note = if (o.isNull("note")) "" else o.optString("note"),
+            createdAt = o.optString("created_at", ""),
+        )
+    }
+}
+
+/** One activity Haiku pulled out of a free-text description ("played badminton for an hour"). */
+data class DescribedExercise(
+    val activityCode: String?,
+    val name: String,
+    val minutes: Int,
+    val intensity: String,
+    val met: Double,
+    val kcal: Double,
+) {
+    companion object {
+        fun from(o: JSONObject) = DescribedExercise(
+            activityCode = if (o.isNull("activity_code")) null else o.optString("activity_code").ifBlank { null },
+            name = o.optString("name"),
+            minutes = o.optInt("minutes", 0),
+            intensity = o.optString("intensity", "medium").ifBlank { "medium" },
+            met = o.optDouble("met", 0.0),
+            kcal = o.optDouble("kcal", 0.0),
+        )
+    }
+}

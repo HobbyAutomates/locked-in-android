@@ -247,3 +247,35 @@ val HistoryIcon: ImageVector by lazy {
         moveTo(12f, 7f); verticalLineTo(12f); lineTo(15f, 14f)
     }
 }
+
+/** Running figure for the Run option and exercise rows. */
+val RunIcon: ImageVector by lazy {
+    stroke("Run") {
+        // Head
+        moveTo(15f, 4f); arcTo(1.5f, 1.5f, 0f, true, true, 14.9f, 4f); close()
+        // Torso + leading leg
+        moveTo(6f, 21f); lineTo(9.5f, 14.5f); lineTo(12.5f, 16.5f); lineTo(14f, 21f)
+        // Back leg + body line
+        moveTo(9.5f, 14.5f); lineTo(10.5f, 10f); lineTo(14f, 8.5f); lineTo(16.5f, 12f); lineTo(20f, 12.5f)
+        // Trailing arm
+        moveTo(10.5f, 10f); lineTo(7f, 11.5f); lineTo(5f, 9f)
+    }
+}
+
+/** Three text lines for the Describe option. */
+val TextLinesIcon: ImageVector by lazy {
+    stroke("TextLines") {
+        moveTo(4f, 7f); horizontalLineTo(20f)
+        moveTo(4f, 12f); horizontalLineTo(16f)
+        moveTo(4f, 17f); horizontalLineTo(12f)
+    }
+}
+
+/** Number keypad for the Manual option. */
+val KeypadIcon: ImageVector by lazy {
+    stroke("Keypad") {
+        moveTo(6f, 5f); horizontalLineTo(6.1f); moveTo(12f, 5f); horizontalLineTo(12.1f); moveTo(18f, 5f); horizontalLineTo(18.1f)
+        moveTo(6f, 11f); horizontalLineTo(6.1f); moveTo(12f, 11f); horizontalLineTo(12.1f); moveTo(18f, 11f); horizontalLineTo(18.1f)
+        moveTo(6f, 17f); horizontalLineTo(6.1f); moveTo(12f, 17f); horizontalLineTo(12.1f); moveTo(18f, 17f); horizontalLineTo(18.1f)
+    }
+}

@@ -83,11 +83,11 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
 
-/** Full-screen Log page: Workout / Meal segments (opened from the + FAB or a workout row). */
+/** Full-screen Log page: Workout / Meal / Exercise segments (opened from the + FAB or a workout row). */
 @Composable
-fun LogScreen(vm: AppViewModel, existing: Workout?, initialDate: String, startOnMeal: Boolean, onClose: () -> Unit) {
+fun LogScreen(vm: AppViewModel, existing: Workout?, initialDate: String, startOnMeal: Boolean, onClose: () -> Unit, startOnExercise: Boolean = false) {
     val p = palette
-    var seg by rememberSaveable { mutableStateOf(if (startOnMeal) 1 else 0) }
+    var seg by rememberSaveable { mutableStateOf(if (startOnExercise) 2 else if (startOnMeal) 1 else 0) }
     Column(Modifier.fillMaxSize().background(p.bg).statusBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(16.dp, 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
@@ -98,9 +98,13 @@ fun LogScreen(vm: AppViewModel, existing: Workout?, initialDate: String, startOn
             Spacer(Modifier.width(40.dp))
         }
         if (existing == null) {
-            Box(Modifier.padding(16.dp, 8.dp)) { Segmented(listOf("Workout", "Meal"), seg, { seg = it }) }
+            Box(Modifier.padding(16.dp, 8.dp)) { Segmented(listOf("Workout", "Meal", "Exercise"), seg, { seg = it }) }
         }
-        if (existing != null || seg == 0) WorkoutForm(vm, existing, initialDate, onClose) else MealForm(vm, initialDate, onClose)
+        when {
+            existing != null || seg == 0 -> WorkoutForm(vm, existing, initialDate, onClose)
+            seg == 1 -> MealForm(vm, initialDate, onClose)
+            else -> ExerciseForm(vm, initialDate, onClose)
+        }
     }
 }
 
