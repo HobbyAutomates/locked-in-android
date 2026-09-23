@@ -36,12 +36,17 @@ data class MealItem(
     val proteinG: Double,
     val carbsG: Double,
     val fatG: Double,
-    val source: String, // table | estimated
+    val source: String, // table | estimated | scan
     val confidence: Double?,
     /** Only set on freshly parsed (not yet saved) items: the words it came from. */
     val input: String = "",
     /** Fibre / sugar / sodium / iron / calcium / vit C / potassium … already scaled to [grams]. */
     val micros: Map<String, Double> = emptyMap(),
+    /** v1.9: how the quantity was entered — g | ml | kg | serving — and how many servings that was. */
+    val unit: String? = null,
+    val servings: Double? = null,
+    /** v1.9: the fat preset this dish was cooked in (the fat itself is a separate item). */
+    val cookedIn: String? = null,
 ) {
     fun toJson(mealId: String, userId: String): JSONObject = JSONObject()
         .put("meal_id", mealId).put("user_id", userId)
@@ -49,13 +54,18 @@ data class MealItem(
         .put("calories", calories).put("protein_g", proteinG).put("carbs_g", carbsG).put("fat_g", fatG)
         .put("source", source).put("confidence", confidence ?: JSONObject.NULL)
         .put("micros", JSONObject(micros))
+        .put("unit", unit ?: JSONObject.NULL).put("servings", servings ?: JSONObject.NULL).put("cooked_in", cookedIn ?: JSONObject.NULL)
 
     /** Re-price after the user edits grams (scales linearly, micros included). */
     fun withGrams(g: Double): MealItem {
         if (grams <= 0.0) return copy(grams = g)
         val k = g / grams
-        return copy(grams = g, calories = calories * k, proteinG = proteinG * k, carbsG = carbsG * k, fatG = fatG * k, micros = micros.mapValues { it.value * k })
+        return copy(grams = g, calories = calories * k, proteinG = proteinG * k, carbsG = carbsG * k, fatG = fatG * k, micros = micros.mapValues { it.value * k }, servings = servings?.let { it * k })
     }
+
+    /** "1.5 servings" when logged by serving, else "150 g". */
+    val quantityLabel: String
+        get() = if (unit == "serving" && servings != null && servings > 0) "${com.sohum.bandlog.ui.today.fmt(servings)} serving${if (servings == 1.0) "" else "s"}" else "${grams.toInt()} g"
 
     companion object {
         fun from(o: JSONObject) = MealItem(
@@ -71,6 +81,9 @@ data class MealItem(
             confidence = if (o.isNull("confidence")) null else o.optDouble("confidence"),
             input = o.optString("input", ""),
             micros = micros(o.optJSONObject("micros")),
+            unit = if (o.isNull("unit")) null else o.optString("unit").ifBlank { null },
+            servings = if (o.isNull("servings")) null else o.optDouble("servings").takeIf { !it.isNaN() },
+            cookedIn = if (o.isNull("cooked_in")) null else o.optString("cooked_in").ifBlank { null },
         )
 
         fun micros(o: JSONObject?): Map<String, Double> {
@@ -128,7 +141,19 @@ data class Profile(
     val fatTargetGSet: Int? = null,
     /** Raw `{"breakfast":{"on":true,"time":"08:30"},…}`; parsed by util/Reminders. */
     val remindersJson: String = "",
+    /** v1.9: protein | goal | snack | cutting | bulking — the lens a scan report opens on. */
+    val lensDefault: String = "protein",
+    /** v1.9: Groups (coming next) — share protein & calories, or streaks only. */
+    val shareStats: Boolean = true,
 ) {
+    /** The lens a report opens on: `goal` follows the weight goal (lose → cutting, gain → bulking, else protein). */
+    val initialLens: String
+        get() = when (lensDefault) {
+            "goal" -> when (goalType) { "lose" -> "cutting"; "gain" -> "bulking"; else -> "protein" }
+            "snack", "cutting", "bulking" -> lensDefault
+            else -> "protein"
+        }
+
     /** Macro targets (Cal AI-style cards): explicit if set, else fat 25% of calories and carbs the remainder. */
     val fatTargetG: Int get() = fatTargetGSet ?: (calorieTarget * 0.25 / 9).toInt()
     val carbTargetG: Int get() = carbTargetGSet ?: ((calorieTarget - proteinTargetG * 4 - fatTargetG * 9) / 4).coerceAtLeast(0)
@@ -160,6 +185,8 @@ data class Profile(
             carbTargetGSet = if (o.isNull("carb_target_g")) null else o.optInt("carb_target_g").takeIf { it > 0 },
             fatTargetGSet = if (o.isNull("fat_target_g")) null else o.optInt("fat_target_g").takeIf { it > 0 },
             remindersJson = if (o.isNull("reminders")) "" else o.opt("reminders")?.toString().orEmpty(),
+            lensDefault = o.str("lens_default") ?: "protein",
+            shareStats = if (o.isNull("share_stats")) true else o.optBoolean("share_stats", true),
         )
     }
 }
@@ -177,6 +204,101 @@ data class WeightEntry(val id: String, val date: String, val weightKg: Double, v
 }
 
 data class ParseResult(val items: List<MealItem>, val assumptions: List<String>, val unparsed: List<String>)
+
+/** A household serving: "1 katori" = 150 g. */
+data class Serving(val label: String, val grams: Double) {
+    companion object {
+        fun list(a: JSONArray?): List<Serving> = a?.let { arr ->
+            (0 until arr.length()).mapNotNull { i ->
+                val o = arr.optJSONObject(i) ?: return@mapNotNull null
+                val g = o.optDouble("grams", 0.0)
+                val label = o.optString("label").ifBlank { o.optString("name") }
+                if (g > 0 && label.isNotBlank()) Serving(label, g) else null
+            }
+        } ?: emptyList()
+    }
+}
+
+/** One row of `bandlog.food_presets`, joined to its foods row (per 100 g). */
+data class FoodPreset(
+    val id: String,
+    val foodId: String,
+    val label: String,
+    val labelHi: String?,
+    /** breakfast | staple | dal | sabzi | protein | snack | drink | sweet | fruit | fat */
+    val category: String,
+    val servings: List<Serving>,
+    val defaultServing: String?,
+    val sort: Int,
+    val icon: String?,
+    val foodName: String,
+    val calories: Double,
+    val proteinG: Double,
+    val carbsG: Double,
+    val fatG: Double,
+    val micros: Map<String, Double>,
+) {
+    val default: Serving? get() = servings.firstOrNull { it.label == defaultServing } ?: servings.firstOrNull()
+
+    companion object {
+        fun from(o: JSONObject): FoodPreset? {
+            val f = o.optJSONObject("foods") ?: return null
+            return FoodPreset(
+                id = o.getString("id"),
+                foodId = o.optString("food_id"),
+                label = o.optString("label"),
+                labelHi = if (o.isNull("label_hi")) null else o.optString("label_hi").ifBlank { null },
+                category = o.optString("category"),
+                servings = Serving.list(o.optJSONArray("servings")),
+                defaultServing = if (o.isNull("default_serving")) null else o.optString("default_serving").ifBlank { null },
+                sort = o.optInt("sort", 100),
+                icon = if (o.isNull("icon")) null else o.optString("icon").ifBlank { null },
+                foodName = f.optString("name"),
+                calories = f.optDouble("calories", 0.0),
+                proteinG = f.optDouble("protein_g", 0.0),
+                carbsG = f.optDouble("carbs_g", 0.0),
+                fatG = f.optDouble("fat_g", 0.0),
+                micros = MealItem.micros(f.optJSONObject("micros")),
+            )
+        }
+    }
+}
+
+/** One hit from the `search_foods` RPC (per 100 g), for the Search tab. */
+data class FoodHit(
+    val id: String,
+    val name: String,
+    val nameHi: String?,
+    val calories: Double,
+    val proteinG: Double,
+    val carbsG: Double,
+    val fatG: Double,
+    /** custom | dish | ifct | usda | off */
+    val source: String,
+    val units: List<Serving>,
+    val micros: Map<String, Double>,
+    val score: Double,
+) {
+    companion object {
+        fun from(o: JSONObject): FoodHit {
+            val micros = MealItem.micros(o.optJSONObject("micros")).toMutableMap()
+            listOf("fiber_g", "sugar_g", "sodium_mg").forEach { k -> if (!o.isNull(k)) o.optDouble(k).takeIf { !it.isNaN() }?.let { micros[k] = it } }
+            return FoodHit(
+                id = o.getString("id"),
+                name = o.optString("name"),
+                nameHi = o.optJSONObject("names_local")?.optString("hi")?.ifBlank { null },
+                calories = o.optDouble("calories", 0.0),
+                proteinG = o.optDouble("protein_g", 0.0),
+                carbsG = o.optDouble("carbs_g", 0.0),
+                fatG = o.optDouble("fat_g", 0.0),
+                source = o.optString("source", "custom"),
+                units = Serving.list(o.optJSONArray("units")),
+                micros = micros,
+                score = o.optDouble("score", 0.0),
+            )
+        }
+    }
+}
 
 /** A repeatable meal ("rice dal eggs whey") saved for one-tap logging. */
 data class SavedMeal(val id: String, val name: String, val items: List<MealItem>, val calories: Double, val proteinG: Double) {

@@ -21,6 +21,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -44,6 +45,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -88,6 +90,7 @@ private val INTENSITIES = listOf(
 fun ExerciseForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
     val p = palette
     val scope = rememberCoroutineScope()
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
     // null (choose) | run | bands | activity | describe | manual
     var mode by rememberSaveable { mutableStateOf<String?>(null) }
     var activity by remember { mutableStateOf<Activity?>(null) }
@@ -155,6 +158,7 @@ fun ExerciseForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
                                 Row(Modifier.fillMaxWidth().background(p.card2, RoundedCornerShape(12.dp)).padding(12.dp, 10.dp), verticalAlignment = Alignment.CenterVertically) {
                                     BasicTextField(
                                         query, { query = it.take(40) }, Modifier.weight(1f), singleLine = true,
+                                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), keyboardActions = KeyboardActions(onSearch = { focus.clearFocus() }),
                                         textStyle = TextStyle(fontSize = 15.sp, color = p.ink), cursorBrush = SolidColor(p.ink),
                                         decorationBox = { inner -> if (query.isEmpty()) Text("Cricket, badminton, walking, yoga, stairs…", fontSize = 15.sp, color = p.muted); inner() },
                                     )
@@ -245,6 +249,7 @@ fun ExerciseForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
                             Box(Modifier.fillMaxWidth().background(p.card2, RoundedCornerShape(14.dp)).padding(14.dp)) {
                                 BasicTextField(
                                     describeText, { describeText = it }, Modifier.fillMaxWidth().height(64.dp),
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
                                     textStyle = TextStyle(fontSize = 15.sp, color = p.ink, lineHeight = 22.sp), cursorBrush = SolidColor(p.ink),
                                     decorationBox = { inner -> if (describeText.isEmpty()) Text("Played badminton for an hour then walked home 20 min", fontSize = 15.sp, color = p.muted); inner() },
                                 )
@@ -296,6 +301,7 @@ fun ExerciseForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
                                     Spacer(Modifier.height(6.dp))
                                     BasicTextField(
                                         manualName, { manualName = it.take(60) }, Modifier.fillMaxWidth(), singleLine = true,
+                                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next), keyboardActions = KeyboardActions(onNext = { focus.moveFocus(androidx.compose.ui.focus.FocusDirection.Down) }),
                                         textStyle = TextStyle(fontSize = 15.sp, color = p.ink), cursorBrush = SolidColor(p.ink),
                                         decorationBox = { inner -> if (manualName.isEmpty()) Text("Football, swimming, gym class…", fontSize = 15.sp, color = p.muted); inner() },
                                     )
@@ -303,7 +309,7 @@ fun ExerciseForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
                                 Hair()
                                 RowSpaceBetween {
                                     Text("Calories burned", fontSize = 15.sp, fontWeight = FontWeight(500), color = p.ink, modifier = Modifier.padding(vertical = 12.dp))
-                                    NumberField(manualKcal, { manualKcal = it.filter(Char::isDigit).take(4) }, "kcal")
+                                    NumberField(manualKcal, { manualKcal = it.filter(Char::isDigit).take(4) }, "kcal", imeAction = ImeAction.Next)
                                 }
                                 Hair()
                                 RowSpaceBetween {

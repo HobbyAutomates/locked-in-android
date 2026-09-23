@@ -279,3 +279,28 @@ val KeypadIcon: ImageVector by lazy {
         moveTo(6f, 17f); horizontalLineTo(6.1f); moveTo(12f, 17f); horizontalLineTo(12.1f); moveTo(18f, 17f); horizontalLineTo(18.1f)
     }
 }
+
+/** Magnifier for the food Search tab. */
+val SearchIcon: ImageVector by lazy {
+    stroke("Search") {
+        moveTo(17.5f, 11f); arcTo(6.5f, 6.5f, 0f, true, true, 4.5f, 11f); arcTo(6.5f, 6.5f, 0f, true, true, 17.5f, 11f)
+        moveTo(16f, 16f); lineTo(21f, 21f)
+    }
+}
+
+/** Four tiles for the Presets tab. */
+val GridIcon: ImageVector by lazy {
+    stroke("Grid") {
+        moveTo(4f, 4f); horizontalLineTo(10f); verticalLineTo(10f); horizontalLineTo(4f); close()
+        moveTo(14f, 4f); horizontalLineTo(20f); verticalLineTo(10f); horizontalLineTo(14f); close()
+        moveTo(4f, 14f); horizontalLineTo(10f); verticalLineTo(20f); horizontalLineTo(4f); close()
+        moveTo(14f, 14f); horizontalLineTo(20f); verticalLineTo(20f); horizontalLineTo(14f); close()
+    }
+}
+
+/** Oil drop for the "Cooked in…" fat chips. */
+val DropIcon: ImageVector by lazy {
+    stroke("Drop") {
+        moveTo(12f, 3f); curveTo(12f, 3f, 18f, 9.5f, 18f, 14f); arcTo(6f, 6f, 0f, true, true, 6f, 14f); curveTo(6f, 9.5f, 12f, 3f, 12f, 3f); close()
+    }
+}

@@ -67,13 +67,13 @@ fun NutritionGoalsScreen(vm: AppViewModel, onBack: () -> Unit, onOpenPersonal: (
         Rise(0) {
             Card(padding = 0.dp) {
                 Column(Modifier.padding(horizontal = 16.dp)) {
-                    GoalRow("Calorie goal", p.ink, calories) { calories = it.filter(Char::isDigit).take(5) }
+                    GoalRow("Calorie goal", p.ink, calories, last = false) { calories = it.filter(Char::isDigit).take(5) }
                     Hair()
-                    GoalRow("Protein goal", p.red, protein) { protein = it.filter(Char::isDigit).take(4) }
+                    GoalRow("Protein goal", p.red, protein, last = false) { protein = it.filter(Char::isDigit).take(4) }
                     Hair()
-                    GoalRow("Carb goal", p.orange, carbs) { carbs = it.filter(Char::isDigit).take(4) }
+                    GoalRow("Carb goal", p.orange, carbs, last = false) { carbs = it.filter(Char::isDigit).take(4) }
                     Hair()
-                    GoalRow("Fat goal", p.blue, fat) { fat = it.filter(Char::isDigit).take(4) }
+                    GoalRow("Fat goal", p.blue, fat, last = true) { fat = it.filter(Char::isDigit).take(4) }
                 }
             }
         }
@@ -131,7 +131,7 @@ fun NutritionGoalsScreen(vm: AppViewModel, onBack: () -> Unit, onOpenPersonal: (
 
 /** A coloured ring icon, the goal's name, and its editable number. */
 @Composable
-private fun GoalRow(label: String, color: Color, value: String, onChange: (String) -> Unit) {
+private fun GoalRow(label: String, color: Color, value: String, last: Boolean, onChange: (String) -> Unit) {
     val p = palette
     Row(
         Modifier.fillMaxWidth().padding(vertical = 11.dp),
@@ -143,6 +143,6 @@ private fun GoalRow(label: String, color: Color, value: String, onChange: (Strin
             Spacer(Modifier.width(12.dp))
             Text(label, fontSize = 15.sp, fontWeight = FontWeight(500), color = p.ink)
         }
-        NumberField(value, onChange, if (label.startsWith("Calorie")) "kcal" else "g")
+        NumberField(value, onChange, if (label.startsWith("Calorie")) "kcal" else "g", imeAction = if (last) androidx.compose.ui.text.input.ImeAction.Done else androidx.compose.ui.text.input.ImeAction.Next)
     }
 }

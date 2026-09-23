@@ -373,6 +373,7 @@ private fun OptionCard(title: String, sub: String? = null, selected: Boolean, on
 /** A big tappable number with its unit, used for height and weight side by side. */
 @Composable
 private fun BigNumberField(label: String, value: String, unit: String, modifier: Modifier = Modifier, onChange: (String) -> Unit) {
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
     val p = palette
     Column(modifier.background(p.card2, RoundedCornerShape(18.dp)).padding(16.dp, 14.dp)) {
         Text(label, fontSize = 12.sp, fontWeight = FontWeight(600), color = p.muted)
@@ -383,7 +384,8 @@ private fun BigNumberField(label: String, value: String, unit: String, modifier:
                 { onChange(it.filter { c -> c.isDigit() || c == '.' }.take(5)) },
                 Modifier.weight(1f),
                 singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { focus.clearFocus() }),
                 textStyle = TextStyle(fontSize = 34.sp, fontWeight = FontWeight(800), letterSpacing = (-1.4).sp, color = p.ink),
                 cursorBrush = SolidColor(p.ink),
             )

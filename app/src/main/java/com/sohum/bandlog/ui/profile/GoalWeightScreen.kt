@@ -89,7 +89,7 @@ fun GoalWeightScreen(vm: AppViewModel, onBack: () -> Unit) {
         Rise(1) {
             Card(padding = 0.dp) {
                 Column(Modifier.padding(horizontal = 16.dp)) {
-                    SettingRow(ScaleIcon, p.ink, "Current weight") { NumberField(current, { current = it.filter { c -> c.isDigit() || c == '.' } }, "kg") }
+                    SettingRow(ScaleIcon, p.ink, "Current weight") { NumberField(current, { current = it.filter { c -> c.isDigit() || c == '.' } }, "kg", imeAction = androidx.compose.ui.text.input.ImeAction.Next) }
                     Hair()
                     SettingRow(TargetIcon, p.ink, "Goal weight") { NumberField(goal, { goal = it.filter { c -> c.isDigit() || c == '.' } }, "kg") }
                 }

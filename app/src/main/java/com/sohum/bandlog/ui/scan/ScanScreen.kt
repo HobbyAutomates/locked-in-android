@@ -36,6 +36,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -61,8 +62,10 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -85,9 +88,11 @@ import com.sohum.bandlog.ui.components.CrossIcon
 import com.sohum.bandlog.ui.components.ErrorNote
 import com.sohum.bandlog.ui.components.Hair
 import com.sohum.bandlog.ui.components.HistoryIcon
+import com.sohum.bandlog.ui.components.MacroDonut
 import com.sohum.bandlog.ui.components.MacroDot
 import com.sohum.bandlog.ui.components.Motion
 import com.sohum.bandlog.ui.components.PillButton
+import com.sohum.bandlog.ui.components.QuantitySheet
 import com.sohum.bandlog.ui.components.QuestionIcon
 import com.sohum.bandlog.ui.components.RemoteImage
 import com.sohum.bandlog.ui.components.Ring
@@ -102,6 +107,7 @@ import com.sohum.bandlog.ui.log.NumberField
 import com.sohum.bandlog.ui.theme.palette
 import com.sohum.bandlog.ui.today.fmt
 import com.sohum.bandlog.util.Dates
+import com.sohum.bandlog.util.QuantityFood
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -116,8 +122,6 @@ private const val OCR_MIN_CHARS = 120
 
 private val LENSES = listOf("protein" to "Protein", "snack" to "Snack", "cutting" to "Cutting", "bulking" to "Bulking")
 
-/** lose → cutting, gain → bulking, else protein — mirrors the server default. */
-private fun defaultLens(goalType: String) = when (goalType) { "lose" -> "cutting"; "gain" -> "bulking"; else -> "protein" }
 
 /** Bottom-nav tab: title, the three-mode scanner, and the History list. A tapped row opens its stored report. */
 @Composable
@@ -147,7 +151,7 @@ fun ScanTab(vm: AppViewModel) {
         ) { item ->
             if (item != null) {
                 BackHandler { open = null }
-                ScanDetailPage(item) { open = null }
+                ScanDetailPage(item, onLogged = { vm.refresh() }) { open = null }
             }
         }
     }
@@ -168,8 +172,10 @@ private fun ScanForm(
     val p = palette
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    val focus = LocalFocusManager.current
     var mode by remember { mutableIntStateOf(0) } // 0 label · 1 barcode · 2 food photo
-    var lens by remember(vm.profile.goalType) { mutableStateOf(defaultLens(vm.profile.goalType)) }
+    // Profile → Preferences → "Judge scans for" decides where the lens starts.
+    var lens by remember(vm.profile.initialLens) { mutableStateOf(vm.profile.initialLens) }
     var photo by remember { mutableStateOf<Bitmap?>(null) }
     var ocr by remember { mutableStateOf("") }
     var barcode by remember { mutableStateOf("") }
@@ -289,7 +295,8 @@ private fun ScanForm(
                         Box(Modifier.fillMaxWidth().background(p.card2, RoundedCornerShape(12.dp)).padding(12.dp)) {
                             BasicTextField(
                                 barcode, { barcode = it.filter(Char::isDigit).take(14) }, Modifier.fillMaxWidth(), singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
                                 textStyle = TextStyle(fontSize = 16.sp, fontWeight = FontWeight(700), color = p.ink, letterSpacing = 1.sp), cursorBrush = SolidColor(p.ink),
                                 decorationBox = { inner -> if (barcode.isEmpty()) Text(if (reading) "Reading the barcode…" else "Or type the digits, e.g. 8901058851298", fontSize = 14.sp, color = p.muted); inner() },
                             )
@@ -303,7 +310,9 @@ private fun ScanForm(
                         Spacer(Modifier.height(10.dp))
                         Box(Modifier.fillMaxWidth().background(p.card2, RoundedCornerShape(12.dp)).padding(12.dp)) {
                             BasicTextField(
-                                note, { note = it }, Modifier.fillMaxWidth(), textStyle = TextStyle(fontSize = 14.sp, color = p.ink), cursorBrush = SolidColor(p.ink),
+                                note, { note = it }, Modifier.fillMaxWidth(), singleLine = true,
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
+                                textStyle = TextStyle(fontSize = 14.sp, color = p.ink), cursorBrush = SolidColor(p.ink),
                                 decorationBox = { inner -> if (note.isEmpty()) Text(if (mode == 2) "Optional: e.g. the dal has ghee, two rotis" else "Optional: what is it / what do you want to know", fontSize = 14.sp, color = p.muted); inner() },
                             )
                         }
@@ -334,7 +343,7 @@ private fun ScanForm(
                     PillButton("Scan the label", { mode = 0; photo = null; clearResults() }, height = 44.dp, bg = p.card2, fg = p.ink)
                 }
             }
-            report?.let { ReportView(it, lens) }
+            report?.let { ReportView(it, lens, onLogged = { vm.refresh() }) }
             plate?.let { est ->
                 PhotoReview(est, photo, readOnly = false) { items, path ->
                     scope.launch {
@@ -386,8 +395,10 @@ private fun WhatIRead(text: String, reading: Boolean, expanded: Boolean, onToggl
             Column {
                 Spacer(Modifier.height(10.dp))
                 Box(Modifier.fillMaxWidth().heightIn(min = 90.dp, max = 260.dp).background(p.card, RoundedCornerShape(10.dp)).padding(10.dp)) {
+                    val focus = LocalFocusManager.current
                     BasicTextField(
                         text, onChange, Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
                         textStyle = TextStyle(fontSize = 12.sp, color = p.ink, lineHeight = 17.sp), cursorBrush = SolidColor(p.ink),
                         decorationBox = { inner -> if (text.isEmpty()) Text("Nothing was recognised. Type the label here, or just hit Analyse and we'll read the photo on the server.", fontSize = 12.sp, color = p.muted); inner() },
                     )
@@ -406,17 +417,23 @@ private fun fitLabel(verdict: String) = when (verdict) { "great" -> "Great fit";
 private fun eatLabel(verdict: String) = when (verdict) { "great" -> "Eat it"; "ok" -> "Sometimes"; else -> "Skip for this" }
 
 @Composable
-fun ReportView(r: LabelReport, initialLens: String = r.lens) {
+fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Unit = {}) {
     val p = palette
     if (!r.readable) {
         Rise(1) { Card { Text("Couldn't read that as a food label", fontWeight = FontWeight(700), color = p.ink); Text(r.verdictReason, fontSize = 13.sp, color = p.muted) } }
         return
     }
+    val scope = rememberCoroutineScope()
     var lens by remember(r) { mutableStateOf(if (r.fits.containsKey(initialLens)) initialLens else r.lens) }
     val g = r.infographic
     val fit = r.fits[lens]
     val score = g.score
     val scoreColor = when { score >= 7 -> p.green; score >= 4 -> p.orange; else -> p.muted }
+    // "Log 1 serving": the report as a food the Quantity sheet can price.
+    val food = remember(r) { QuantityFood.from(r) }
+    var logFood by remember(r) { mutableStateOf<QuantityFood?>(null) }
+    var logged by remember(r) { mutableStateOf<String?>(null) }
+    var logError by remember(r) { mutableStateOf<String?>(null) }
 
     // 1. What it is: product, the neutral description, the score for the report's lens.
     Rise(1) {
@@ -424,7 +441,8 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 if (r.imageUrl != null) { RemoteImage(url = r.imageUrl, size = 64.dp, radius = 12.dp, fallback = BarcodeIcon); Spacer(Modifier.width(12.dp)) }
                 Column(Modifier.weight(1f)) {
-                    Text(r.product.ifBlank { "Unknown product" }, fontSize = 19.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink, lineHeight = 23.sp)
+                    // Long product names wrap (no maxLines) and never push the ring off the card.
+                    Text(r.product.ifBlank { "Unknown product" }, fontSize = 19.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink, lineHeight = 23.sp, softWrap = true)
                     if (g.oneLiner.isNotBlank()) {
                         Spacer(Modifier.height(4.dp))
                         Text(g.oneLiner, fontSize = 13.sp, color = p.muted, lineHeight = 18.sp)
@@ -441,6 +459,38 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens) {
             if (r.whatItIs.isNotBlank()) {
                 Spacer(Modifier.height(12.dp))
                 Text(r.whatItIs, fontSize = 14.sp, color = p.ink, lineHeight = 20.sp)
+            }
+            if (food != null) {
+                Spacer(Modifier.height(14.dp))
+                PillButton("Log 1 serving" + (r.servingG?.takeIf { it > 0 }?.let { " · ${it.roundToInt()} g" } ?: ""), { logFood = food }, height = 44.dp)
+                logged?.let { Spacer(Modifier.height(8.dp)); Row(verticalAlignment = Alignment.CenterVertically) { Icon(CheckIcon, null, tint = p.green, modifier = Modifier.size(14.dp)); Text("  $it — on Home", fontSize = 12.sp, fontWeight = FontWeight(600), color = p.green) } }
+                logError?.let { Spacer(Modifier.height(8.dp)); Text(it, fontSize = 12.sp, color = p.red) }
+            }
+        }
+    }
+
+    // 1b. One serving as a donut: P / C / F share of its calories.
+    if (food != null && (food.proteinG + food.carbsG + food.fatG) > 0) Rise(1) {
+        Card {
+            Text("One serving", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
+            Text(if (r.servingG != null && r.servingG > 0) "${r.servingG.roundToInt()} g · where the calories come from" else "Per 100 g · where the calories come from", fontSize = 12.sp, color = p.muted)
+            Spacer(Modifier.height(12.dp))
+            val k = (r.servingG?.takeIf { it > 0 } ?: 100.0) / 100.0
+            val pr = food.proteinG * k; val cb = food.carbsG * k; val ft = food.fatG * k
+            val kcalSum = pr * 4 + cb * 4 + ft * 9
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                MacroDonut(pr, cb, ft) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("${(food.calories * k).roundToInt()}", fontSize = 18.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink, lineHeight = 20.sp)
+                        Text("kcal", fontSize = 10.sp, fontWeight = FontWeight(600), color = p.muted)
+                    }
+                }
+                Spacer(Modifier.width(16.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(Triple("Protein", pr * 4, p.red to pr), Triple("Carbs", cb * 4, p.orange to cb), Triple("Fat", ft * 9, p.blue to ft)).forEach { (label, kc, cg) ->
+                        MacroDot("$label ${if (kcalSum > 0) (kc / kcalSum * 100).roundToInt() else 0}% · ${fmt((cg.second * 10).roundToInt() / 10.0)} g", cg.first)
+                    }
+                }
             }
         }
     }
@@ -591,6 +641,21 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens) {
         }
     }
     if (r.research.isNotEmpty()) Rise(12) { Collapsible("What the web says", r.research) }
+
+    logFood?.let { f ->
+        QuantitySheet(
+            food = f, title = "Log from this scan", cta = "Log",
+            onDismiss = { logFood = null },
+            onDone = { item, _ ->
+                logFood = null
+                scope.launch {
+                    runCatching { Api.saveMeal(Dates.today(), "${r.product.ifBlank { "Scanned product" }} (scan)", listOf(item)) }
+                        .onSuccess { logged = "Logged ${item.quantityLabel} · ${item.calories.roundToInt()} kcal"; logError = null; onLogged() }
+                        .onFailure { logError = it.message }
+                }
+            },
+        )
+    }
 }
 
 /** Safe · Caution · Unsafe · Misleading · Fake, with the one that applies filled in. Safety and honesty only. */
@@ -786,7 +851,7 @@ private fun HistoryRow(it: ScanHistoryItem, onOpen: () -> Unit, onDelete: () -> 
 
 /** A stored scan, opened from History: the same views, read-only. */
 @Composable
-private fun ScanDetailPage(item: ScanHistoryItem, onBack: () -> Unit) {
+private fun ScanDetailPage(item: ScanHistoryItem, onLogged: () -> Unit, onBack: () -> Unit) {
     val p = palette
     var json by remember(item.id) { mutableStateOf<org.json.JSONObject?>(null) }
     var error by remember(item.id) { mutableStateOf<String?>(null) }
@@ -797,7 +862,7 @@ private fun ScanDetailPage(item: ScanHistoryItem, onBack: () -> Unit) {
             error != null -> ErrorNote(error)
             o == null -> { LinearProgressIndicator(Modifier.fillMaxWidth(), color = p.ink, trackColor = p.track); Text("Opening…", fontSize = 12.sp, color = p.muted) }
             item.kind == "photo" -> PhotoReview(PlateEstimate.from(o), null, readOnly = true)
-            else -> ReportView(LabelReport.from(o))
+            else -> ReportView(LabelReport.from(o), onLogged = onLogged)
         }
     }
 }
@@ -807,7 +872,7 @@ private fun dayOf(iso: String): String = runCatching {
         .atZoneSameInstant(java.time.ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("d MMM", Locale.ENGLISH))
 }.getOrDefault("")
 
-private fun decodeScaled(ctx: Context, uri: Uri, maxEdge: Int): Bitmap? {
+internal fun decodeScaled(ctx: Context, uri: Uri, maxEdge: Int): Bitmap? {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
     var sample = 1
@@ -821,10 +886,10 @@ private fun decodeScaled(ctx: Context, uri: Uri, maxEdge: Int): Bitmap? {
     return Bitmap.createScaledBitmap(bmp, (bmp.width * k).roundToInt(), (bmp.height * k).roundToInt(), true)
 }
 
-private fun toJpegBytes(b: Bitmap, quality: Int): ByteArray {
+internal fun toJpegBytes(b: Bitmap, quality: Int): ByteArray {
     val out = ByteArrayOutputStream()
     b.compress(Bitmap.CompressFormat.JPEG, quality, out)
     return out.toByteArray()
 }
 
-private fun toJpegBase64(b: Bitmap, quality: Int): String = Base64.encodeToString(toJpegBytes(b, quality), Base64.NO_WRAP)
+internal fun toJpegBase64(b: Bitmap, quality: Int): String = Base64.encodeToString(toJpegBytes(b, quality), Base64.NO_WRAP)

@@ -70,13 +70,13 @@ fun LoginScreen(onSignedIn: () -> Unit) {
         Spacer(Modifier.height(22.dp))
         OutlinedTextField(
             email, { email = it }, Modifier.fillMaxWidth(), label = { Text("Email") }, singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = androidx.compose.ui.text.input.ImeAction.Next),
         )
         Spacer(Modifier.height(10.dp))
         OutlinedTextField(
             password, { password = it }, Modifier.fillMaxWidth(), label = { Text("Password") }, singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = androidx.compose.ui.text.input.ImeAction.Done),
         )
         Spacer(Modifier.height(12.dp))
         ErrorNote(error)

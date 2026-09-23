@@ -105,9 +105,9 @@ fun PersonalDetailsScreen(vm: AppViewModel, onBack: () -> Unit, onChangeGoal: ()
         Rise(1) {
             Card(padding = 0.dp) {
                 Column(Modifier.padding(horizontal = 16.dp)) {
-                    SettingRow(ScaleIcon, p.ink, "Current weight") { NumberField(weight, { weight = it.filter { c -> c.isDigit() || c == '.' } }, "kg") }
+                    SettingRow(ScaleIcon, p.ink, "Current weight") { NumberField(weight, { weight = it.filter { c -> c.isDigit() || c == '.' } }, "kg", imeAction = androidx.compose.ui.text.input.ImeAction.Next) }
                     Hair()
-                    SettingRow(RulerIcon, p.ink, "Height") { NumberField(height, { height = it.filter { c -> c.isDigit() || c == '.' } }, "cm") }
+                    SettingRow(RulerIcon, p.ink, "Height") { NumberField(height, { height = it.filter { c -> c.isDigit() || c == '.' } }, "cm", imeAction = androidx.compose.ui.text.input.ImeAction.Next) }
                     Hair()
                     SettingRow(TargetIcon, p.ink, "Date of birth", onClick = {
                         val start = runCatching { LocalDate.parse(dob) }.getOrDefault(LocalDate.now().minusYears(17))

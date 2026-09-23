@@ -128,6 +128,18 @@ class AppViewModel : ViewModel() {
 
     fun loadSavedMeals() { viewModelScope.launch { runCatching { savedMeals = Api.savedMeals() } } }
 
+    /** The Indian food presets (v1.9), fetched once per session; the Meal form's Presets tab reads them. */
+    var presets by mutableStateOf<List<com.sohum.bandlog.data.FoodPreset>>(emptyList()); private set
+    var presetsLoading by mutableStateOf(false); private set
+    fun loadPresets(force: Boolean = false) {
+        if (presetsLoading || (presets.isNotEmpty() && !force)) return
+        viewModelScope.launch {
+            presetsLoading = true
+            runCatching { presets = Api.presets() }
+            presetsLoading = false
+        }
+    }
+
     fun onSignedIn() { signedIn = true; refresh() }
 
     fun refresh() {

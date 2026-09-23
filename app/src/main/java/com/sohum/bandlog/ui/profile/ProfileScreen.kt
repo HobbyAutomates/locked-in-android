@@ -39,6 +39,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
@@ -71,7 +72,7 @@ enum class ProfilePage { PERSONAL, GOALS, GOAL_WEIGHT, REMINDERS, WEIGHT_HISTORY
 
 private const val INVITE_TEXT =
     "Locked In — workouts, meals by voice, label scanner. " +
-        "Android: https://evizkfvltacrfngsgbuu.supabase.co/storage/v1/object/public/app/LockedIn-8.apk · " +
+        "Android: https://evizkfvltacrfngsgbuu.supabase.co/storage/v1/object/public/app/LockedIn-11.apk · " +
         "iPhone: https://web-production-ff1cf.up.railway.app (Safari → Add to Home Screen)"
 
 /**
@@ -158,7 +159,7 @@ fun ProfileScreen(
                 Column(Modifier.padding(horizontal = 16.dp)) {
                     SettingRow(Icons.Outlined.Person, p.ink, "Personal details", onClick = { onOpen(ProfilePage.PERSONAL) }) { Chevron() }
                     Hair()
-                    SettingRow(Icons.Outlined.Tune, p.ink, "Preferences", subtitle = "Appearance, Health Connect, burned calories") { }
+                    SettingRow(Icons.Outlined.Tune, p.ink, "Preferences", subtitle = "Appearance, Health Connect, scans, burned calories, groups") { }
                     Hair()
                     PreferencesRows(vm, themeMode, onThemeMode)
                 }
@@ -272,21 +273,62 @@ private fun PreferencesRows(vm: AppViewModel, themeMode: ThemeMode, onThemeMode:
             colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = p.btn, checkedThumbColor = p.btnInk),
         )
     }
+    Hair()
+    // "Judge scans for": the lens every scan report opens on. Saved straight to profiles.lens_default.
+    val prof = vm.profile
+    Column(Modifier.padding(vertical = 12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(com.sohum.bandlog.ui.components.ScanIcon, null, tint = p.ink, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(10.dp))
+            Column {
+                Text("Judge scans for", fontSize = 15.sp, fontWeight = FontWeight(500), color = p.ink)
+                Text("“My goal” follows Lose → Cutting, Gain → Bulking", fontSize = 11.sp, color = p.muted)
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.padding(start = 30.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf("protein" to "Protein", "goal" to "My goal", "snack" to "Snack").forEach { (key, label) ->
+                com.sohum.bandlog.ui.components.SmallChip(label, { vm.launch { vm.saveProfile(prof.copy(lensDefault = key)) } }, filled = prof.lensDefault == key)
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.padding(start = 30.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf("cutting" to "Cutting", "bulking" to "Bulking").forEach { (key, label) ->
+                com.sohum.bandlog.ui.components.SmallChip(label, { vm.launch { vm.saveProfile(prof.copy(lensDefault = key)) } }, filled = prof.lensDefault == key)
+            }
+        }
+    }
+    Hair()
+    SettingRow(Icons.Outlined.Share, p.ink, "Share with groups", subtitle = (if (prof.shareStats) "Streaks + protein & calories" else "Streaks only") + " · Groups are coming next") {
+        androidx.compose.material3.Switch(
+            prof.shareStats,
+            { on -> vm.launch { vm.saveProfile(prof.copy(shareStats = on)) } },
+            colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = p.btn, checkedThumbColor = p.btnInk),
+        )
+    }
 }
 
 /** Inline-editable display name, shown as "Enter your name ✏️" while empty. */
 @Composable
 private fun NameField(name: String, onCommit: (String) -> Unit) {
     val p = palette
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
     var text by remember(name) { mutableStateOf(name) }
+    var hadFocus by remember { mutableStateOf(false) }
+    fun commit() { if (text.trim() != name) onCommit(text.trim()) }
     Row(verticalAlignment = Alignment.CenterVertically) {
         BasicTextField(
             value = text,
             onValueChange = { text = it.take(40) },
             singleLine = true,
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { commit(); focus.clearFocus() }),
             textStyle = TextStyle(fontSize = 17.sp, fontWeight = FontWeight(700), color = p.ink),
             cursorBrush = SolidColor(p.ink),
-            modifier = Modifier.weight(1f, fill = false),
+            modifier = Modifier.weight(1f, fill = false).onFocusChanged { st ->
+                if (hadFocus && !st.isFocused) commit()
+                hadFocus = st.isFocused
+            },
             decorationBox = { inner ->
                 if (text.isEmpty()) Text("Enter your name", fontSize = 17.sp, fontWeight = FontWeight(700), color = p.muted)
                 inner()

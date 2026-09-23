@@ -47,7 +47,7 @@ object Api {
 
     private const val PROFILE_COLS =
         "weekly_workout_target,protein_target_g,calorie_target,name,dob,gender,height_cm,weight_kg," +
-            "goal_weight_kg,goal_type,goal_speed_kg_wk,step_goal,carb_target_g,fat_target_g,reminders"
+            "goal_weight_kg,goal_type,goal_speed_kg_wk,step_goal,carb_target_g,fat_target_g,reminders,lens_default,share_stats"
 
     suspend fun profile(): Profile = withContext(Dispatchers.IO) {
         val body = run(rest("profiles?select=$PROFILE_COLS&limit=1").get().build(), "Load profile")
@@ -74,6 +74,8 @@ object Api {
             .put("carb_target_g", p.carbTargetGSet ?: JSONObject.NULL)
             .put("fat_target_g", p.fatTargetGSet ?: JSONObject.NULL)
             .put("reminders", if (p.remindersJson.isBlank()) JSONObject.NULL else JSONObject(p.remindersJson))
+            .put("lens_default", p.lensDefault.ifBlank { "protein" })
+            .put("share_stats", p.shareStats)
             .toString()
         run(rest("profiles").header("Prefer", "resolution=merge-duplicates").post(json(payload)).build(), "Save profile")
         Unit
@@ -210,7 +212,7 @@ object Api {
     // ---- meals ----
 
     suspend fun meals(from: String, to: String): List<Meal> = withContext(Dispatchers.IO) {
-        val sel = "id,date,raw_text,created_at,photo_path,meal_items(id,food_id,name,grams,calories,protein_g,carbs_g,fat_g,source,confidence,micros)"
+        val sel = "id,date,raw_text,created_at,photo_path,meal_items(id,food_id,name,grams,calories,protein_g,carbs_g,fat_g,source,confidence,micros,unit,servings,cooked_in)"
         val body = run(rest("meals?select=$sel&date=gte.$from&date=lte.$to&order=created_at.desc").get().build(), "Load meals")
         val arr = JSONArray(body)
         (0 until arr.length()).map { Meal.from(arr.getJSONObject(it)) }
@@ -230,6 +232,26 @@ object Api {
 
     suspend fun deleteMeal(id: String) = withContext(Dispatchers.IO) {
         run(rest("meals?id=eq.$id").delete().build(), "Delete meal"); Unit
+    }
+
+    // ---- food presets + search (v1.9) ----
+
+    /** Every Indian food preset with its foods row joined, in category sort order. */
+    suspend fun presets(): List<FoodPreset> = withContext(Dispatchers.IO) {
+        val sel = "id,food_id,label,label_hi,category,servings,default_serving,sort,icon,foods(name,calories,protein_g,carbs_g,fat_g,micros)"
+        val body = run(rest("food_presets?select=$sel&order=sort.asc").get().build(), "Load presets")
+        val arr = JSONArray(body)
+        (0 until arr.length()).mapNotNull { FoodPreset.from(arr.getJSONObject(it)) }
+    }
+
+    /** Trigram search over bandlog.foods (the same RPC the parser uses). Hinglish and Devanagari both match. */
+    suspend fun searchFoods(q: String, n: Int = 14): List<FoodHit> = withContext(Dispatchers.IO) {
+        val key = q.trim().lowercase().replace(Regex("\\s+"), " ")
+        if (key.length < 2) return@withContext emptyList()
+        val payload = JSONObject().put("q", key).put("n", n).toString()
+        val body = run(rest("rpc/search_foods").post(json(payload)).build(), "Search foods")
+        val arr = JSONArray(body)
+        (0 until arr.length()).map { FoodHit.from(arr.getJSONObject(it)) }
     }
 
     // ---- meal parsing (web app → Haiku) ----
@@ -362,7 +384,7 @@ object Api {
     /** Fetches an image (signed Storage URL or an Open Food Facts picture) as a bitmap; null on any failure. */
     suspend fun fetchBitmap(url: String): android.graphics.Bitmap? = withContext(Dispatchers.IO) {
         runCatching {
-            client.newCall(Request.Builder().url(url).header("User-Agent", "LockedIn/1.8").get().build()).execute().use { res ->
+            client.newCall(Request.Builder().url(url).header("User-Agent", "LockedIn/1.9").get().build()).execute().use { res ->
                 if (!res.isSuccessful) null else res.body?.bytes()?.let { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size) }
             }
         }.getOrNull()

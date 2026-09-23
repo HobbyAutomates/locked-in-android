@@ -144,6 +144,7 @@ private fun LogWeightDialog(vm: AppViewModel, onDismiss: () -> Unit) {
     val p = palette
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
     var date by remember { mutableStateOf(Dates.today()) }
     var kg by remember { mutableStateOf(vm.profile.weightKg?.let { fmt(it) } ?: "") }
     var note by remember { mutableStateOf("") }
@@ -168,12 +169,14 @@ private fun LogWeightDialog(vm: AppViewModel, onDismiss: () -> Unit) {
             Spacer(Modifier.height(10.dp))
             RowSpaceBetween {
                 Text("Weight", fontSize = 15.sp, fontWeight = FontWeight(500), color = p.ink)
-                NumberField(kg, { kg = it.filter { c -> c.isDigit() || c == '.' } }, "kg")
+                NumberField(kg, { kg = it.filter { c -> c.isDigit() || c == '.' } }, "kg", imeAction = androidx.compose.ui.text.input.ImeAction.Next)
             }
             Spacer(Modifier.height(14.dp))
             Box(Modifier.fillMaxWidth().background(p.card2, RoundedCornerShape(12.dp)).padding(12.dp)) {
                 BasicTextField(
-                    note, { note = it.take(80) }, Modifier.fillMaxWidth(),
+                    note, { note = it.take(80) }, Modifier.fillMaxWidth(), singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { focus.clearFocus() }),
                     textStyle = TextStyle(fontSize = 14.sp, color = p.ink), cursorBrush = SolidColor(p.ink),
                     decorationBox = { inner -> if (note.isEmpty()) Text("Note (optional)", fontSize = 14.sp, color = p.muted); inner() },
                 )
