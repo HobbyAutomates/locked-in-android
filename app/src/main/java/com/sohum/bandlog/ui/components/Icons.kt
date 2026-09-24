@@ -304,3 +304,43 @@ val DropIcon: ImageVector by lazy {
         moveTo(12f, 3f); curveTo(12f, 3f, 18f, 9.5f, 18f, 14f); arcTo(6f, 6f, 0f, true, true, 6f, 14f); curveTo(6f, 9.5f, 12f, 3f, 12f, 3f); close()
     }
 }
+
+/** Two people: the Squad tab. */
+val PeopleIcon: ImageVector by lazy {
+    stroke("People") {
+        moveTo(12.2f, 8f); arcTo(3.2f, 3.2f, 0f, true, true, 5.8f, 8f); arcTo(3.2f, 3.2f, 0f, true, true, 12.2f, 8f); close()
+        moveTo(3.5f, 19.5f); arcTo(5.5f, 5.5f, 0f, false, true, 14.5f, 19.5f)
+        moveTo(15.5f, 5.2f); arcTo(3f, 3f, 0f, false, true, 15.5f, 10.8f)
+        moveTo(17.5f, 13.8f); arcTo(5.5f, 5.5f, 0f, false, true, 20.5f, 19.5f)
+    }
+}
+
+/** A raised fist: the nudge. */
+val FistIcon: ImageVector by lazy {
+    stroke("Fist") {
+        moveTo(7f, 11f); verticalLineTo(8.5f); arcTo(1.5f, 1.5f, 0f, false, true, 10f, 8.5f); verticalLineTo(11f)
+        moveTo(10f, 10f); verticalLineTo(7.5f); arcTo(1.5f, 1.5f, 0f, false, true, 13f, 7.5f); verticalLineTo(10f)
+        moveTo(13f, 10f); verticalLineTo(8f); arcTo(1.5f, 1.5f, 0f, false, true, 16f, 8f); verticalLineTo(11f)
+        moveTo(16f, 10.5f); arcTo(1.5f, 1.5f, 0f, false, true, 19f, 10.5f); verticalLineTo(14f)
+        arcTo(6f, 6f, 0f, false, true, 13f, 20f); horizontalLineTo(11.5f)
+        arcTo(5.5f, 5.5f, 0f, false, true, 6f, 14.5f); verticalLineTo(12f); arcTo(1.5f, 1.5f, 0f, false, true, 9f, 12f)
+    }
+}
+
+/** Two sheets: copy the squad code. */
+val CopyIcon: ImageVector by lazy {
+    stroke("Copy") {
+        moveTo(11f, 9f); horizontalLineTo(18f); arcTo(2f, 2f, 0f, false, true, 20f, 11f); verticalLineTo(18f)
+        arcTo(2f, 2f, 0f, false, true, 18f, 20f); horizontalLineTo(11f); arcTo(2f, 2f, 0f, false, true, 9f, 18f)
+        verticalLineTo(11f); arcTo(2f, 2f, 0f, false, true, 11f, 9f); close()
+        moveTo(5f, 15f); verticalLineTo(5f); arcTo(2f, 2f, 0f, false, true, 7f, 3f); horizontalLineTo(15f)
+    }
+}
+
+/** Moon and a star: the 9 pm wrap. */
+val MoonStarIcon: ImageVector by lazy {
+    stroke("MoonStar") {
+        moveTo(20f, 14.5f); arcTo(8f, 8f, 0f, true, true, 9.5f, 4f); arcTo(6.5f, 6.5f, 0f, false, false, 20f, 14.5f); close()
+        moveTo(17f, 3f); verticalLineTo(7f); moveTo(15f, 5f); horizontalLineTo(19f)
+    }
+}

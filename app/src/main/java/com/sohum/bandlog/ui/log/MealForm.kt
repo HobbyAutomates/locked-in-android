@@ -110,7 +110,7 @@ private val CATEGORIES = listOf(
 private val SOURCE_LABEL = mapOf("dish" to "INDB", "ifct" to "IFCT", "usda" to "USDA", "custom" to "Curated", "off" to "OFF")
 
 /** What the Quantity sheet is open for: a food to add, or a review row to change. */
-private data class SheetReq(val food: QuantityFood, val initial: Quantity? = null, val replace: Int? = null)
+private data class SheetReq(val food: QuantityFood, val initial: Quantity? = null, val replace: Int? = null, val restaurant: Boolean = false)
 
 /**
  * The Meal form: Dictate · Search · Presets · Photo build one review list, every quantity goes
@@ -203,7 +203,7 @@ fun MealForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
                     onQuick = { vm.quickLogMeal(text.trim(), date); onClose() },
                 )
                 1 -> SearchCard { hit -> sheet = SheetReq(QuantityFood.from(hit)) }
-                2 -> PresetsCard(vm.presets, vm.presetsLoading) { preset, serving ->
+                2 -> PresetsCard(vm.presets, vm.presetsLoading, onRestaurant = { preset -> sheet = SheetReq(QuantityFood.from(preset), restaurant = true) }) { preset, serving ->
                     if (serving == null) sheet = SheetReq(QuantityFood.from(preset))
                     else add(QuantityFood.from(preset, serving).item(Quantity(QUnit.SERVING, 1.0)), preset.label)
                 }
@@ -304,11 +304,12 @@ fun MealForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
             food = req.food, initial = req.initial,
             title = if (req.replace != null) "Change the amount" else "How much?",
             cta = if (req.replace != null) "Update" else "Add",
+            restaurantStart = req.restaurant,
             onDismiss = { sheet = null },
             onDone = { item, _ ->
                 sheet = null
                 val idx = req.replace
-                if (idx != null) items = items.toMutableList().also { l -> val old = l[idx]; l[idx] = item.copy(cookedIn = old.cookedIn, source = old.source, foodId = old.foodId) }
+                if (idx != null) items = items.toMutableList().also { l -> val old = l[idx]; l[idx] = item.copy(cookedIn = item.cookedIn ?: old.cookedIn, source = old.source, foodId = old.foodId) }
                 else add(item)
             },
         )
@@ -433,11 +434,13 @@ private fun SearchCard(onPick: (FoodHit) -> Unit) {
 
 /** Category chips → grid of preset cards → serving chips (+ Custom…). [onPick] gets the tapped serving label, or null for Custom. */
 @Composable
-private fun PresetsCard(presets: List<FoodPreset>, loading: Boolean, onPick: (FoodPreset, String?) -> Unit) {
+private fun PresetsCard(presets: List<FoodPreset>, loading: Boolean, onRestaurant: (FoodPreset) -> Unit, onPick: (FoodPreset, String?) -> Unit) {
     val p = palette
     var cat by rememberSaveable { mutableStateOf("breakfast") }
     var open by remember { mutableStateOf<String?>(null) }
     val list = remember(presets, cat) { presets.filter { it.category == cat }.sortedBy { it.sort } }
+    // v2.0: common outside dishes at the top of Snacks and Protein; each opens as a restaurant portion.
+    val outside = remember(presets) { presets.filter { it.category == "restaurant" }.sortedBy { it.sort } }
     Rise(1) {
         Column {
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -450,6 +453,12 @@ private fun PresetsCard(presets: List<FoodPreset>, loading: Boolean, onPick: (Fo
                 }
             }
             Spacer(Modifier.height(10.dp))
+            if ((cat == "snack" || cat == "protein") && outside.isNotEmpty()) {
+                Text("Restaurant", fontSize = 12.sp, fontWeight = FontWeight(700), color = p.muted, modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
+                Row(Modifier.horizontalScroll(rememberScrollState()).padding(bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    outside.forEach { pr -> SmallChip(pr.label, { onRestaurant(pr) }, dashed = true) }
+                }
+            }
             if (presets.isEmpty()) {
                 Card {
                     if (loading) { LinearProgressIndicator(Modifier.fillMaxWidth(), color = p.ink, trackColor = p.track); Spacer(Modifier.height(8.dp)) }
@@ -594,7 +603,7 @@ private fun ReviewRow(item: MealItem, fats: List<FoodPreset>, showCookedIn: Bool
                     fats.take(4).forEach { f -> SmallChip(f.label, { onCookedIn(f) }) }
                 }
             }
-            item.cookedIn?.let { id -> Text("Cooked in ${fats.firstOrNull { it.id == id }?.label ?: id}", fontSize = 11.sp, color = p.muted) }
+            item.cookedIn?.let { id -> Text(if (id == "restaurant") "Restaurant portion · oil included" else "Cooked in ${fats.firstOrNull { it.id == id }?.label ?: id}", fontSize = 11.sp, color = p.muted) }
         }
         AnimatedVisibility(showDelta, enter = scaleIn() + fadeIn(), exit = fadeOut() + scaleOut()) {
             Box(Modifier.padding(end = 6.dp).background(if (delta > 0) p.btn else p.card2, CircleShape).padding(8.dp, 3.dp)) {

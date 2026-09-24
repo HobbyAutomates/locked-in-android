@@ -72,7 +72,7 @@ enum class ProfilePage { PERSONAL, GOALS, GOAL_WEIGHT, REMINDERS, WEIGHT_HISTORY
 
 private const val INVITE_TEXT =
     "Locked In — workouts, meals by voice, label scanner. " +
-        "Android: https://evizkfvltacrfngsgbuu.supabase.co/storage/v1/object/public/app/LockedIn-11.apk · " +
+        "Android: https://evizkfvltacrfngsgbuu.supabase.co/storage/v1/object/public/app/LockedIn-12.apk · " +
         "iPhone: https://web-production-ff1cf.up.railway.app (Safari → Add to Home Screen)"
 
 /**
@@ -159,7 +159,7 @@ fun ProfileScreen(
                 Column(Modifier.padding(horizontal = 16.dp)) {
                     SettingRow(Icons.Outlined.Person, p.ink, "Personal details", onClick = { onOpen(ProfilePage.PERSONAL) }) { Chevron() }
                     Hair()
-                    SettingRow(Icons.Outlined.Tune, p.ink, "Preferences", subtitle = "Appearance, Health Connect, scans, burned calories, groups") { }
+                    SettingRow(Icons.Outlined.Tune, p.ink, "Preferences", subtitle = "Appearance, Health Connect, scans, burned calories, squads") { }
                     Hair()
                     PreferencesRows(vm, themeMode, onThemeMode)
                 }
@@ -299,7 +299,7 @@ private fun PreferencesRows(vm: AppViewModel, themeMode: ThemeMode, onThemeMode:
         }
     }
     Hair()
-    SettingRow(Icons.Outlined.Share, p.ink, "Share with groups", subtitle = (if (prof.shareStats) "Streaks + protein & calories" else "Streaks only") + " · Groups are coming next") {
+    SettingRow(Icons.Outlined.Share, p.ink, "Share with squads", subtitle = (if (prof.shareStats) "Streaks + protein & calories" else "Streaks only") + " · what squad-mates see") {
         androidx.compose.material3.Switch(
             prof.shareStats,
             { on -> vm.launch { vm.saveProfile(prof.copy(shareStats = on)) } },

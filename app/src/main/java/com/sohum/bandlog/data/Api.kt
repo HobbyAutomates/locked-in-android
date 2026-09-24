@@ -408,4 +408,89 @@ object Api {
     }
 
     suspend fun deleteSavedMeal(id: String) = withContext(Dispatchers.IO) { run(rest("saved_meals?id=eq.$id").delete().build(), "Delete saved meal"); Unit }
+
+    // ---- v2.0: squads ----
+
+    /** One day of my rollup for the squad board. */
+    data class DailyStat(val date: String, val trained: Boolean, val proteinG: Double, val calories: Double, val burned: Double, val meals: Int, val weekStreak: Int)
+
+    /** Upserts my `daily_stats` rows (PK user_id + date). */
+    suspend fun upsertDailyStats(rows: List<DailyStat>) = withContext(Dispatchers.IO) {
+        val uid = Session.userId ?: throw AuthException("Not signed in")
+        if (rows.isEmpty()) return@withContext
+        fun r1(d: Double) = Math.round(d * 10) / 10.0
+        val arr = JSONArray().apply {
+            rows.forEach { r ->
+                put(
+                    JSONObject().put("user_id", uid).put("date", r.date).put("trained", r.trained)
+                        .put("protein_g", r1(r.proteinG)).put("calories", r1(r.calories)).put("burned", r1(r.burned))
+                        .put("meals", r.meals).put("week_streak", r.weekStreak)
+                        .put("updated_at", java.time.Instant.now().toString()),
+                )
+            }
+        }
+        run(rest("daily_stats?on_conflict=user_id,date").header("Prefer", "resolution=merge-duplicates,return=minimal").post(json(arr.toString())).build(), "Save rollup")
+        Unit
+    }
+
+    /** Every squad I'm in, oldest membership first. */
+    suspend fun mySquads(): List<Squad> = withContext(Dispatchers.IO) {
+        val uid = Session.userId ?: throw AuthException("Not signed in")
+        val m = JSONArray(run(rest("group_members?select=group_id,joined_at&user_id=eq.$uid&order=joined_at.asc").get().build(), "Load squads"))
+        val ids = (0 until m.length()).map { m.getJSONObject(it).getString("group_id") }
+        if (ids.isEmpty()) return@withContext emptyList()
+        val g = JSONArray(run(rest("groups?select=id,name,code,owner_id&id=in.(${ids.joinToString(",")})").get().build(), "Load squads"))
+        val byId = (0 until g.length()).map { Squad.from(g.getJSONObject(it)) }.associateBy { it.id }
+        ids.mapNotNull { byId[it] }
+    }
+
+    private suspend fun rpc(fn: String, payload: JSONObject, label: String): String = withContext(Dispatchers.IO) {
+        run(rest("rpc/$fn").post(json(payload.toString())).build(), label)
+    }
+
+    /** Creates a squad (the server picks the 6-letter code); returns (id, code). */
+    suspend fun createSquad(name: String, displayName: String): Pair<String, String> {
+        val body = rpc("create_group", JSONObject().put("p_name", name).put("p_display", displayName), "Create squad")
+        val o = runCatching { JSONArray(body).getJSONObject(0) }.getOrElse { JSONObject(body) }
+        return o.getString("id") to o.getString("code")
+    }
+
+    /** Joins with a code; returns the squad id. */
+    suspend fun joinSquad(code: String, displayName: String): String {
+        val body = rpc("join_group", JSONObject().put("p_code", code.uppercase().trim()).put("p_name", displayName), "Join squad")
+        return body.trim().trim('"')
+    }
+
+    suspend fun leaveSquad(groupId: String) { rpc("leave_group", JSONObject().put("g", groupId), "Leave squad") }
+
+    /** Owner only (RLS): returns false when nothing was updated. */
+    suspend fun renameSquad(groupId: String, name: String): Boolean = withContext(Dispatchers.IO) {
+        val body = run(rest("groups?id=eq.$groupId").header("Prefer", "return=representation").patch(json(JSONObject().put("name", name).toString())).build(), "Rename squad")
+        JSONArray(body).length() > 0
+    }
+
+    suspend fun squadBoard(groupId: String): List<SquadMember> {
+        val arr = JSONArray(rpc("squad_board", JSONObject().put("g", groupId), "Load squad"))
+        return (0 until arr.length()).map { SquadMember.from(arr.getJSONObject(it)) }
+    }
+
+    /** Who I've nudged in the last 20 h (the board shows "Nudged"). */
+    suspend fun sentNudges(): Set<String> = withContext(Dispatchers.IO) {
+        val uid = Session.userId ?: throw AuthException("Not signed in")
+        val since = java.net.URLEncoder.encode(java.time.Instant.now().minusSeconds(20 * 3600).toString(), "UTF-8")
+        val arr = JSONArray(run(rest("nudges?select=to_user&from_user=eq.$uid&created_at=gte.$since").get().build(), "Load nudges"))
+        (0 until arr.length()).map { arr.getJSONObject(it).getString("to_user") }.toSet()
+    }
+
+    suspend fun nudge(groupId: String, toUser: String) = withContext(Dispatchers.IO) {
+        val uid = Session.userId ?: throw AuthException("Not signed in")
+        val payload = JSONObject().put("group_id", groupId).put("from_user", uid).put("to_user", toUser).put("kind", "nudge").toString()
+        run(rest("nudges").header("Prefer", "return=minimal").post(json(payload)).build(), "Nudge"); Unit
+    }
+
+    /** Nudges sent to me in the last 24 h, newest first, with the sender's name. */
+    suspend fun myNudges(): List<Nudge> {
+        val arr = JSONArray(rpc("my_nudges", JSONObject(), "Load nudges"))
+        return (0 until arr.length()).map { Nudge.from(arr.getJSONObject(it)) }
+    }
 }

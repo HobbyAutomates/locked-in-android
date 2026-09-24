@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Person
@@ -93,6 +94,8 @@ class MainActivity : ComponentActivity() {
 
     /** Bumped when a meal-reminder notification is tapped; the shell opens Log → Meal. */
     private val openMealTick = mutableIntStateOf(0)
+    /** Bumped when the 9 pm wrap notification is tapped; the shell lands on Home with the Wrap card. */
+    private val openWrapTick = mutableIntStateOf(0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -118,7 +121,7 @@ class MainActivity : ComponentActivity() {
                         // so a brand-new account never flashes the empty tab shell.
                         !vm.loadedOnce && vm.error == null -> BootSplash()
                         vm.needsOnboarding -> OnboardingScreen(vm, onDone = {}, onSkip = { vm.onboardingSkipped = true })
-                        else -> MainShell(vm, updateVm, themeMode, openMealTick.intValue) { themeMode = it; ThemePrefs.set(this, it) }
+                        else -> MainShell(vm, updateVm, themeMode, openMealTick.intValue, openWrapTick.intValue) { themeMode = it; ThemePrefs.set(this, it) }
                     }
                 }
                 UpdateDialog(updateVm)
@@ -133,12 +136,18 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIntent(i: android.content.Intent?) {
-        if (i?.getStringExtra(EXTRA_OPEN) == OPEN_MEAL) openMealTick.intValue++
+        when (i?.getStringExtra(EXTRA_OPEN)) {
+            OPEN_MEAL -> openMealTick.intValue++
+            OPEN_WRAP -> { runCatching { com.sohum.bandlog.util.Wrap.undismiss(this) }; openWrapTick.intValue++ }
+        }
+        // Consume it so a rotation / re-delivery doesn't reopen the same thing.
+        i?.removeExtra(EXTRA_OPEN)
     }
 
     companion object {
         const val EXTRA_OPEN = "open"
         const val OPEN_MEAL = "meal"
+        const val OPEN_WRAP = "wrap"
     }
 }
 
@@ -157,27 +166,32 @@ private data class LogRequest(val workout: Workout?, val date: String, val meal:
 private data class Tab(val label: String, val icon: ImageVector)
 
 /** A full-screen page pushed over the tab shell (Profile detail screens, Badges). */
-private enum class Page { PERSONAL, GOALS, GOAL_WEIGHT, REMINDERS, WEIGHT_HISTORY, BADGES }
+private enum class Page { PERSONAL, GOALS, GOAL_WEIGHT, REMINDERS, WEIGHT_HISTORY, BADGES, CALENDAR }
 
 @Composable
-private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: ThemeMode, openMealTick: Int, onThemeMode: (ThemeMode) -> Unit) {
+private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: ThemeMode, openMealTick: Int, openWrapTick: Int, onThemeMode: (ThemeMode) -> Unit) {
     val p = palette
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var log by remember { mutableStateOf<LogRequest?>(null) }
     var page by remember { mutableStateOf<Page?>(null) }
-    val tabs = listOf(Tab("Home", Icons.Outlined.Home), Tab("Calendar", Icons.Outlined.CalendarMonth), Tab("Scan", com.sohum.bandlog.ui.components.ScanIcon), Tab("Progress", Icons.Outlined.SignalCellularAlt), Tab("Profile", Icons.Outlined.Person))
+    // v2.0: Squad takes Calendar's slot; Calendar is a card link on Home and opens as a pushed page.
+    val tabs = listOf(Tab("Home", Icons.Outlined.Home), Tab("Squad", com.sohum.bandlog.ui.components.PeopleIcon), Tab("Scan", com.sohum.bandlog.ui.components.ScanIcon), Tab("Progress", Icons.Outlined.SignalCellularAlt), Tab("Profile", Icons.Outlined.Person))
 
     // A tapped meal reminder lands straight on the Meal form.
     LaunchedEffect(openMealTick) {
         if (openMealTick > 0) { page = null; log = LogRequest(null, Dates.today(), true) }
+    }
+    // A tapped 9 pm wrap lands on Home, where the Wrap card sits on top.
+    LaunchedEffect(openWrapTick) {
+        if (openWrapTick > 0) { page = null; log = null; tab = 0 }
     }
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             Box(Modifier.weight(1f)) {
                 when (tab) {
-                    0 -> TodayScreen(vm, onOpenWorkout = { w -> log = LogRequest(w, Dates.today(), false) }, onLogExercise = { log = LogRequest(null, Dates.today(), false, exercise = true) })
-                    1 -> CalendarScreen(vm) { w, d -> log = LogRequest(w, d, false) }
+                    0 -> TodayScreen(vm, onOpenWorkout = { w -> log = LogRequest(w, Dates.today(), false) }, onLogExercise = { log = LogRequest(null, Dates.today(), false, exercise = true) }, onOpenCalendar = { page = Page.CALENDAR }, wrapTick = openWrapTick)
+                    1 -> com.sohum.bandlog.ui.squad.SquadScreen(vm, onOpenProfile = { tab = 4 })
                     2 -> com.sohum.bandlog.ui.scan.ScanTab(vm)
                     3 -> ProgressScreen(vm) { page = Page.BADGES }
                     else -> ProfileScreen(vm, updateVm, themeMode, onThemeMode) { target ->
@@ -228,6 +242,7 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
                     Page.REMINDERS -> RemindersScreen(vm, back)
                     Page.WEIGHT_HISTORY -> WeightHistoryScreen(vm, back)
                     Page.BADGES -> BadgesScreen(vm, back)
+                    Page.CALENDAR -> CalendarPage(vm, back) { w, d -> log = LogRequest(w, d, false) }
                 }
             }
         }
@@ -240,6 +255,23 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
                 BackHandler { log = null }
                 LogScreen(vm, req.workout, req.date, req.meal, onClose = { log = null }, startOnExercise = req.exercise)
             }
+        }
+    }
+}
+
+/** The Calendar, pushed from Home's "Calendar →" card with a back pill over it. */
+@Composable
+private fun CalendarPage(vm: AppViewModel, onBack: () -> Unit, onOpen: (Workout?, String) -> Unit) {
+    val p = palette
+    Box(Modifier.fillMaxSize().background(p.bg).statusBarsPadding()) {
+        Column(Modifier.fillMaxSize()) {
+            Row(Modifier.fillMaxWidth().padding(16.dp, 8.dp, 16.dp, 0.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(40.dp).shadow(8.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow).background(p.card, CircleShape).clickable(onClick = onBack),
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Icons.Outlined.ArrowBack, "Back", tint = p.ink, modifier = Modifier.size(18.dp)) }
+            }
+            Box(Modifier.weight(1f)) { CalendarScreen(vm) { w, d -> onOpen(w, d) } }
         }
     }
 }

@@ -143,7 +143,7 @@ data class Profile(
     val remindersJson: String = "",
     /** v1.9: protein | goal | snack | cutting | bulking — the lens a scan report opens on. */
     val lensDefault: String = "protein",
-    /** v1.9: Groups (coming next) — share protein & calories, or streaks only. */
+    /** Squads: share protein & calories with squad-mates, or streaks only. */
     val shareStats: Boolean = true,
 ) {
     /** The lens a report opens on: `goal` follows the weight goal (lose → cutting, gain → bulking, else protein). */
@@ -435,6 +435,8 @@ data class PlateItem(
     /** table (numbers from the food database) | estimated (the model's own) */
     val source: String,
     val foodId: String?,
+    /** v2.0: "restaurant" when the server scaled the portion and added the hidden oil. */
+    val cookedIn: String? = null,
 ) {
     fun withGrams(g: Double): PlateItem {
         if (grams <= 0.0) return copy(grams = g)
@@ -444,7 +446,7 @@ data class PlateItem(
 
     fun toMealItem() = MealItem(
         foodId = foodId, name = name, grams = grams, calories = calories, proteinG = proteinG, carbsG = carbsG, fatG = fatG,
-        source = source, confidence = when (confidence) { "high" -> 0.9; "medium" -> 0.6; else -> 0.3 }, micros = micros,
+        source = source, confidence = when (confidence) { "high" -> 0.9; "medium" -> 0.6; else -> 0.3 }, micros = micros, cookedIn = cookedIn,
     )
 
     companion object {
@@ -459,6 +461,7 @@ data class PlateItem(
             micros = MealItem.micros(o.optJSONObject("micros")),
             source = o.optString("source", "estimated"),
             foodId = if (o.isNull("food_id")) null else o.optString("food_id").ifBlank { null },
+            cookedIn = if (o.isNull("cooked_in")) null else o.optString("cooked_in").ifBlank { null },
         )
     }
 }
@@ -473,6 +476,8 @@ data class PlateEstimate(
     val photoPath: String?,
     /** Signed URL for a stored plate photo (only on reports opened from History). */
     val photoUrl: String? = null,
+    /** v2.0: "restaurant" when the note / plate description said it was eaten out. */
+    val portionHint: String? = null,
 ) {
     companion object {
         fun from(o: JSONObject): PlateEstimate {
@@ -485,6 +490,7 @@ data class PlateEstimate(
                 plateNote = o.optString("plate_note"),
                 photoPath = if (o.isNull("photo_path")) null else o.optString("photo_path").ifBlank { null },
                 photoUrl = if (o.isNull("photo_url")) null else o.optString("photo_url").ifBlank { null },
+                portionHint = if (o.isNull("portion_hint")) null else o.optString("portion_hint").ifBlank { null },
             )
         }
     }
@@ -605,5 +611,71 @@ data class DescribedExercise(
             met = o.optDouble("met", 0.0),
             kcal = o.optDouble("kcal", 0.0),
         )
+    }
+}
+
+// ---- v2.0: squads ----
+
+/** A squad the signed-in user belongs to (`bandlog.groups`). */
+data class Squad(val id: String, val name: String, val code: String, val ownerId: String) {
+    companion object {
+        fun from(o: JSONObject) = Squad(o.getString("id"), o.optString("name"), o.optString("code"), o.optString("owner_id"))
+    }
+}
+
+/** One day of a squad-mate's rollup; the numbers are null for members who share streaks only. */
+data class SquadDay(
+    val date: String,
+    val trained: Boolean,
+    val weekStreak: Int,
+    val proteinG: Double?,
+    val calories: Double?,
+    val burned: Double?,
+    val meals: Int?,
+) {
+    companion object {
+        private fun JSONObject.dblOrNull(k: String): Double? = if (isNull(k) || !has(k)) null else optDouble(k).takeIf { !it.isNaN() }
+        fun from(o: JSONObject) = SquadDay(
+            date = o.optString("date").take(10),
+            trained = o.optBoolean("trained", false),
+            weekStreak = o.optInt("week_streak", 0),
+            proteinG = o.dblOrNull("protein_g"),
+            calories = o.dblOrNull("calories"),
+            burned = o.dblOrNull("burned"),
+            meals = if (o.isNull("meals") || !o.has("meals")) null else o.optInt("meals"),
+        )
+    }
+}
+
+/** One row of `bandlog.squad_board(g)`. */
+data class SquadMember(
+    val userId: String,
+    val name: String,
+    val shareStats: Boolean,
+    val isOwner: Boolean,
+    val days: List<SquadDay>,
+) {
+    /** The streak from their newest rollup (0 when they haven't opened the app this week). */
+    val weekStreak: Int get() = days.maxByOrNull { it.date }?.weekStreak ?: 0
+    fun day(date: String): SquadDay? = days.firstOrNull { it.date == date }
+
+    companion object {
+        fun from(o: JSONObject): SquadMember {
+            val arr = o.optJSONArray("days") ?: JSONArray()
+            return SquadMember(
+                userId = o.getString("user_id"),
+                name = o.optString("name").ifBlank { "Member" },
+                shareStats = if (o.isNull("share_stats")) true else o.optBoolean("share_stats", true),
+                isOwner = o.optBoolean("is_owner", false),
+                days = (0 until arr.length()).map { SquadDay.from(arr.getJSONObject(it)) },
+            )
+        }
+    }
+}
+
+/** A nudge a squad-mate sent me in the last 24 h (`bandlog.my_nudges()`). */
+data class Nudge(val id: String, val groupName: String, val fromName: String, val createdAt: String) {
+    companion object {
+        fun from(o: JSONObject) = Nudge(o.getString("id"), o.optString("group_name"), o.optString("from_name").ifBlank { "A squad-mate" }, o.optString("created_at"))
     }
 }

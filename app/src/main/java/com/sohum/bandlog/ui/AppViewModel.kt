@@ -95,15 +95,55 @@ class AppViewModel : ViewModel() {
     fun refreshHealth(context: android.content.Context) {
         viewModelScope.launch {
             val ctx = context.applicationContext
-            if (!com.sohum.bandlog.util.Health.available(ctx)) { healthConnected = false; return@launch }
+            if (!com.sohum.bandlog.util.Health.available(ctx)) { healthConnected = false; com.sohum.bandlog.util.Wrap.setHealthConnected(ctx, false); return@launch }
             healthConnected = com.sohum.bandlog.util.Health.hasPermissions(ctx)
+            com.sohum.bandlog.util.Wrap.setHealthConnected(ctx, healthConnected)
             if (healthConnected) {
                 val r = com.sohum.bandlog.util.Health.todayResult(ctx)
                 healthToday = r.getOrNull(); healthError = r.exceptionOrNull()?.let { "Health Connect read failed: ${it.message}" }
                 // Stamp today's burn so the Weekly Energy chart has a history to draw.
                 healthToday?.let { com.sohum.bandlog.util.BurnedCache.put(ctx, Dates.today(), it.activeKcal) }
-            } else { healthToday = null; healthError = null }
+                val y = Dates.addDays(Dates.today(), -1)
+                healthBurnHistory = mapOf(y to com.sohum.bandlog.util.BurnedCache.get(ctx, y))
+            } else { healthToday = null; healthError = null; healthBurnHistory = emptyMap() }
+            pushRollup()
         }
+    }
+
+    /** Health Connect active kcal stamped on earlier days (yesterday), for the rollup and a past-midnight wrap. */
+    private var healthBurnHistory: Map<String, Double> = emptyMap()
+
+    /** Everything burned on [date], deduplicated exactly as Home does. */
+    fun burnedOn(date: String): Double =
+        exerciseKcal(date) + if (date == today) (healthToday?.activeKcal ?: 0.0) else if (healthConnected) (healthBurnHistory[date] ?: 0.0) else 0.0
+
+    // ---- v2.0: squads ----
+
+    /** Nudges squad-mates sent me in the last 24 h (Home's banner). */
+    var nudges by mutableStateOf<List<com.sohum.bandlog.data.Nudge>>(emptyList()); private set
+    private var rolledYesterday = false
+
+    /**
+     * Upserts today's `daily_stats` row (and yesterday's on the first push of this app session) so
+     * the squad board is current: trained, protein, calories, burned, meals, week streak.
+     */
+    private fun pushRollup() {
+        if (!signedIn || !loadedOnce) return
+        val t = today
+        val dates = if (rolledYesterday) listOf(t) else listOf(t, Dates.addDays(t, -1))
+        val streak = weekStreak
+        val trainedDates = workoutDates.toSet()
+        val rows = dates.map { d ->
+            val tot = com.sohum.bandlog.data.totalsFor(meals, d)
+            Api.DailyStat(d, d in trainedDates, tot.protein, tot.calories, burnedOn(d), meals.count { it.date == d }, streak)
+        }
+        viewModelScope.launch { runCatching { Api.upsertDailyStats(rows); rolledYesterday = true } }
+    }
+
+    /** Tonight's wrap (or last night's, after midnight), from the same data as Home. */
+    fun wrap(): com.sohum.bandlog.util.Wrap.Result {
+        val d = com.sohum.bandlog.util.Wrap.wrapDate()
+        return com.sohum.bandlog.util.Wrap.compute(profile, workouts, meals, burnedOn(d), d)
     }
 
     /** Called after a workout save; mirrors it into Health Connect when connected. */
@@ -155,9 +195,11 @@ class AppViewModel : ViewModel() {
                     val m = async { Api.meals(from, t) }
                     val g = async { runCatching { Api.weights() }.getOrDefault(weights) }
                     val x = async { runCatching { Api.exercises(from, t) }.getOrDefault(exercises) }
-                    profile = p.await(); workouts = w.await(); meals = m.await(); weights = g.await(); exercises = x.await()
+                    val n = async { runCatching { Api.myNudges() }.getOrDefault(nudges) }
+                    profile = p.await(); workouts = w.await(); meals = m.await(); weights = g.await(); exercises = x.await(); nudges = n.await()
                 }
                 loadedOnce = true
+                pushRollup()
             } catch (e: AuthException) {
                 signedIn = false; error = e.message
             } catch (e: Exception) {
@@ -281,7 +323,7 @@ class AppViewModel : ViewModel() {
             SupabaseAuth.signOut()
             signedIn = false; workouts = emptyList(); meals = emptyList(); weights = emptyList(); exercises = emptyList()
             profile = Profile(); loadedOnce = false; totalMeals = 0; allWorkoutDates = emptyList()
-            onboardingSkipped = false
+            onboardingSkipped = false; nudges = emptyList(); rolledYesterday = false
         }
     }
 }

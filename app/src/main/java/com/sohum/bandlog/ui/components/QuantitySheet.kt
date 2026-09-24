@@ -70,6 +70,8 @@ fun QuantitySheet(
     initial: Quantity? = null,
     title: String = "How much?",
     cta: String = "Add",
+    /** Open with "Restaurant portion" already on (the Restaurant preset row). */
+    restaurantStart: Boolean = false,
     onDone: (MealItem, Quantity) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -83,7 +85,11 @@ fun QuantitySheet(
     val value = text.toDoubleOrNull() ?: 0.0
     val q = Quantity(unit, value)
     val grams = food.grams(q)
-    val item = food.item(q)
+    // v2.0 "Restaurant portion": x1.4 the amount and, for dal / sabzi / protein dishes, a hidden tsp of oil.
+    val allowRestaurant = com.sohum.bandlog.util.Restaurant.allowed(food)
+    var restaurant by remember(food) { mutableStateOf(restaurantStart && allowRestaurant) }
+    val oily = com.sohum.bandlog.util.Restaurant.oily(food.name, food.category)
+    val item = food.item(q).let { if (restaurant) com.sohum.bandlog.util.Restaurant.apply(it, oily) else it }
     val servingLabel = food.serving?.label
 
     fun pick(next: Quantity) { unit = next.unit; text = fmt(next.value) }
@@ -158,13 +164,29 @@ fun QuantitySheet(
                     }
                 }
             }
-            Spacer(Modifier.height(6.dp))
+            if (allowRestaurant) {
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    Modifier.fillMaxWidth().border(1.5.dp, p.hair, RoundedCornerShape(16.dp)).clickable { restaurant = !restaurant }.padding(start = 14.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Restaurant portion", fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink)
+                        Text("×${com.sohum.bandlog.util.Restaurant.MULTIPLIER} the amount" + (if (oily) " + 1 tsp hidden oil" else "") + " — outside kitchens serve bigger", fontSize = 11.sp, color = p.muted, lineHeight = 14.sp)
+                    }
+                    androidx.compose.material3.Switch(
+                        restaurant, { restaurant = it },
+                        colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = p.btn, checkedThumbColor = p.btnInk),
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+            } else Spacer(Modifier.height(6.dp))
 
             // Live preview.
             Row(Modifier.fillMaxWidth().background(p.card2, RoundedCornerShape(16.dp)).padding(14.dp, 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("${item.calories.roundToInt()} kcal", fontSize = 22.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink, lineHeight = 24.sp)
-                    Text("${fmt((grams * 10).roundToInt() / 10.0)} g total", fontSize = 12.sp, color = p.muted)
+                    Text("${fmt((item.grams * 10).roundToInt() / 10.0)} g total" + (if (restaurant) " · restaurant" else ""), fontSize = 12.sp, color = p.muted)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     MacroDot("${fmt(item.proteinG)}g", p.red); MacroDot("${fmt(item.carbsG)}g", p.orange); MacroDot("${fmt(item.fatG)}g", p.blue)

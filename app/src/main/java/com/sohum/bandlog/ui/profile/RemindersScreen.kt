@@ -84,7 +84,7 @@ fun RemindersScreen(vm: AppViewModel, onBack: () -> Unit) {
     SubPage("Tracking reminders", onBack) {
         Rise(0) {
             Text(
-                "A quiet nudge at each meal so nothing goes unlogged. Tap a time to change it.",
+                "A quiet nudge at each meal so nothing goes unlogged, and a 9 pm wrap of your day. Tap a time to change it.",
                 fontSize = 13.sp, color = p.muted, lineHeight = 18.sp,
             )
         }
@@ -114,7 +114,7 @@ fun RemindersScreen(vm: AppViewModel, onBack: () -> Unit) {
                 Column(Modifier.padding(horizontal = 16.dp)) {
                     Reminders.SLOTS.forEachIndexed { i, slot ->
                         if (i > 0) Hair()
-                        val pref = prefs[slot.key] ?: Reminders.Pref(false, slot.defaultTime)
+                        val pref = prefs[slot.key] ?: Reminders.Pref(slot.defaultOn, slot.defaultTime)
                         Row(
                             Modifier.fillMaxWidth().padding(vertical = 10.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,

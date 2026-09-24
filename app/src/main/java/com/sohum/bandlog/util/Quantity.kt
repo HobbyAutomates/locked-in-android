@@ -35,6 +35,8 @@ data class QuantityFood(
     val packGrams: Double? = null,
     /** table | estimated | scan */
     val source: String = "table",
+    /** v2.0: the preset category (dal / sabzi / protein / restaurant …) — decides the restaurant oil. */
+    val category: String? = null,
 ) {
     val serving: Serving? get() = servings.firstOrNull { it.label == defaultServing } ?: servings.firstOrNull()
     val servingGrams: Double? get() = serving?.grams?.takeIf { it > 0 }
@@ -93,7 +95,7 @@ data class QuantityFood(
         fun from(p: FoodPreset, serving: String? = p.defaultServing) = QuantityFood(
             name = p.label, nameHi = p.labelHi, foodId = p.foodId,
             calories = p.calories, proteinG = p.proteinG, carbsG = p.carbsG, fatG = p.fatG,
-            micros = p.micros, servings = p.servings, defaultServing = serving, source = "table",
+            micros = p.micros, servings = p.servings, defaultServing = serving, source = "table", category = p.category,
         )
 
         fun from(h: FoodHit) = QuantityFood(
@@ -129,5 +131,43 @@ data class QuantityFood(
         /** Dishes that usually carry cooking fat — the "Cooked in…" row shows after these. */
         private val COOKED = Regex("\\b(dal|daal|dhal|sambar|rajma|chole|chana|sabzi|sabji|bhindi|gobi|paneer|bharta|paratha|omelette|omelet|egg|anda|bhurji|curry|matar|aloo|palak|khichdi|poha|upma|pulao|biryani)\\b", RegexOption.IGNORE_CASE)
         fun wantsCookedIn(name: String, category: String? = null): Boolean = category == "dal" || category == "sabzi" || COOKED.containsMatchIn(name)
+    }
+}
+
+/**
+ * v2.0 restaurant portions (mirrors the web's lib/quantity.ts): outside kitchens serve about 1.4x a
+ * home katori, and curries / dal / sabzi carry roughly a teaspoon more oil than the home recipe.
+ */
+object Restaurant {
+    const val MULTIPLIER = 1.4
+    /** 1 tsp of oil, added to the item's fat (and its 44 kcal) rather than as a row of its own. */
+    const val OIL_G = 5.0
+    private const val OIL_KCAL_PER_G = 8.84
+    private val FAST_FOOD = Regex("\\b(pizza|burger|fries|momo|momos|sandwich)\\b", RegexOption.IGNORE_CASE)
+
+    /** Whether the toggle also adds the hidden teaspoon of oil. */
+    fun oily(name: String, category: String?): Boolean = when (category) {
+        "dal", "sabzi", "protein" -> true
+        "restaurant" -> !FAST_FOOD.containsMatchIn(name)
+        null -> QuantityFood.wantsCookedIn(name)
+        else -> false
+    }
+
+    /** Packaged scans come with a printed serving; everything else can be a restaurant portion. */
+    fun allowed(food: QuantityFood): Boolean = food.source != "scan"
+
+    /** x1.4 the amount, +1 tsp oil when [oily], "(restaurant)" on the name, cooked_in = "restaurant". */
+    fun apply(item: MealItem, oily: Boolean): MealItem {
+        val scaled = item.withGrams(((item.grams * MULTIPLIER) * 10).roundToInt() / 10.0)
+        val oil = if (oily) OIL_G else 0.0
+        return scaled.copy(
+            name = if (item.name.endsWith("(restaurant)", ignoreCase = true)) item.name else "${item.name} (restaurant)",
+            calories = ((scaled.calories + oil * OIL_KCAL_PER_G) * 10).roundToInt() / 10.0,
+            proteinG = (scaled.proteinG * 10).roundToInt() / 10.0,
+            carbsG = (scaled.carbsG * 10).roundToInt() / 10.0,
+            fatG = ((scaled.fatG + oil) * 10).roundToInt() / 10.0,
+            micros = scaled.micros.mapValues { (it.value * 10).roundToInt() / 10.0 },
+            cookedIn = "restaurant",
+        )
     }
 }

@@ -750,6 +750,12 @@ fun PhotoReview(est: PlateEstimate, photo: Bitmap?, readOnly: Boolean, onSave: (
                 Column(Modifier.weight(1f)) {
                     Text(est.plateNote.ifBlank { "Your plate" }, fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink, lineHeight = 20.sp)
                     Text("This is an estimate — edit anything.", fontSize = 12.sp, color = p.muted)
+                    if (est.portionHint == "restaurant") {
+                        Spacer(Modifier.height(6.dp))
+                        Box(Modifier.background(p.orangeBg, androidx.compose.foundation.shape.CircleShape).padding(horizontal = 10.dp, vertical = 4.dp)) {
+                            Text("Restaurant portion · ×1.4 + hidden oil", fontSize = 11.sp, fontWeight = FontWeight(700), color = p.orange)
+                        }
+                    }
                 }
             }
         }

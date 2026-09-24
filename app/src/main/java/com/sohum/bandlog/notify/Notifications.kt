@@ -48,4 +48,26 @@ object Notifications {
             .build()
         runCatching { NotificationManagerCompat.from(context).notify(id, n) }
     }
+
+    /** The 9 pm daily wrap. Tapping it opens Home with the Wrap card on top. */
+    @SuppressLint("MissingPermission")
+    fun notifyWrap(context: Context, id: Int, line: String) {
+        ensureChannel(context)
+        val open = Intent(context, MainActivity::class.java).apply {
+            putExtra(MainActivity.EXTRA_OPEN, MainActivity.OPEN_WRAP)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pi = PendingIntent.getActivity(context, id, open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val n = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("Your day, wrapped")
+            .setContentText(line)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(line))
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setAutoCancel(true)
+            .setContentIntent(pi)
+            .build()
+        runCatching { NotificationManagerCompat.from(context).notify(id, n) }
+    }
 }

@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.CircularProgressIndicator
@@ -57,7 +58,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 @Composable
-fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit, onLogExercise: () -> Unit = {}) {
+fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit, onLogExercise: () -> Unit = {}, onOpenCalendar: () -> Unit = {}, wrapTick: Int = 0) {
     val p = palette
     val today = vm.today
     var selected by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(today) }
@@ -71,6 +72,12 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit, onLogExerci
     val workoutBurn = vm.exercises.filter { it.date == selected && it.source == "workout" }.associate { it.note to it.kcal }
     val trained = vm.workoutDates.toSet()
     val ctx = androidx.compose.ui.platform.LocalContext.current
+    // v2.0: the 9 pm wrap (21:00–04:00, dismissible per day; a tapped notification brings it back) and the nudge banner.
+    val wrapDate = com.sohum.bandlog.util.Wrap.wrapDate()
+    var wrapHidden by androidx.compose.runtime.remember(wrapTick, wrapDate) { androidx.compose.runtime.mutableStateOf(com.sohum.bandlog.util.Wrap.dismissed(ctx, wrapDate)) }
+    val showWrap = com.sohum.bandlog.util.Wrap.inWindow() && !wrapHidden && vm.loadedOnce
+    val latestNudge = vm.nudges.firstOrNull()
+    var nudgeHidden by androidx.compose.runtime.remember(latestNudge?.id) { androidx.compose.runtime.mutableStateOf(latestNudge?.let { com.sohum.bandlog.util.Wrap.nudgeDismissed(ctx, it.id) } ?: true) }
     // Steps and burned calories go stale while the app is backgrounded; re-read on every resume.
     val owner = androidx.compose.ui.platform.LocalLifecycleOwner.current
     androidx.compose.runtime.DisposableEffect(owner) {
@@ -115,6 +122,12 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit, onLogExerci
                 }
                 ErrorNote(vm.error, Modifier.padding(top = 8.dp))
             }
+        }
+        if (latestNudge != null && !nudgeHidden) item(key = "nudge") {
+            Rise(1) { NudgeBanner(vm.nudges) { com.sohum.bandlog.util.Wrap.dismissNudge(ctx, latestNudge.id); nudgeHidden = true } }
+        }
+        if (showWrap) item(key = "wrap") {
+            Rise(1) { WrapCard(vm.wrap()) { com.sohum.bandlog.util.Wrap.dismiss(ctx, wrapDate); wrapHidden = true } }
         }
         item { Rise(1) { WeekStrip(today, selected, trained) { selected = it } } }
         item {
@@ -183,6 +196,24 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit, onLogExerci
         }
         item {
             Rise(4) {
+                // Calendar left the tab bar for Squad in v2.0; it lives one tap away here.
+                Card(padding = 14.dp, onClick = onOpenCalendar) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(38.dp).background(p.card2, androidx.compose.foundation.shape.RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Outlined.CalendarMonth, null, tint = p.ink, modifier = Modifier.size(20.dp))
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Calendar", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
+                            Text("Every session and meal, month by month", fontSize = 12.sp, color = p.muted)
+                        }
+                        Text("→", fontSize = 18.sp, fontWeight = FontWeight(600), color = p.muted)
+                    }
+                }
+            }
+        }
+        item {
+            Rise(4) {
                 RowSpaceBetween {
                     Text(if (isToday) "Recently logged" else Dates.long(selected), fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.5).sp, color = p.ink)
                     if (vm.loading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = p.muted)
@@ -196,6 +227,87 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit, onLogExerci
         items(todayWorkouts, key = { "w" + it.id }) { w -> Rise(5) { WorkoutRow(w, burnKcal = workoutBurn[w.id]) { onOpenWorkout(w) } } }
         items(todayExercises, key = { "e" + it.id }) { e -> Rise(5) { ExerciseRow(e) { vm.launch { vm.deleteExercise(e.id) } } } }
         items(todayMeals, key = { "m" + it.id }) { m -> Rise(6) { MealRow(m, onDelete = { vm.launch { vm.deleteMeal(m.id) } }, onFeedback = { r -> vm.launch { runCatching { com.sohum.bandlog.data.Api.feedback(r, m.rawText, m.id) } } }) } }
+    }
+}
+
+/** "Sohum nudged you" — squad-mates poking you to train, dismissible. Text with an inline icon, no emoji. */
+@Composable
+private fun NudgeBanner(nudges: List<com.sohum.bandlog.data.Nudge>, onDismiss: () -> Unit) {
+    val p = palette
+    val names = nudges.map { it.fromName }.distinct()
+    val who = when (names.size) { 1 -> names[0]; 2 -> "${names[0]} and ${names[1]}"; else -> "${names[0]} and ${names.size - 1} others" }
+    Row(
+        Modifier.fillMaxWidth().background(p.btn, androidx.compose.foundation.shape.RoundedCornerShape(20.dp)).padding(start = 14.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(36.dp).background(p.btnInk.copy(alpha = 0.14f), CircleShape), contentAlignment = Alignment.Center) {
+            Icon(com.sohum.bandlog.ui.components.FistIcon, null, tint = p.btnInk, modifier = Modifier.size(18.dp))
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text("$who nudged you", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.btnInk)
+            Text("${nudges.first().groupName} · get a session in today", fontSize = 12.sp, color = p.btnInk.copy(alpha = 0.72f), maxLines = 1)
+        }
+        IconButton(onClick = onDismiss, Modifier.size(36.dp)) { Icon(com.sohum.bandlog.ui.components.CrossIcon, "Dismiss", tint = p.btnInk, modifier = Modifier.size(16.dp)) }
+    }
+}
+
+/** The 9 pm daily wrap card: protein, calories vs budget, sessions, tomorrow's session, best meal, share. */
+@Composable
+private fun WrapCard(w: com.sohum.bandlog.util.Wrap.Result, onDismiss: () -> Unit) {
+    val p = palette
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    Card(padding = 18.dp) {
+        RowSpaceBetween {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(com.sohum.bandlog.ui.components.MoonStarIcon, null, tint = p.muted, modifier = Modifier.size(16.dp))
+                Text(if (w.isYesterday) "  Yesterday's wrap" else "  Today's wrap", fontSize = 13.sp, fontWeight = FontWeight(700), color = p.muted)
+            }
+            Box(Modifier.size(30.dp).background(p.card2, CircleShape).clickable(onClick = onDismiss), contentAlignment = Alignment.Center) {
+                Icon(com.sohum.bandlog.ui.components.CrossIcon, "Dismiss the wrap", tint = p.muted, modifier = Modifier.size(13.dp))
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            WrapStat(Modifier.weight(1f), "${w.protein} g", if (w.proteinHit) "protein, hit" else "protein · ${(w.proteinTarget - w.protein).coerceAtLeast(0)} short", if (w.proteinHit) p.green else p.red, check = w.proteinHit)
+            WrapStat(Modifier.weight(1f), String.format(Locale.US, "%,d", w.calories), "of ${String.format(Locale.US, "%,d", w.calorieBudget)} kcal", p.ink)
+            WrapStat(Modifier.weight(1f), "${w.sessions}/${w.sessionTarget}", "sessions this week", p.ink)
+        }
+        Spacer(Modifier.height(12.dp))
+        val frac = (w.protein.toFloat() / w.proteinTarget.coerceAtLeast(1)).coerceIn(0f, 1f)
+        Box(Modifier.fillMaxWidth().height(6.dp).background(p.track, CircleShape)) {
+            Box(Modifier.fillMaxWidth(frac).height(6.dp).background(if (w.proteinHit) p.green else p.red, CircleShape))
+        }
+        Spacer(Modifier.height(12.dp))
+        Row {
+            Text("Tomorrow: ", fontSize = 14.sp, color = p.muted)
+            Text(w.tomorrow, fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink)
+        }
+        w.bestMeal?.let { Text("Best meal: $it · ${w.bestMealProtein} g protein", fontSize = 13.sp, color = p.muted, maxLines = 1, modifier = Modifier.padding(top = 2.dp)) }
+        Spacer(Modifier.height(12.dp))
+        Row(
+            Modifier.fillMaxWidth().height(42.dp).background(p.card2, CircleShape).clickable {
+                runCatching {
+                    ctx.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(android.content.Intent.EXTRA_TEXT, w.shareText) }, "Share my day"))
+                }
+            },
+            horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(com.sohum.bandlog.ui.components.ShareIcon, null, tint = p.ink, modifier = Modifier.size(16.dp))
+            Text("  Share my day", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink)
+        }
+    }
+}
+
+@Composable
+private fun WrapStat(modifier: Modifier, value: String, label: String, color: Color, check: Boolean = false) {
+    val p = palette
+    Column(modifier.background(p.card2, androidx.compose.foundation.shape.RoundedCornerShape(16.dp)).padding(horizontal = 12.dp, vertical = 10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(value, fontSize = 18.sp, fontWeight = FontWeight(800), letterSpacing = (-0.5).sp, color = color, maxLines = 1)
+            if (check) Icon(com.sohum.bandlog.ui.components.CheckIcon, null, tint = color, modifier = Modifier.padding(start = 3.dp).size(13.dp))
+        }
+        Text(label, fontSize = 11.sp, color = p.muted, lineHeight = 13.sp, maxLines = 2)
     }
 }
 
