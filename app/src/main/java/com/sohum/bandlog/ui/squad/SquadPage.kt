@@ -101,17 +101,22 @@ fun SquadOverlays(vm: AppViewModel) {
         sq.profileFlow -> { BackHandler { sq.profileFlow = false; sq.profileFlowDismissed = true }; UsernameFlow(vm) { sq.profileFlow = false; sq.profileFlowDismissed = true } }
         sq.creating -> { BackHandler { sq.creating = false }; CreateSquadFlow(sq, display) { sq.creating = false } }
         open != null && sq.infoOpen -> { BackHandler { sq.infoOpen = false }; SquadInfoPage(sq, open) { sq.infoOpen = false } }
-        open != null -> { BackHandler { sq.close() }; SquadPage(sq, open) }
+        open != null -> { BackHandler { sq.close() }; SquadPage(sq, open, vm = vm) }
     }
 }
 
-private enum class SquadTab(val label: String) { CHAT("Chat"), FEED("Feed"), BOARD("Leaderboard") }
+private enum class SquadTab(val label: String) { CHAT("Chat"), FEED("Feed"), BOARD("Leaderboard"), BATTLE("Battle") }
 
-/** Cal AI group page: header (icon, name, members button) and the Chat · Feed · Leaderboard tabs. */
+/**
+ * Cal AI group page: header (icon, name, members button) and the Chat · Feed · Leaderboard tabs,
+ * plus a v2.7 Battle tab (docs/food-battle-spec.md) when the squad has Squad Food Battle on.
+ * [vm] is only used for the Battle tab's Snap flow (existing plate-photo scan + meal save).
+ */
 @Composable
-fun SquadPage(sq: SquadViewModel, squad: Squad, initialTab: Int? = null) {
+fun SquadPage(sq: SquadViewModel, squad: Squad, initialTab: Int? = null, vm: AppViewModel? = null) {
     val p = palette
-    val tabs = if (sq.feedSupported == false) listOf(SquadTab.BOARD) else SquadTab.entries.toList()
+    val tabs = (if (sq.feedSupported == false) listOf(SquadTab.BOARD) else listOf(SquadTab.CHAT, SquadTab.FEED, SquadTab.BOARD)) +
+        (if (sq.battleEnabled) listOf(SquadTab.BATTLE) else emptyList())
     var tab by remember(squad.id) { mutableIntStateOf(initialTab ?: if (sq.feedSupported == false) 0 else 1) }
     val current = tabs.getOrElse(tab) { tabs.last() }
     Column(Modifier.fillMaxSize().background(p.bg).statusBarsPadding()) {
@@ -146,6 +151,7 @@ fun SquadPage(sq: SquadViewModel, squad: Squad, initialTab: Int? = null) {
                 SquadTab.CHAT -> ChatTab(sq)
                 SquadTab.FEED -> FeedTab(sq)
                 SquadTab.BOARD -> LeaderboardTab(sq)
+                SquadTab.BATTLE -> if (vm != null) BattleBoardTab(sq, vm, squad.id) else LeaderboardTab(sq)
             }
         }
     }
@@ -446,6 +452,8 @@ fun SquadInfoPage(sq: SquadViewModel, squad: Squad, onBack: () -> Unit) {
                     fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink, textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().clickable(enabled = !sq.busy) { sq.setPrivate(squad.id, !squad.isPrivate) }.padding(vertical = 14.dp),
                 )
+                Box(Modifier.fillMaxWidth().height(1.dp).background(p.hair))
+                BattleToggleRow(sq, squad.id)
             }
             if (confirmLeave) {
                 Column(Modifier.padding(20.dp).fillMaxWidth().background(p.card, RoundedCornerShape(20.dp)).padding(16.dp)) {

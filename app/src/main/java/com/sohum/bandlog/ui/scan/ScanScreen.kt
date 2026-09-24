@@ -109,6 +109,7 @@ import com.sohum.bandlog.ui.log.NumberField
 import com.sohum.bandlog.ui.theme.palette
 import com.sohum.bandlog.ui.today.fmt
 import com.sohum.bandlog.util.Dates
+import com.sohum.bandlog.util.LabelParse
 import com.sohum.bandlog.util.QuantityFood
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -121,6 +122,9 @@ import kotlin.math.roundToInt
 
 /** Under this many characters the phone's read is treated as a miss and the photo goes up too. */
 private const val OCR_MIN_CHARS = 120
+
+/** Shown instead of a per-100g table when the server found no real nutrition data to parse. */
+private const val BACK_OF_PACK_HINT = "Flip the pack and scan the Nutrition Facts table for real numbers."
 
 private val LENSES = listOf("protein" to "Protein", "snack" to "Snack", "cutting" to "Cutting", "bulking" to "Bulking")
 
@@ -206,7 +210,12 @@ private fun ScanForm(
     suspend fun labelFrom(bmp: Bitmap?) {
         if (ocr.isBlank() && bmp != null) ocr = runCatching { Ocr.read(bmp) }.getOrDefault("")
         val text = ocr.trim()
-        val b64 = if (text.length < OCR_MIN_CHARS && bmp != null) withContext(Dispatchers.IO) { toJpegBase64(bmp, 88) } else null
+        // Send the photo too unless the on-device OCR text actually contains a nutrition table —
+        // front-of-pack marketing copy ("...21g Non GMO Protein...") can clear OCR_MIN_CHARS
+        // without ever showing a number, and the server has no way to read the back of the pack
+        // if the image never arrives (the seeds-label bug: it fabricated a table from that text).
+        val hasTable = text.length >= OCR_MIN_CHARS && LabelParse.parse(text).hasTable
+        val b64 = if (!hasTable && bmp != null) withContext(Dispatchers.IO) { toJpegBase64(bmp, 88) } else null
         report = Api.scanLabel(text, note, b64, lens)
     }
 
@@ -541,9 +550,24 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Uni
 
             TrustMeter(r.verdict, r.verdictReason)
 
+            if (r.needsBackOfPack) {
+                Card {
+                    Text("One serving", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
+                    Spacer(Modifier.height(6.dp))
+                    Text(BACK_OF_PACK_HINT, fontSize = 13.sp, color = p.orange, lineHeight = 18.sp)
+                }
+            } else
             // One serving as a donut, and against the whole day.
             if (food != null && (food.proteinG + food.carbsG + food.fatG) > 0) Card {
-                Text("One serving", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("One serving", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
+                    if (r.nutritionSource != null && r.nutritionSource != "label") {
+                        Text(
+                            "ESTIMATE", fontSize = 10.sp, fontWeight = FontWeight(700), color = p.orange,
+                            modifier = Modifier.background(p.orangeBg, RoundedCornerShape(999.dp)).padding(horizontal = 8.dp, vertical = 3.dp),
+                        )
+                    }
+                }
                 Text(if (r.servingG != null && r.servingG > 0) "${r.servingG.roundToInt()} g · where the calories come from" else "Per 100 g · where the calories come from", fontSize = 12.sp, color = p.muted)
                 Spacer(Modifier.height(12.dp))
                 val k = (r.servingG?.takeIf { it > 0 } ?: 100.0) / 100.0
@@ -686,10 +710,22 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Uni
  * label gives a serving, else per 100 g (and it says so). Null when the report has no numbers.
  */
 private fun SummaryGrid(r: LabelReport): (@Composable () -> Unit)? {
+    if (r.needsBackOfPack) {
+        return {
+            val p = palette
+            Card(padding = 14.dp) {
+                Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("!", fontSize = 14.sp, fontWeight = FontWeight(800), color = p.orange)
+                    Text(BACK_OF_PACK_HINT, fontSize = 13.sp, lineHeight = 18.sp, color = p.ink)
+                }
+            }
+        }
+    }
     val keys = listOf("protein_g", "calories", "sugar_g", "fat_g")
     if (keys.none { r.per100[it] != null }) return null
     val serving = r.servingG?.takeIf { it > 0 }
     val k = (serving ?: 100.0) / 100.0
+    val isEstimate = r.nutritionSource != null && r.nutritionSource != "label"
     fun v(key: String): String = r.per100[key]?.let { x ->
         val y = x * k
         if (key == "calories") "${y.roundToInt()}" else fmt(round1(y))
@@ -697,10 +733,18 @@ private fun SummaryGrid(r: LabelReport): (@Composable () -> Unit)? {
     return {
         val p = palette
         Card(padding = 14.dp) {
-            Text(
-                if (serving != null) "Per serving · ${serving.roundToInt()} g" else "Per 100 g",
-                fontSize = 12.sp, fontWeight = FontWeight(600), color = p.muted,
-            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    if (serving != null) "Per serving · ${serving.roundToInt()} g" else "Per 100 g",
+                    fontSize = 12.sp, fontWeight = FontWeight(600), color = p.muted,
+                )
+                if (isEstimate) {
+                    Text(
+                        "ESTIMATE", fontSize = 10.sp, fontWeight = FontWeight(700), color = p.orange,
+                        modifier = Modifier.background(p.orangeBg, RoundedCornerShape(999.dp)).padding(horizontal = 8.dp, vertical = 3.dp),
+                    )
+                }
+            }
             Spacer(Modifier.height(10.dp))
             val cells = listOf(
                 Triple(v("protein_g"), "g", "Protein") to p.red,

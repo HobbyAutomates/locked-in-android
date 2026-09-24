@@ -425,6 +425,7 @@ object Api {
             items = (0 until items.length()).map { MealItem.from(items.getJSONObject(it)) },
             assumptions = strings("assumptions"),
             unparsed = strings("unparsed"),
+            water = ParsedWater.from(o.optJSONObject("water")),
         )
     }
 

@@ -157,6 +157,8 @@ fun MealForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
     var cookedFor by remember { mutableStateOf<Int?>(null) }
     var fixOpen by remember { mutableStateOf(false) }
     var repeatOpen by remember { mutableStateOf(false) }
+    var waterNotice by remember { mutableStateOf<com.sohum.bandlog.data.ParsedWater?>(null) }
+    var waterUndone by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         vm.loadSavedMeals(); vm.loadPresets()
         // A scan's "Log 1 serving" lands here with the item already on the plate.
@@ -171,6 +173,19 @@ fun MealForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
     val fats = remember(vm.presets) { vm.presets.filter { it.category == "fat" } }
 
     fun say(msg: String) { toast = msg; toastTick++ }
+
+    /**
+     * v2.7: "2 glasses of water" in a dictated sentence — parse-meal already pulled it out of the
+     * food text (server-side, shared with the web app); this writes it to bandlog.water_log the
+     * same way the Water page's + button does, and shows an Undo chip. Logged immediately (not
+     * gated on Save) so a water-only utterance — which never puts anything on the plate — still
+     * gets recorded; `quiet = true` because we show our own chip here instead of the app-wide notice.
+     */
+    fun handleWater(w: com.sohum.bandlog.data.ParsedWater) {
+        waterNotice = w; waterUndone = false
+        scope.launch { vm.logWater(w.ml, date, "custom", quiet = true) }
+    }
+    LaunchedEffect(waterNotice) { if (waterNotice != null) { delay(5000); waterNotice = null } }
 
     fun add(item: MealItem, raw: String, amount: String) {
         items = items + item; rawParts += raw; error = null
@@ -191,8 +206,11 @@ fun MealForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
             val r = runCatching { job.await() }
             pending = pending - pd
             r.onSuccess { b ->
-                if (b.items.isEmpty()) error = "Couldn't find any food in “${label.take(40)}” — try naming it differently."
-                else {
+                b.water?.let { handleWater(it) }
+                if (b.items.isEmpty()) {
+                    // A water-only utterance ("do glass paani piya") is a valid outcome, not an error.
+                    if (b.water == null) error = "Couldn't find any food in “${label.take(40)}” — try naming it differently."
+                } else {
                     items = items + b.items; notes = notes + b.notes
                     b.photoPath?.let { photoPath = it }
                     say("Added ${b.items.size} item${if (b.items.size == 1) "" else "s"} · ${b.items.sumOf { it.calories }.roundToInt()} kcal")
@@ -259,6 +277,14 @@ fun MealForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
                 if (items.isEmpty() && pending.isEmpty()) Spacer(Modifier.navigationBarsPadding())
             }
             Toast(toast, Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp))
+            WaterToast(
+                water = waterNotice, undone = waterUndone,
+                onUndo = {
+                    waterUndone = true
+                    scope.launch { vm.undoWater() }
+                },
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = if (toast != null) 56.dp else 12.dp),
+            )
         }
         if (items.isNotEmpty() || pending.isNotEmpty()) {
             Plate(
@@ -377,6 +403,29 @@ private fun Toast(text: String?, modifier: Modifier) {
     AnimatedVisibility(text != null, modifier, enter = slideInVertically { it / 2 } + fadeIn(), exit = fadeOut()) {
         Box(Modifier.shadow(10.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow).background(p.btn, CircleShape).padding(16.dp, 10.dp)) {
             Text(text ?: "", fontSize = 13.sp, fontWeight = FontWeight(700), color = p.btnInk, maxLines = 1)
+        }
+    }
+}
+
+/** "💧 +2 glasses to Water (500 mL) · Undo" — shown right after a dictated water phrase is logged. */
+@Composable
+private fun WaterToast(water: com.sohum.bandlog.data.ParsedWater?, undone: Boolean, onUndo: () -> Unit, modifier: Modifier) {
+    val p = palette
+    AnimatedVisibility(water != null, modifier, enter = slideInVertically { it / 2 } + fadeIn(), exit = fadeOut()) {
+        Row(
+            Modifier.shadow(10.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow).background(p.blueBg, CircleShape).padding(start = 14.dp, end = if (undone) 14.dp else 6.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val glasses = water?.glasses ?: 0.0
+            val g = if (glasses % 1.0 == 0.0) glasses.toInt().toString() else String.format("%.1f", glasses)
+            Text(
+                if (undone) "💧 Undone" else "💧 +$g glass${if (glasses == 1.0) "" else "es"} to Water (${water?.ml ?: 0} mL)",
+                fontSize = 13.sp, fontWeight = FontWeight(700), color = p.blue, maxLines = 1,
+            )
+            if (!undone) {
+                Spacer(Modifier.width(8.dp))
+                Text("Undo", fontSize = 13.sp, fontWeight = FontWeight(800), color = p.blue, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline, modifier = Modifier.clickable(onClick = onUndo).padding(8.dp))
+            }
         }
     }
 }

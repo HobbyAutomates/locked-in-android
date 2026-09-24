@@ -353,7 +353,7 @@ class AppViewModel : ViewModel() {
     // ---- v2.1: the one Add-food screen ----
 
     /** What a background parse or plate photo adds to the plate: items, any notes, and the stored photo. */
-    data class MealBatch(val items: List<MealItem>, val notes: List<String> = emptyList(), val photoPath: String? = null)
+    data class MealBatch(val items: List<MealItem>, val notes: List<String> = emptyList(), val photoPath: String? = null, val water: com.sohum.bandlog.data.ParsedWater? = null)
 
     /**
      * "Work it out": parse-meal, run in the view model's scope so it survives the Log page closing
@@ -361,7 +361,7 @@ class AppViewModel : ViewModel() {
      */
     fun parseAsync(text: String): Deferred<MealBatch> = viewModelScope.async {
         val r = Api.parseMeal(text)
-        MealBatch(r.items, r.assumptions + r.unparsed.map { "Ignored: $it" })
+        MealBatch(r.items, r.assumptions + r.unparsed.map { "Ignored: $it" }, water = r.water)
     }
 
     /** The plate photo → per-item estimate; the JPEG is stored (or uploaded) so it saves with the meal. */
