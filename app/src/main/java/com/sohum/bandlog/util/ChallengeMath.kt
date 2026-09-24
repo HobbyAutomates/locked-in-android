@@ -25,6 +25,10 @@ object ChallengeMath {
 
     val LENGTHS = listOf(7, 14, 30)
 
+    /** The server's "today" is the India date; the client must agree for status and days left. */
+    val ZONE: java.time.ZoneId = java.time.ZoneId.of("Asia/Kolkata")
+    fun today(): String = LocalDate.now(ZONE).toString()
+
     /** log_days: every day; train_days: 70 % of the length; protein_days: 5 of every 7. */
     fun defaultTarget(kind: String, length: Int): Int {
         val raw = when (kind) {
@@ -53,23 +57,23 @@ object ChallengeMath {
     }.getOrDefault(1)
 
     /** upcoming when today < starts_on, ended when today > ends_on, else active. */
-    fun status(today: String, startsOn: String, endsOn: String): String = when {
+    fun status(today: String = today(), startsOn: String, endsOn: String): String = when {
         today < startsOn -> "upcoming"
         today > endsOn -> "ended"
         else -> "active"
     }
 
     /** Days left including today (the last day counts as 1); 0 once it's over. */
-    fun daysLeft(today: String, endsOn: String): Int = runCatching {
+    fun daysLeft(today: String = today(), endsOn: String): Int = runCatching {
         (ChronoUnit.DAYS.between(LocalDate.parse(today), LocalDate.parse(endsOn)) + 1).toInt().coerceAtLeast(0)
     }.getOrDefault(0)
 
-    fun daysUntil(today: String, startsOn: String): Int = runCatching {
+    fun daysUntil(today: String = today(), startsOn: String): Int = runCatching {
         ChronoUnit.DAYS.between(LocalDate.parse(today), LocalDate.parse(startsOn)).toInt().coerceAtLeast(0)
     }.getOrDefault(0)
 
     /** "3 days left", "last day 👀", "starts tomorrow", "starts in 4 days", "wrapped". */
-    fun timeLine(today: String, startsOn: String, endsOn: String): String = when (status(today, startsOn, endsOn)) {
+    fun timeLine(today: String = today(), startsOn: String, endsOn: String): String = when (status(today, startsOn, endsOn)) {
         "upcoming" -> daysUntil(today, startsOn).let { if (it <= 1) "starts tomorrow" else "starts in $it days" }
         "ended" -> "wrapped"
         else -> daysLeft(today, endsOn).let { if (it <= 1) "last day 👀" else "$it days left" }

@@ -108,7 +108,7 @@ internal fun ChallengesTab(sq: SquadViewModel, squad: Squad, proteinGoal: Int?) 
     val open = list.filter { it.isOpen }
     val past = list.filter { !it.isOpen }
     val full = open.size >= ChallengeMath.MAX_OPEN
-    val today = Dates.today()
+    val today = ChallengeMath.today()
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 14.dp, 16.dp, 40.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item(key = "start") {
             Column {
@@ -148,9 +148,13 @@ internal fun ChallengesTab(sq: SquadViewModel, squad: Squad, proteinGoal: Int?) 
     if (creating) StartChallengeSheet(sq, proteinGoal) { creating = false }
 }
 
-/** Leader's avatar: the squad's member / leaderboard data by name (the list only carries the name). */
-private fun leaderAvatar(sq: SquadViewModel, name: String?): String? =
-    name?.let { n -> sq.members.firstOrNull { it.name == n }?.avatarPath ?: sq.leaders.firstOrNull { it.name == n }?.avatarPath }
+/** Leader's avatar from the squad's member / leaderboard data: by leader_user_id, else by name. */
+private fun leaderAvatar(sq: SquadViewModel, c: Challenge): String? {
+    c.leaderUserId?.let { id ->
+        (sq.members.firstOrNull { it.userId == id }?.avatarPath ?: sq.leaders.firstOrNull { it.userId == id }?.avatarPath)?.let { return it }
+    }
+    return c.leaderName?.let { n -> sq.members.firstOrNull { it.name == n }?.avatarPath ?: sq.leaders.firstOrNull { it.name == n }?.avatarPath }
+}
 
 @Composable
 private fun KindTag(kind: String) {
@@ -192,7 +196,7 @@ private fun ChallengeCard(sq: SquadViewModel, c: Challenge, today: String, onCli
         Row(verticalAlignment = Alignment.CenterVertically) {
             val leader = c.leaderName?.takeIf { c.leaderProgress > 0 }
             if (leader != null) {
-                Avatar(Api.avatarUrl(leaderAvatar(sq, leader)), Names.initials(leader), 28.dp)
+                Avatar(Api.avatarUrl(leaderAvatar(sq, c)), Names.initials(leader), 28.dp)
                 Spacer(Modifier.width(8.dp))
                 Text(
                     "${leader.substringBefore(' ')} leads · ${c.leaderProgress}/${c.targetDays}",
@@ -285,7 +289,7 @@ private fun StartChallengeSheet(sq: SquadViewModel, proteinGoal: Int?, onDismiss
     fun retitle() { if (!titleEdited) title = ChallengeMath.defaultTitle(kind, target, length, if (kind == ChallengeMath.PROTEIN) protein else null) }
     fun pick(k: String, len: Int) { kind = k; length = len; target = ChallengeMath.defaultTarget(k, len); retitle() }
 
-    val start = if (tomorrow) Dates.addDays(Dates.today(), 1) else Dates.today()
+    val start = if (tomorrow) Dates.addDays(ChallengeMath.today(), 1) else ChallengeMath.today()
     BottomSheet(
         title = "Start a challenge",
         subtitle = "The whole squad's in automatically",
@@ -377,7 +381,7 @@ fun ChallengeDetailPage(sq: SquadViewModel, squad: Squad) {
             return@Column
         }
         val tint = p.kindColor(c.kind)
-        val today = Dates.today()
+        val today = ChallengeMath.today()
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 4.dp, 16.dp, 40.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item(key = "head") {
                 Column(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {

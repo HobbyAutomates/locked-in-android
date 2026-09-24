@@ -992,6 +992,8 @@ data class Challenge(
     val leaderProgress: Int,
     val participants: Int,
     val completedCount: Int,
+    /** v2.7 final contract: the #1 row's user id (null on an older list RPC). */
+    val leaderUserId: String? = null,
 ) {
     val isOpen: Boolean get() = status != "ended"
     val lengthDays: Int get() = com.sohum.bandlog.util.ChallengeMath.lengthDays(startsOn, endsOn)
@@ -1014,6 +1016,7 @@ data class Challenge(
             leaderProgress = o.optInt("leader_progress", 0),
             participants = o.optInt("participants", 0),
             completedCount = o.optInt("completed_count", 0),
+            leaderUserId = o.s("leader_user_id"),
         )
     }
 }
