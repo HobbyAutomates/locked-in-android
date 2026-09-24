@@ -206,7 +206,7 @@ private fun ScanForm(
     suspend fun labelFrom(bmp: Bitmap?) {
         if (ocr.isBlank() && bmp != null) ocr = runCatching { Ocr.read(bmp) }.getOrDefault("")
         val text = ocr.trim()
-        val b64 = if (text.length < OCR_MIN_CHARS && bmp != null) withContext(Dispatchers.IO) { toJpegBase64(bmp, 88) } else null
+        val b64 = if (text.length < OCR_MIN_CHARS && bmp != null) withContext(Dispatchers.IO) { toJpegBase64(scaleForUpload(bmp, 1600), 88) } else null
         report = Api.scanLabel(text, note, b64, lens)
     }
 
@@ -232,7 +232,7 @@ private fun ScanForm(
                     "label" -> labelFrom(bmp)
                     else -> {
                         bmp ?: return@launch
-                        plate = Api.photoMeal(withContext(Dispatchers.IO) { toJpegBase64(bmp, 85) }, note)
+                        plate = Api.photoMeal(withContext(Dispatchers.IO) { toJpegBase64(scaleForUpload(bmp, 1280), 85) }, note)
                     }
                 }
                 onScanned()
@@ -1044,3 +1044,16 @@ internal fun toJpegBytes(b: Bitmap, quality: Int): ByteArray {
 }
 
 internal fun toJpegBase64(b: Bitmap, quality: Int): String = Base64.encodeToString(toJpegBytes(b, quality), Base64.NO_WRAP)
+
+/**
+ * v2.7: downscale for the network upload only — on-device barcode/OCR reading (Barcode.read,
+ * Ocr.read) already ran on the full-resolution [decodeScaled] bitmap before this is called, so
+ * accuracy there is unaffected. A meal photo needs less detail than a label's nutrition table, so
+ * the two flows shrink to different sizes before they leave the phone.
+ */
+internal fun scaleForUpload(b: Bitmap, maxEdge: Int): Bitmap {
+    val longest = maxOf(b.width, b.height)
+    if (longest <= maxEdge) return b
+    val k = maxEdge.toFloat() / longest
+    return Bitmap.createScaledBitmap(b, (b.width * k).roundToInt(), (b.height * k).roundToInt(), true)
+}
