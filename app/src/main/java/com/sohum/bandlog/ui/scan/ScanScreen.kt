@@ -140,7 +140,7 @@ fun ScanTab(vm: AppViewModel) {
                 ScreenTitle("Scan")
             }
             Box(Modifier.weight(1f).padding(bottom = 96.dp)) {
-                ScanForm(vm, history, onScanned = { historyTick++ }, onOpen = { open = it }, onDelete = { item ->
+                ScanForm(vm, history, onScanned = { historyTick++ }, onOpen = { open = it }, onLogServing = { vm.openAddFood(listOf(it)) }, onDelete = { item ->
                     history = history.filter { it.id != item.id }
                     vm.launch { runCatching { Api.deleteScan(item.id) } }
                 })
@@ -152,7 +152,7 @@ fun ScanTab(vm: AppViewModel) {
         ) { item ->
             if (item != null) {
                 BackHandler { open = null }
-                ScanDetailPage(item, onLogged = { vm.refresh() }) { open = null }
+                ScanDetailPage(item, onLogged = { vm.refresh() }, onLogServing = { open = null; vm.openAddFood(listOf(it)) }) { open = null }
             }
         }
     }
@@ -176,6 +176,7 @@ private fun ScanForm(
     history: List<ScanHistoryItem>,
     onScanned: () -> Unit,
     onOpen: (ScanHistoryItem) -> Unit,
+    onLogServing: (com.sohum.bandlog.data.MealItem) -> Unit,
     onDelete: (ScanHistoryItem) -> Unit,
 ) {
     val p = palette
@@ -273,7 +274,7 @@ private fun ScanForm(
                     val bmp = photo
                     if (bmp == null) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(44.dp).background(p.btn, CircleShape), contentAlignment = Alignment.Center) { Icon(ScanIcon, null, tint = p.btnInk, modifier = Modifier.size(20.dp)) }
+                            Box(Modifier.size(44.dp).background(p.btn, CircleShape), contentAlignment = Alignment.Center) { Icon(com.sohum.bandlog.ui.components.ScanFilledIcon, null, tint = p.btnInk, modifier = Modifier.size(20.dp)) }
                             Spacer(Modifier.width(12.dp))
                             Column {
                                 Text("Scan anything you eat", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
@@ -364,7 +365,7 @@ private fun ScanForm(
                     PillButton("Scan again", { openCamera() }, height = 46.dp)
                 }
             }
-            report?.let { ReportView(it, lens, onLogged = { vm.refresh() }) }
+            report?.let { ReportView(it, lens, onLogged = { vm.refresh() }, onLogServing = onLogServing) }
             plate?.let { est ->
                 PhotoReview(est, photo, readOnly = false) { items, path ->
                     scope.launch {
@@ -448,7 +449,7 @@ private fun eatLabel(verdict: String) = when (verdict) { "great" -> "Eat it"; "o
  * lens chips), then "Log 1 serving", then everything else folded into one "Details" expander.
  */
 @Composable
-fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Unit = {}) {
+fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Unit = {}, onLogServing: ((com.sohum.bandlog.data.MealItem) -> Unit)? = null) {
     val p = palette
     if (!r.readable) {
         Rise(1) { Card { Text("Couldn't read that as a food label", fontWeight = FontWeight(700), color = p.ink); Text(r.verdictReason, fontSize = 13.sp, color = p.muted) } }
@@ -510,7 +511,12 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Uni
 
     if (food != null) Rise(2) {
         Column {
-            PillButton("Log 1 serving" + (r.servingG?.takeIf { it > 0 }?.let { " · ${it.roundToInt()} g" } ?: ""), { logFood = food })
+            // v2.4: opens Add food with one serving already on the plate (the amount stays editable there).
+            PillButton("Log 1 serving" + (r.servingG?.takeIf { it > 0 }?.let { " · ${it.roundToInt()} g" } ?: ""), {
+                val go = onLogServing
+                if (go == null) logFood = food
+                else go(food.item(if (food.servingGrams != null) com.sohum.bandlog.util.Quantity(com.sohum.bandlog.util.QUnit.SERVING, 1.0) else com.sohum.bandlog.util.Quantity(com.sohum.bandlog.util.QUnit.G, 100.0)))
+            })
             logged?.let { Row(Modifier.padding(top = 8.dp, start = 4.dp), verticalAlignment = Alignment.CenterVertically) { Icon(CheckIcon, null, tint = p.green, modifier = Modifier.size(14.dp)); Text("  $it — on Home", fontSize = 12.sp, fontWeight = FontWeight(600), color = p.green) } }
             logError?.let { Text(it, fontSize = 12.sp, color = p.red, modifier = Modifier.padding(top = 8.dp, start = 4.dp)) }
         }
@@ -955,8 +961,13 @@ private fun HistoryRow(it: ScanHistoryItem, onOpen: () -> Unit, onDelete: () -> 
     val trust = trustChip(it.verdict)
     Card(padding = 12.dp, onClick = onOpen) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            // Own thumbnail (private bucket) → Open Food Facts picture → the plate's meal photo → kind icon.
-            RemoteImage(
+            // Own thumbnail (private bucket) → Open Food Facts picture → the plate's meal photo; with
+            // none of those, a food picture for the product name (v2.4) → kind icon.
+            val plateless = it.thumbPath == null && it.imageUrl == null && !(it.isPlate && it.imagePath != null)
+            if (plateless && !ScanHistoryItem.isJunkName(it.product)) com.sohum.bandlog.ui.components.FoodImage(
+                it.displayName, kind = if (it.isPlate) "generic" else "product", size = 48.dp,
+                fallback = kindIcon, fallbackTint = p.muted,
+            ) else RemoteImage(
                 privatePath = it.thumbPath, url = it.imageUrl, storagePath = if (it.isPlate) it.imagePath else null,
                 size = 48.dp, radius = 12.dp, fallback = kindIcon,
             )
@@ -985,7 +996,7 @@ private fun HistoryRow(it: ScanHistoryItem, onOpen: () -> Unit, onDelete: () -> 
 
 /** A stored scan, opened from History: the same views, read-only. */
 @Composable
-private fun ScanDetailPage(item: ScanHistoryItem, onLogged: () -> Unit, onBack: () -> Unit) {
+private fun ScanDetailPage(item: ScanHistoryItem, onLogged: () -> Unit, onLogServing: (com.sohum.bandlog.data.MealItem) -> Unit, onBack: () -> Unit) {
     val p = palette
     var json by remember(item.id) { mutableStateOf<org.json.JSONObject?>(null) }
     var error by remember(item.id) { mutableStateOf<String?>(null) }
@@ -996,7 +1007,7 @@ private fun ScanDetailPage(item: ScanHistoryItem, onLogged: () -> Unit, onBack: 
             error != null -> ErrorNote(error)
             o == null -> { LinearProgressIndicator(Modifier.fillMaxWidth(), color = p.ink, trackColor = p.track); Text("Opening…", fontSize = 12.sp, color = p.muted) }
             item.isPlate -> PhotoReview(PlateEstimate.from(o), null, readOnly = true)
-            else -> ReportView(LabelReport.from(o), onLogged = onLogged)
+            else -> ReportView(LabelReport.from(o), onLogged = onLogged, onLogServing = onLogServing)
         }
     }
 }

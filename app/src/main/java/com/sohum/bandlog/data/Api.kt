@@ -315,9 +315,13 @@ object Api {
     /** Every Indian food preset with its foods row joined, in category sort order. */
     suspend fun presets(): List<FoodPreset> = withContext(Dispatchers.IO) {
         val sel = "id,food_id,label,label_hi,category,servings,default_serving,sort,icon,foods(name,calories,protein_g,carbs_g,fat_g,micros)"
-        val body = run(rest("food_presets?select=$sel&order=sort.asc").get().build(), "Load presets")
+        // v2.4: image_url on the preset and its food; falls back to the old columns if not there yet.
+        val selImg = "id,food_id,label,label_hi,category,servings,default_serving,sort,icon,image_url,foods(name,calories,protein_g,carbs_g,fat_g,micros,image_url)"
+        val body = runCatching { run(rest("food_presets?select=$selImg&order=sort.asc").get().build(), "Load presets") }
+            .getOrElse { run(rest("food_presets?select=$sel&order=sort.asc").get().build(), "Load presets") }
         val arr = JSONArray(body)
         (0 until arr.length()).mapNotNull { FoodPreset.from(arr.getJSONObject(it)) }
+            .onEach { com.sohum.bandlog.ui.components.FoodImages.register(it.foodId, it.label, it.imageUrl); com.sohum.bandlog.ui.components.FoodImages.register(null, it.foodName, it.imageUrl) }
     }
 
     /** Trigram search over bandlog.foods (the same RPC the parser uses). Hinglish and Devanagari both match. */
@@ -525,10 +529,30 @@ object Api {
         }.getOrNull()
     }
 
+    /** Raw bytes of a public image (food pictures); null on any failure. */
+    suspend fun fetchBytes(url: String): ByteArray? = withContext(Dispatchers.IO) {
+        runCatching {
+            client.newCall(Request.Builder().url(url).header("User-Agent", "LockedIn/2.4").get().build()).execute().use { res ->
+                if (!res.isSuccessful) null else res.body?.bytes()?.takeIf { it.isNotEmpty() }
+            }
+        }.getOrNull()
+    }
+
+    /**
+     * v2.4: `GET /api/food-image?q=&kind=preset|product|generic` → `{ "url": … | null }`. The first
+     * ask for a name can take ~15 s while the web app finds and stores a picture; later ones are cached.
+     */
+    suspend fun foodImage(q: String, kind: String): String? = withContext(Dispatchers.IO) {
+        val enc = java.net.URLEncoder.encode(q, "UTF-8")
+        val o = apiGet("food-image?q=$enc&kind=$kind", "Food image")
+        if (o.isNull("url")) null else o.optString("url").trim().takeIf { it.startsWith("http") }
+    }
+
     // ---- saved meals (one-tap repeat dinners) ----
 
     suspend fun savedMeals(): List<SavedMeal> = withContext(Dispatchers.IO) {
-        val body = run(rest("saved_meals?select=id,name,items,calories,protein_g&order=created_at.desc").get().build(), "Load saved meals")
+        val body = runCatching { run(rest("saved_meals?select=id,name,items,calories,protein_g,image_url&order=created_at.desc").get().build(), "Load saved meals") }
+            .getOrElse { run(rest("saved_meals?select=id,name,items,calories,protein_g&order=created_at.desc").get().build(), "Load saved meals") }
         val arr = JSONArray(body)
         (0 until arr.length()).map { SavedMeal.from(arr.getJSONObject(it)) }
     }

@@ -37,6 +37,8 @@ data class QuantityFood(
     val source: String = "table",
     /** v2.0: the preset category (dal / sabzi / protein / restaurant …) — decides the restaurant oil. */
     val category: String? = null,
+    /** v2.4: the food's picture, carried onto the plate row. */
+    val imageUrl: String? = null,
 ) {
     val serving: Serving? get() = servings.firstOrNull { it.label == defaultServing } ?: servings.firstOrNull()
     val servingGrams: Double? get() = serving?.grams?.takeIf { it > 0 }
@@ -70,6 +72,7 @@ data class QuantityFood(
             micros = micros.mapValues { (it.value * k * 10).roundToInt() / 10.0 },
             unit = q.unit.label,
             servings = if (q.unit == QUnit.SERVING) q.value else servingsFor(g),
+            imageUrl = imageUrl,
         )
     }
 
@@ -96,12 +99,13 @@ data class QuantityFood(
             name = p.label, nameHi = p.labelHi, foodId = p.foodId,
             calories = p.calories, proteinG = p.proteinG, carbsG = p.carbsG, fatG = p.fatG,
             micros = p.micros, servings = p.servings, defaultServing = serving, source = "table", category = p.category,
+            imageUrl = p.imageUrl,
         )
 
         fun from(h: FoodHit) = QuantityFood(
             name = h.name, nameHi = h.nameHi, foodId = h.id,
             calories = h.calories, proteinG = h.proteinG, carbsG = h.carbsG, fatG = h.fatG,
-            micros = h.micros, servings = h.units, source = "table",
+            micros = h.micros, servings = h.units, source = "table", imageUrl = h.imageUrl,
         )
 
         /** A scan report as a food: per-100 g from the label, one serving = serving_g. Null without numbers. */
@@ -114,7 +118,7 @@ data class QuantityFood(
                 name = r.product.ifBlank { "Scanned product" }, foodId = null,
                 calories = kcal ?: 0.0, proteinG = prot ?: 0.0, carbsG = r.per100["carbs_g"] ?: 0.0, fatG = r.per100["fat_g"] ?: 0.0,
                 micros = listOf("sugar_g", "fiber_g", "sodium_mg").mapNotNull { k -> r.per100[k]?.let { k to it } }.toMap(),
-                servings = serving, defaultServing = serving.firstOrNull()?.label, source = "scan",
+                servings = serving, defaultServing = serving.firstOrNull()?.label, source = "scan", imageUrl = r.imageUrl,
             )
         }
 
@@ -124,7 +128,7 @@ data class QuantityFood(
             return QuantityFood(
                 name = it.name, foodId = it.foodId,
                 calories = it.calories * k, proteinG = it.proteinG * k, carbsG = it.carbsG * k, fatG = it.fatG * k,
-                micros = it.micros.mapValues { m -> m.value * k }, servings = servings, source = it.source,
+                micros = it.micros.mapValues { m -> m.value * k }, servings = servings, source = it.source, imageUrl = it.imageUrl,
             )
         }
 

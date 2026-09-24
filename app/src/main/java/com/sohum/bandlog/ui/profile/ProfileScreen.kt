@@ -32,6 +32,8 @@ import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.outlined.NewReleases
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -78,17 +80,17 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** Where a Profile row can take you. Rendered as full-screen pages by MainActivity. */
-enum class ProfilePage { PERSONAL, GOALS, GOAL_WEIGHT, REMINDERS, WEIGHT_HISTORY }
+enum class ProfilePage { PERSONAL, GOALS, GOAL_WEIGHT, REMINDERS, WEIGHT_HISTORY, BADGES, PREFERENCES, APPEARANCE, TRACKING, PRIVACY, ACCOUNT }
 
 private const val INVITE_TEXT =
     "Locked In — workouts, meals by voice, label scanner. " +
-        "Android: https://evizkfvltacrfngsgbuu.supabase.co/storage/v1/object/public/app/LockedIn-15.apk · " +
+        "Android: https://evizkfvltacrfngsgbuu.supabase.co/storage/v1/object/public/app/LockedIn-16.apk · " +
         "iPhone: https://web-production-ff1cf.up.railway.app (Safari → Add to Home Screen)"
 
 /**
- * v2.1 Profile: three cards. **You** (name, age, details, goals, weight), **Preferences**
- * (appearance, scans, squads, burned calories, reminders, Health Connect) and **App** (version,
- * invite, feature requests, ring colours, sign out). Rows edit in place, open a sheet, or push a page.
+ * v2.4 Profile: a header (photo, name, email), **You** (details, goals, weight, badges), one
+ * **Preferences** row that opens the category pages (Appearance, Tracking, Reminders, Privacy,
+ * Account), and **App** (updates, version, what's new, invite, feature requests).
  */
 @Composable
 fun ProfileScreen(
@@ -101,8 +103,7 @@ fun ProfileScreen(
     val p = palette
     val ctx = LocalContext.current
     val prof = vm.profile
-    var showRings by remember { mutableStateOf(false) }
-    var showLens by remember { mutableStateOf(false) }
+    var showChangelog by remember { mutableStateOf(false) }
     var avatarSheet by remember { mutableStateOf(false) }
     var avatarBusy by remember { mutableStateOf(false) }
     var avatarError by remember { mutableStateOf<String?>(null) }
@@ -138,8 +139,7 @@ fun ProfileScreen(
         Rise(0) { ScreenTitle("Profile") }
         Rise(1) { ErrorNote(vm.error) }
 
-        // ---- you ----
-        Rise(1) { GroupLabel("You") }
+        // ---- header ----
         Rise(1) {
             Card(padding = 0.dp) {
                 Column(Modifier.padding(horizontal = 16.dp)) {
@@ -158,7 +158,15 @@ fun ProfileScreen(
                         }
                     }
                     avatarError?.let { ErrorNote(it, Modifier.padding(bottom = 10.dp)) }
-                    Hair()
+                }
+            }
+        }
+
+        // ---- you ----
+        Rise(1) { GroupLabel("You") }
+        Rise(1) {
+            Card(padding = 0.dp) {
+                Column(Modifier.padding(horizontal = 16.dp)) {
                     SettingRow(Icons.Outlined.Person, p.ink, "Personal details", onClick = { onOpen(ProfilePage.PERSONAL) }) { Chevron() }
                     Hair()
                     SettingRow(TargetIcon, p.ink, "Nutrition goals", onClick = { onOpen(ProfilePage.GOALS) }) {
@@ -172,16 +180,18 @@ fun ProfileScreen(
                     SettingRow(ScaleIcon, p.ink, "Weight history", onClick = { onOpen(ProfilePage.WEIGHT_HISTORY) }) {
                         Text(prof.weightKg?.let { "${com.sohum.bandlog.ui.today.fmt(it)} kg" } ?: "—", fontSize = 13.sp, color = p.muted)
                     }
+                    Hair()
+                    SettingRow(com.sohum.bandlog.ui.components.CheckIcon, p.ink, "Badges", onClick = { onOpen(ProfilePage.BADGES) }) { Chevron() }
                 }
             }
         }
 
-        // ---- preferences ----
+        // ---- preferences: one row, categories inside ----
         Rise(2) { GroupLabel("Preferences") }
         Rise(2) {
             Card(padding = 0.dp) {
                 Column(Modifier.padding(horizontal = 16.dp)) {
-                    PreferencesRows(vm, themeMode, onThemeMode, onLens = { showLens = true }, onReminders = { onOpen(ProfilePage.REMINDERS) })
+                    SettingRow(Icons.Outlined.Tune, p.ink, "Preferences", subtitle = "Appearance, tracking, reminders, privacy, account", onClick = { onOpen(ProfilePage.PREFERENCES) }) { Chevron() }
                 }
             }
         }
@@ -191,7 +201,7 @@ fun ProfileScreen(
         Rise(3) {
             Card(padding = 0.dp) {
                 Column(Modifier.padding(horizontal = 16.dp)) {
-                    SettingRow(Icons.Outlined.Refresh, p.ink, "Version", subtitle = "Tap to check for updates", onClick = { updateVm.check() }) {
+                    SettingRow(Icons.Outlined.Refresh, p.ink, "Check for updates", subtitle = "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", onClick = { updateVm.check() }) {
                         Text(
                             when {
                                 updateVm.checking -> "Checking…"
@@ -201,6 +211,8 @@ fun ProfileScreen(
                             fontSize = 13.sp, fontWeight = FontWeight(600), color = if (updateVm.upToDate) p.green else p.muted,
                         )
                     }
+                    Hair()
+                    SettingRow(Icons.Outlined.NewReleases, p.ink, "What's new", subtitle = "Changelog", onClick = { showChangelog = true }) { Chevron() }
                     Hair()
                     SettingRow(Icons.Outlined.Share, p.ink, "Invite friends", subtitle = "Android APK or the iPhone web app", onClick = {
                         runCatching {
@@ -226,16 +238,12 @@ fun ProfileScreen(
                             )
                         }
                     }) { Chevron() }
-                    Hair()
-                    SettingRow(Icons.Outlined.Palette, p.ink, "Ring colours explained", onClick = { showRings = true }) { Chevron() }
-                    Hair()
-                    SettingRow(Icons.Outlined.Logout, p.red, "Sign out", onClick = { vm.signOut() }) { Chevron() }
                 }
             }
         }
     }
 
-    if (showRings) RingColoursSheet { showRings = false }
+    if (showChangelog) ChangelogSheet { showChangelog = false }
     if (avatarSheet) BottomSheet(title = "Profile photo", subtitle = "Shows on your profile and your squads' boards", onDismiss = { avatarSheet = false }) {
         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable {
             avatarSheet = false
@@ -266,10 +274,9 @@ fun ProfileScreen(
             }
         }
     }
-    if (showLens) LensSheet(prof.lensDefault, onPick = { key -> showLens = false; vm.launch { vm.saveProfile(prof.copy(lensDefault = key)) } }) { showLens = false }
 }
 
-private val LENS_OPTIONS = listOf(
+internal val LENS_OPTIONS = listOf(
     "protein" to ("Protein" to "How much protein it gives you"),
     "goal" to ("My goal" to "Follows your goal: Lose → Cutting, Gain → Bulking"),
     "snack" to ("Snack" to "Is it a decent snack"),
@@ -277,76 +284,9 @@ private val LENS_OPTIONS = listOf(
     "bulking" to ("Bulking" to "Helps a surplus"),
 )
 
-/** Appearance, scans, squads, burned calories, reminders and Health Connect, grouped under Preferences. */
-@Composable
-private fun PreferencesRows(vm: AppViewModel, themeMode: ThemeMode, onThemeMode: (ThemeMode) -> Unit, onLens: () -> Unit, onReminders: () -> Unit) {
-    val p = palette
-    val ctx = LocalContext.current
-    val prof = vm.profile
-    SettingRow(Icons.Outlined.DarkMode, p.ink, "Appearance") {
-        Row(Modifier.background(p.card2, CircleShape).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-            ThemeMode.entries.forEach { m ->
-                val sel = m == themeMode
-                Box(
-                    Modifier.height(36.dp).background(if (sel) p.btn else Color.Transparent, CircleShape)
-                        .clickable { onThemeMode(m) }.padding(horizontal = 11.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(m.name.lowercase().replaceFirstChar { it.uppercase() }, fontSize = 12.sp, fontWeight = FontWeight(600), color = if (sel) p.btnInk else p.muted)
-                }
-            }
-        }
-    }
-    Hair()
-    // "Judge scans for": the lens every scan report opens on. Saved straight to profiles.lens_default.
-    SettingRow(com.sohum.bandlog.ui.components.ScanIcon, p.ink, "Judge scans for", onClick = onLens) {
-        Text(LENS_OPTIONS.firstOrNull { it.first == prof.lensDefault }?.second?.first ?: "Protein", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted)
-    }
-    Hair()
-    SettingRow(Icons.Outlined.Share, p.ink, "Share with squads", subtitle = if (prof.shareStats) "Streaks + protein & calories" else "Streaks only") {
-        androidx.compose.material3.Switch(
-            prof.shareStats,
-            { on -> vm.launch { vm.saveProfile(prof.copy(shareStats = on)) } },
-            colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = p.btn, checkedThumbColor = p.btnInk, uncheckedTrackColor = p.track, uncheckedThumbColor = p.muted, uncheckedBorderColor = p.hair),
-        )
-    }
-    Hair()
-    val switchColors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = p.btn, checkedThumbColor = p.btnInk, uncheckedTrackColor = p.track, uncheckedThumbColor = p.muted, uncheckedBorderColor = p.hair)
-    SettingRow(FlameIcon, p.ink, "Add burned calories to daily goal", subtitle = "Exercise raises today's calorie budget") {
-        androidx.compose.material3.Switch(vm.addBurnedBack, { vm.setAddBurned(ctx, it) }, colors = switchColors)
-    }
-    Hair()
-    SettingRow(Icons.Outlined.Refresh, p.ink, "Rollover calories", subtitle = "Up to 200 unused from yesterday") {
-        androidx.compose.material3.Switch(vm.rolloverOn, { vm.setRollover(ctx, it) }, colors = switchColors)
-    }
-    Hair()
-    SettingRow(com.sohum.bandlog.ui.components.CheckIcon, p.ink, "Badge celebrations", subtitle = "Streak pop-up after a workout") {
-        androidx.compose.material3.Switch(vm.celebrationsOn, { vm.celebrationsOn = it; com.sohum.bandlog.util.ThemePrefs.setCelebrations(ctx, it) }, colors = switchColors)
-    }
-    Hair()
-    SettingRow(Icons.Outlined.Notifications, p.ink, "Reminders", onClick = onReminders) {
-        val on = com.sohum.bandlog.util.Reminders.load(ctx).values.count { it.on }
-        Text(if (on == 0) "Off" else "$on on", fontSize = 13.sp, fontWeight = FontWeight(600), color = if (on == 0) p.muted else p.green)
-    }
-    Hair()
-    val healthLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.health.connect.client.PermissionController.createRequestPermissionResultContract(),
-    ) { vm.refreshHealth(ctx) }
-    val hcAvailable = remember { com.sohum.bandlog.util.Health.available(ctx) }
-    SettingRow(Icons.Outlined.MonitorHeart, p.red, "Health Connect", onClick = {
-        if (!hcAvailable) runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("market://details?id=com.google.android.apps.healthdata"))) }
-        else healthLauncher.launch(com.sohum.bandlog.util.Health.PERMISSIONS)
-    }) {
-        Text(
-            when { !hcAvailable -> "Install"; vm.healthConnected -> "Connected"; else -> "Connect" },
-            fontSize = 13.sp, fontWeight = FontWeight(600), color = if (vm.healthConnected) p.green else p.muted,
-        )
-    }
-}
-
 /** Which lens scan reports open on. One tap picks and closes. */
 @Composable
-private fun LensSheet(current: String, onPick: (String) -> Unit, onDismiss: () -> Unit) {
+internal fun LensSheet(current: String, onPick: (String) -> Unit, onDismiss: () -> Unit) {
     val p = palette
     BottomSheet(title = "Judge scans for", subtitle = "Where every scan report starts — you can switch lens on the report too", onDismiss = onDismiss) {
         LENS_OPTIONS.forEachIndexed { i, (key, lt) ->
@@ -364,7 +304,7 @@ private fun LensSheet(current: String, onPick: (String) -> Unit, onDismiss: () -
 
 /** Inline-editable display name, shown as "Enter your name ✏️" while empty. */
 @Composable
-private fun NameField(name: String, placeholder: String = "Enter your name", onCommit: (String) -> Unit) {
+internal fun NameField(name: String, placeholder: String = "Enter your name", onCommit: (String) -> Unit) {
     val p = palette
     val focus = androidx.compose.ui.platform.LocalFocusManager.current
     var text by remember(name) { mutableStateOf(name) }
@@ -398,7 +338,7 @@ private fun NameField(name: String, placeholder: String = "Enter your name", onC
 
 /** The little legend behind every ring in the app, on the shared bottom sheet. */
 @Composable
-private fun RingColoursSheet(onDismiss: () -> Unit) {
+internal fun RingColoursSheet(onDismiss: () -> Unit) {
     val p = palette
     BottomSheet(title = "Ring colours", subtitle = "What each ring on Home is counting", onDismiss = onDismiss, primary = "Got it", onPrimary = onDismiss) {
         listOf(

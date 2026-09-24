@@ -297,6 +297,13 @@ class AppViewModel : ViewModel() {
     /** The most recent band workout, for the Workout form's "Same as last time" pill. */
     val lastWorkout: Workout? get() = workouts.maxWithOrNull(compareBy<Workout>({ it.date }, { it.id }))
 
+    /** v2.4: items a scan's "Log 1 serving" hands to Add food; the Meal form takes them once. */
+    var addFoodPrefill by mutableStateOf<List<MealItem>?>(null); private set
+    /** Bumped to make the shell open Add food (Log → Meal). */
+    var addFoodTick by mutableStateOf(0); private set
+    fun openAddFood(items: List<MealItem>) { addFoodPrefill = items; addFoodTick++ }
+    fun takeAddFoodPrefill(): List<MealItem>? = addFoodPrefill.also { addFoodPrefill = null }
+
     fun loadSavedMeals() { viewModelScope.launch { runCatching { savedMeals = Api.savedMeals() } } }
 
     /** The Indian food presets (v1.9), fetched once per session; the Meal form's Presets tab reads them. */

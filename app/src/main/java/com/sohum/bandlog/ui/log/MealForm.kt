@@ -2,10 +2,6 @@ package com.sohum.bandlog.ui.log
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
-import android.graphics.Bitmap
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -55,7 +51,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -69,12 +64,13 @@ import com.sohum.bandlog.data.MealItem
 import com.sohum.bandlog.data.SavedMeal
 import com.sohum.bandlog.ui.AppViewModel
 import com.sohum.bandlog.ui.components.BottomSheet
-import com.sohum.bandlog.ui.components.CameraIcon
 import com.sohum.bandlog.ui.components.Card
 import com.sohum.bandlog.ui.components.Chip
 import com.sohum.bandlog.ui.components.CrossIcon
 import com.sohum.bandlog.ui.components.DropIcon
 import com.sohum.bandlog.ui.components.ErrorNote
+import com.sohum.bandlog.ui.components.FoodImage
+import com.sohum.bandlog.ui.components.FoodImages
 import com.sohum.bandlog.ui.components.Hair
 import com.sohum.bandlog.ui.components.MacroDot
 import com.sohum.bandlog.ui.components.MicIcon
@@ -82,7 +78,6 @@ import com.sohum.bandlog.ui.components.PillButton
 import com.sohum.bandlog.ui.components.QuantitySheet
 import com.sohum.bandlog.ui.components.SearchIcon
 import com.sohum.bandlog.ui.components.pressable
-import com.sohum.bandlog.ui.scan.decodeScaled
 import com.sohum.bandlog.ui.theme.palette
 import com.sohum.bandlog.ui.today.fmt
 import com.sohum.bandlog.util.DictationState
@@ -92,11 +87,8 @@ import com.sohum.bandlog.util.QuantityFood
 import com.sohum.bandlog.util.Restaurant
 import com.sohum.bandlog.util.rememberDictation
 import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.io.File
 import kotlin.math.roundToInt
 
 private val CATEGORIES = listOf(
@@ -126,9 +118,10 @@ private data class SheetReq(val food: QuantityFood, val initial: Quantity, val r
 private class Pending(val label: String, val job: Deferred<AppViewModel.MealBatch>)
 
 /**
- * v2.1 Add food: one screen. A search bar (type to search the food table, the mic to say it, the
- * camera beside it for a plate photo), the preset grid below it while the bar is empty ("Yours"
- * first: saved meals + your most-used foods), and the plate as a sticky panel at the bottom.
+ * v2.1 Add food: one screen. A search bar (type to search the food table, the mic to say it), the
+ * preset grid below it while the bar is empty ("Yours" first: saved meals + your most-used foods),
+ * and the plate as a sticky panel at the bottom. v2.4: scanning lives only in the Scan tab; its
+ * "Log 1 serving" opens this screen with the scanned item already on the plate.
  * Tapping a preset or a result adds it at its default serving; the amount on a plate row opens
  * the Quantity sheet. A sentence in the bar gets one "Work it out" button (parse-meal).
  */
@@ -138,7 +131,6 @@ fun MealForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
     val p = palette
     val scope = rememberCoroutineScope()
     val focus = LocalFocusManager.current
-    val ctx = LocalContext.current
     var text by rememberSaveable { mutableStateOf("") }
     var items by remember { mutableStateOf<List<MealItem>>(emptyList()) }
     val rawParts = remember { mutableStateListOf<String>() }
@@ -155,8 +147,14 @@ fun MealForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
     var cookedFor by remember { mutableStateOf<Int?>(null) }
     var fixOpen by remember { mutableStateOf(false) }
     var repeatOpen by remember { mutableStateOf(false) }
-    var photoOpen by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { vm.loadSavedMeals(); vm.loadPresets() }
+    LaunchedEffect(Unit) {
+        vm.loadSavedMeals(); vm.loadPresets()
+        // A scan's "Log 1 serving" lands here with the item already on the plate.
+        vm.takeAddFoodPrefill()?.takeIf { it.isNotEmpty() }?.let { pre ->
+            items = items + pre; pre.forEach { rawParts += it.name }
+            toast = "From your scan · ${pre.sumOf { it.calories }.roundToInt()} kcal"; toastTick++
+        }
+    }
     LaunchedEffect(toastTick) { if (toast != null) { delay(1800); toast = null } }
 
     val use = remember(vm.meals) { vm.foodUse() }
@@ -217,26 +215,6 @@ fun MealForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
         if (looksLikeSentence(text)) workItOut()
     }
 
-    // ---- plate photo ----
-    val target = remember { mutableStateOf<android.net.Uri?>(null) }
-    fun estimate(b: Bitmap?) {
-        if (b == null) { error = "Couldn't open that photo"; return }
-        rawParts += "Plate photo"
-        track("Your plate photo", vm.photoAsync(b))
-    }
-    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
-        if (ok) target.value?.let { uri -> scope.launch { estimate(withContext(Dispatchers.IO) { decodeScaled(ctx, uri, 1600) }) } }
-    }
-    val gallery = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) scope.launch { estimate(withContext(Dispatchers.IO) { decodeScaled(ctx, uri, 1600) }) }
-    }
-    fun openCamera() {
-        val dir = File(ctx.cacheDir, "scans").apply { mkdirs() }
-        val uri = androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", File(dir, "meal.jpg"))
-        target.value = uri
-        runCatching { camera.launch(uri) }.onFailure { error = "No camera app found — pick from gallery instead." }
-    }
-
     fun save() {
         val raw = rawParts.joinToString(", ").ifBlank { items.joinToString(", ") { it.name } }.ifBlank { "Meal" }
         // Log now, review later — automatically: Save while a parse / photo is working closes the
@@ -251,18 +229,11 @@ fun MealForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.weight(1f)) {
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp, 6.dp, 16.dp, 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    FoodBar(
-                        text = text, onText = { text = it.take(160) }, dictation = dictation, onMic = toggleMic,
-                        onSubmit = { if (looksLikeSentence(text)) workItOut() else focus.clearFocus() },
-                        modifier = Modifier.weight(1f),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Box(
-                        Modifier.size(52.dp).pressable().shadow(10.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow).background(p.btn, CircleShape).clickable { focus.clearFocus(); photoOpen = true },
-                        contentAlignment = Alignment.Center,
-                    ) { Icon(CameraIcon, "Photo of your plate", tint = p.btnInk, modifier = Modifier.size(20.dp)) }
-                }
+                FoodBar(
+                    text = text, onText = { text = it.take(160) }, dictation = dictation, onMic = toggleMic,
+                    onSubmit = { if (looksLikeSentence(text)) workItOut() else focus.clearFocus() },
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 dictation.error?.let { Text(it, fontSize = 12.sp, color = p.orange, modifier = Modifier.padding(horizontal = 4.dp)) }
                 ErrorNote(error)
 
@@ -385,15 +356,6 @@ fun MealForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
             },
         ) { SheetField(name, { name = it.take(40) }, "Name it, e.g. Dinner usual") }
     }
-
-    if (photoOpen) {
-        BottomSheet(
-            title = "Photo of your plate", subtitle = "Every item with grams and calories, added to your plate", onDismiss = { photoOpen = false },
-            primary = "Take photo", onPrimary = { photoOpen = false; openCamera() },
-        ) {
-            PillButton("Choose from gallery", { photoOpen = false; gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, bg = p.card2, fg = p.ink)
-        }
-    }
 }
 
 /** "Added · 1 katori · 158 kcal": a black pill that rises over the plate for a moment. */
@@ -482,6 +444,8 @@ private fun SearchResults(q: String, sentence: Boolean, onWorkItOut: () -> Unit,
             hits.forEachIndexed { i, h ->
                 if (i > 0) Hair()
                 Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable { onPick(h) }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    FoodImage(h.name, h.imageUrl, kind = if (h.source == "off") "product" else "generic", size = 40.dp, foodId = h.id)
+                    Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(h.name, fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
@@ -554,7 +518,12 @@ private fun PresetGrid(
     if (cat == YOURS) {
         vm.savedMeals.chunked(2).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                row.forEach { sm -> FoodCard(Modifier.weight(1f), sm.name, "Saved meal · ${sm.calories.roundToInt()} kcal · ${fmt(sm.proteinG)} g P", 0) { onSaved(sm) } }
+                row.forEach { sm ->
+                    FoodCard(Modifier.weight(1f), sm.name, "Saved meal · ${sm.calories.roundToInt()} kcal · ${fmt(sm.proteinG)} g P", 0, image = {
+                        val big = sm.items.maxByOrNull { it.calories }
+                        FoodImage(sm.pictureName, sm.imageUrl ?: big?.imageUrl, kind = "generic", size = 44.dp, foodId = big?.foodId)
+                    }) { onSaved(sm) }
+                }
                 if (row.size == 1) Spacer(Modifier.weight(1f))
             }
         }
@@ -575,6 +544,7 @@ private fun PresetRows(list: List<FoodPreset>, onPlate: Map<String, Int>, onPres
                     Modifier.weight(1f), pr.label,
                     (pr.labelHi?.let { "$it · " } ?: "") + (def?.let { "${it.label} · ${(pr.calories * it.grams / 100).roundToInt()} kcal" } ?: "100 g · ${pr.calories.roundToInt()} kcal"),
                     onPlate[pr.foodId] ?: 0,
+                    image = { FoodImage(pr.label, pr.imageUrl, kind = "preset", size = 44.dp, foodId = pr.foodId, emoji = pr.icon?.takeIf { i -> i.any { c -> c.code > 0x2000 } }, fallback = presetIcon(pr.category)) },
                 ) { onPreset(pr) }
             }
             if (row.size == 1) Spacer(Modifier.weight(1f))
@@ -583,10 +553,11 @@ private fun PresetRows(list: List<FoodPreset>, onPlate: Map<String, Int>, onPres
 }
 
 @Composable
-private fun FoodCard(modifier: Modifier, title: String, sub: String, count: Int, onClick: () -> Unit) {
+private fun FoodCard(modifier: Modifier, title: String, sub: String, count: Int, image: (@Composable () -> Unit)? = null, onClick: () -> Unit) {
     val p = palette
     Card(modifier, padding = 12.dp, onClick = onClick) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            if (image != null) { image(); Spacer(Modifier.width(10.dp)) }
             Column(Modifier.weight(1f)) {
                 Text(title, fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1)
                 Text(sub, fontSize = 12.sp, color = p.muted, maxLines = 2, lineHeight = 15.sp)
@@ -594,6 +565,13 @@ private fun FoodCard(modifier: Modifier, title: String, sub: String, count: Int,
             AddDot(count)
         }
     }
+}
+
+/** The tile a preset falls back to while (or if) its picture does not load. */
+private fun presetIcon(category: String) = when (category) {
+    "drink" -> com.sohum.bandlog.ui.components.GlassIcon
+    "fat" -> DropIcon
+    else -> com.sohum.bandlog.ui.components.BowlIcon
 }
 
 // ---- the plate ----
@@ -687,6 +665,8 @@ private fun PlateRow(item: MealItem, amount: String, cookedInLabel: String?, sho
         if (d != 0) { delta = d; showDelta = true; delay(1400); showDelta = false }
     }
     Row(Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        FoodImage(item.name, item.imageUrl, kind = FoodImages.kindFor(item.source), size = 38.dp, foodId = item.foodId)
+        Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(item.name + if (item.source == "estimated") " ~" else "", fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {

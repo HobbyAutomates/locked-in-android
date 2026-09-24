@@ -530,8 +530,16 @@ fun MealRow(m: Meal, onDelete: () -> Unit, onFeedback: ((String) -> Unit)? = nul
     var voted by androidx.compose.runtime.remember(m.id) { androidx.compose.runtime.mutableStateOf<String?>(null) }
     CompactRow(
         tile = {
+            // Plate photo when the meal has one; else a picture of its biggest item (v2.4).
             if (m.photoPath != null) com.sohum.bandlog.ui.components.RemoteImage(storagePath = m.photoPath, size = 40.dp, radius = 12.dp, fallback = BowlIcon, fallbackTint = p.orange, fallbackBg = p.orangeBg)
-            else SmallTile(BowlIcon, p.orange, p.orangeBg)
+            else {
+                val big = m.items.maxByOrNull { it.calories }
+                if (big == null) SmallTile(BowlIcon, p.orange, p.orangeBg)
+                else com.sohum.bandlog.ui.components.FoodImage(
+                    big.name, big.imageUrl, kind = com.sohum.bandlog.ui.components.FoodImages.kindFor(big.source), size = 40.dp,
+                    foodId = big.foodId, fallbackBg = p.orangeBg,
+                )
+            }
         },
         title = m.items.joinToString(", ") { it.name }.ifBlank { "Meal" },
         value = "${m.calories.toInt()} kcal",

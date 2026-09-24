@@ -167,7 +167,14 @@ private data class LogRequest(val workout: Workout?, val date: String, val meal:
 private data class Tab(val label: String, val icon: ImageVector)
 
 /** A full-screen page pushed over the tab shell (Profile detail screens, Badges). */
-private enum class Page { PERSONAL, GOALS, GOAL_WEIGHT, REMINDERS, WEIGHT_HISTORY, WEIGHT_LOG, BADGES, CALENDAR }
+private enum class Page { PERSONAL, GOALS, GOAL_WEIGHT, REMINDERS, WEIGHT_HISTORY, WEIGHT_LOG, BADGES, CALENDAR, PREFERENCES, APPEARANCE, TRACKING, PRIVACY, ACCOUNT }
+
+/** v2.4: pages opened from Preferences go back to Preferences; everything else closes. */
+private fun parentOf(page: Page, fromPrefs: Boolean): Page? = when (page) {
+    Page.APPEARANCE, Page.TRACKING, Page.PRIVACY, Page.ACCOUNT -> Page.PREFERENCES
+    Page.REMINDERS -> if (fromPrefs) Page.PREFERENCES else null
+    else -> null
+}
 
 /** v2.3: the + button's speed-dial entries. */
 private enum class DialItem(val label: String) { MEAL("Meal"), WORKOUT("Workout"), EXERCISE("Exercise"), WATER("Water"), WEIGHT("Weight") }
@@ -178,10 +185,12 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var log by remember { mutableStateOf<LogRequest?>(null) }
     var page by remember { mutableStateOf<Page?>(null) }
+    // Reminders is reachable from Preferences; remember that so Back returns there.
+    var fromPrefs by remember { mutableStateOf(false) }
     var dial by remember { mutableStateOf(false) }
     var waterSheet by remember { mutableStateOf(false) }
     // v2.0: Squad takes Calendar's slot; since v2.1 Calendar is an icon in Home's header, pushed as a page.
-    val tabs = listOf(Tab("Home", Icons.Outlined.Home), Tab("Squad", com.sohum.bandlog.ui.components.PeopleIcon), Tab("Scan", com.sohum.bandlog.ui.components.ScanIcon), Tab("Progress", Icons.Outlined.SignalCellularAlt), Tab("Profile", Icons.Outlined.Person))
+    val tabs = listOf(Tab("Home", Icons.Outlined.Home), Tab("Squad", com.sohum.bandlog.ui.components.PeopleIcon), Tab("Scan", com.sohum.bandlog.ui.components.ScanFilledIcon), Tab("Progress", Icons.Outlined.SignalCellularAlt), Tab("Profile", Icons.Outlined.Person))
 
     // v2.2: a rejected refresh token signs out only once no form or page is open, so an open
     // workout form keeps its fields and shows why the save failed instead of vanishing.
@@ -191,6 +200,11 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
     // A tapped meal reminder lands straight on the Meal form.
     LaunchedEffect(openMealTick) {
         if (openMealTick > 0) { page = null; log = LogRequest(null, Dates.today(), true) }
+    }
+    // v2.4: a scan's "Log 1 serving" opens Add food with that serving on the plate.
+    var seenAddFood by rememberSaveable { mutableIntStateOf(vm.addFoodTick) }
+    LaunchedEffect(vm.addFoodTick) {
+        if (vm.addFoodTick > seenAddFood) { seenAddFood = vm.addFoodTick; page = null; log = LogRequest(null, Dates.today(), true) }
     }
     // A tapped 9 pm wrap lands on Home, where the Wrap card sits on top.
     LaunchedEffect(openWrapTick) {
@@ -212,7 +226,14 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
                             ProfilePage.GOAL_WEIGHT -> Page.GOAL_WEIGHT
                             ProfilePage.REMINDERS -> Page.REMINDERS
                             ProfilePage.WEIGHT_HISTORY -> Page.WEIGHT_HISTORY
+                            ProfilePage.BADGES -> Page.BADGES
+                            ProfilePage.PREFERENCES -> Page.PREFERENCES
+                            ProfilePage.APPEARANCE -> Page.APPEARANCE
+                            ProfilePage.TRACKING -> Page.TRACKING
+                            ProfilePage.PRIVACY -> Page.PRIVACY
+                            ProfilePage.ACCOUNT -> Page.ACCOUNT
                         }
+                        fromPrefs = false
                     }
                 }
             }
@@ -268,8 +289,8 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
             transitionSpec = { (slideInVertically(Motion.spatial()) { it / 3 } + fadeIn(Motion.effects())).togetherWith(slideOutVertically(Motion.spatialFast()) { it / 3 } + fadeOut(Motion.effectsFast())) },
         ) { current ->
             if (current != null) {
-                BackHandler { page = null }
-                val back = { page = null }
+                val back: () -> Unit = { page = parentOf(current, fromPrefs) }
+                BackHandler { back() }
                 when (current) {
                     Page.PERSONAL -> PersonalDetailsScreen(vm, back) { page = Page.GOAL_WEIGHT }
                     Page.GOALS -> NutritionGoalsScreen(vm, back) { page = Page.PERSONAL }
@@ -279,6 +300,20 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
                     Page.WEIGHT_LOG -> WeightHistoryScreen(vm, back, openLog = true)
                     Page.BADGES -> BadgesScreen(vm, back)
                     Page.CALENDAR -> CalendarPage(vm, back) { w, d -> log = LogRequest(w, d, false) }
+                    Page.PREFERENCES -> com.sohum.bandlog.ui.profile.PreferencesScreen(vm, themeMode, back) { target ->
+                        fromPrefs = true
+                        page = when (target) {
+                            ProfilePage.APPEARANCE -> Page.APPEARANCE
+                            ProfilePage.TRACKING -> Page.TRACKING
+                            ProfilePage.REMINDERS -> Page.REMINDERS
+                            ProfilePage.PRIVACY -> Page.PRIVACY
+                            else -> Page.ACCOUNT
+                        }
+                    }
+                    Page.APPEARANCE -> com.sohum.bandlog.ui.profile.AppearanceScreen(vm, themeMode, onThemeMode, back)
+                    Page.TRACKING -> com.sohum.bandlog.ui.profile.TrackingScreen(vm, back)
+                    Page.PRIVACY -> com.sohum.bandlog.ui.profile.PrivacyScreen(vm, back)
+                    Page.ACCOUNT -> com.sohum.bandlog.ui.profile.AccountScreen(vm, back)
                 }
             }
         }

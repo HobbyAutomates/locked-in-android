@@ -53,6 +53,31 @@ val ScanIcon: ImageVector by lazy {
     }
 }
 
+/**
+ * v2.4: the Scan tab's own filled mark (scanning is separate from logging meals): four solid
+ * viewfinder corners around a solid scan line.
+ */
+val ScanFilledIcon: ImageVector by lazy {
+    ImageVector.Builder("ScanFilled", 24.dp, 24.dp, 24f, 24f).apply {
+        path(fill = SolidColor(Color.Black)) {
+            // top-left corner
+            moveTo(3f, 9f); verticalLineTo(6f); arcTo(3f, 3f, 0f, false, true, 6f, 3f); horizontalLineTo(9f); verticalLineTo(5.6f); horizontalLineTo(6.4f)
+            arcTo(0.8f, 0.8f, 0f, false, false, 5.6f, 6.4f); verticalLineTo(9f); close()
+            // top-right
+            moveTo(15f, 3f); horizontalLineTo(18f); arcTo(3f, 3f, 0f, false, true, 21f, 6f); verticalLineTo(9f); horizontalLineTo(18.4f); verticalLineTo(6.4f)
+            arcTo(0.8f, 0.8f, 0f, false, false, 17.6f, 5.6f); horizontalLineTo(15f); close()
+            // bottom-right
+            moveTo(21f, 15f); verticalLineTo(18f); arcTo(3f, 3f, 0f, false, true, 18f, 21f); horizontalLineTo(15f); verticalLineTo(18.4f); horizontalLineTo(17.6f)
+            arcTo(0.8f, 0.8f, 0f, false, false, 18.4f, 17.6f); verticalLineTo(15f); close()
+            // bottom-left
+            moveTo(9f, 21f); horizontalLineTo(6f); arcTo(3f, 3f, 0f, false, true, 3f, 18f); verticalLineTo(15f); horizontalLineTo(5.6f); verticalLineTo(17.6f)
+            arcTo(0.8f, 0.8f, 0f, false, false, 6.4f, 18.4f); horizontalLineTo(9f); close()
+            // the scan line, as a solid rounded bar
+            moveTo(7.5f, 10.6f); horizontalLineTo(16.5f); arcTo(1.4f, 1.4f, 0f, false, true, 16.5f, 13.4f); horizontalLineTo(7.5f); arcTo(1.4f, 1.4f, 0f, false, true, 7.5f, 10.6f); close()
+        }
+    }.build()
+}
+
 /** Thumbs for the AI feedback row. */
 val ThumbUpIcon: ImageVector by lazy {
     stroke("ThumbUp") { moveTo(7f, 10f); verticalLineTo(21f); moveTo(3f, 12f); verticalLineTo(19f); arcTo(2f, 2f, 0f, false, false, 5f, 21f); horizontalLineTo(7f); moveTo(7f, 10f); lineTo(11f, 3f); arcTo(2f, 2f, 0f, false, true, 13f, 5f); verticalLineTo(9f); horizontalLineTo(19f); arcTo(2f, 2f, 0f, false, true, 21f, 11.3f); lineTo(19.5f, 19.3f); arcTo(2f, 2f, 0f, false, true, 17.5f, 21f); horizontalLineTo(7f) }

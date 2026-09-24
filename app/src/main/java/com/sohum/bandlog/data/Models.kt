@@ -47,6 +47,8 @@ data class MealItem(
     val servings: Double? = null,
     /** v1.9: the fat preset this dish was cooked in (the fat itself is a separate item). */
     val cookedIn: String? = null,
+    /** v2.4: a picture of the food when the parser / food row has one (never saved on meal_items). */
+    val imageUrl: String? = null,
 ) {
     fun toJson(mealId: String, userId: String): JSONObject = JSONObject()
         .put("meal_id", mealId).put("user_id", userId)
@@ -84,7 +86,12 @@ data class MealItem(
             unit = if (o.isNull("unit")) null else o.optString("unit").ifBlank { null },
             servings = if (o.isNull("servings")) null else o.optDouble("servings").takeIf { !it.isNaN() },
             cookedIn = if (o.isNull("cooked_in")) null else o.optString("cooked_in").ifBlank { null },
+            imageUrl = urlOf(o),
         )
+
+        /** `image_url` when present and non-blank, else null. */
+        fun urlOf(o: JSONObject?, key: String = "image_url"): String? =
+            if (o == null || !o.has(key) || o.isNull(key)) null else o.optString(key).trim().takeIf { it.startsWith("http") }
 
         fun micros(o: JSONObject?): Map<String, Double> {
             if (o == null) return emptyMap()
@@ -283,6 +290,8 @@ data class FoodPreset(
     val carbsG: Double,
     val fatG: Double,
     val micros: Map<String, Double>,
+    /** v2.4: the preset's picture, else its food's. */
+    val imageUrl: String? = null,
 ) {
     val default: Serving? get() = servings.firstOrNull { it.label == defaultServing } ?: servings.firstOrNull()
 
@@ -305,6 +314,7 @@ data class FoodPreset(
                 carbsG = f.optDouble("carbs_g", 0.0),
                 fatG = f.optDouble("fat_g", 0.0),
                 micros = MealItem.micros(f.optJSONObject("micros")),
+                imageUrl = MealItem.urlOf(o) ?: MealItem.urlOf(f),
             )
         }
     }
@@ -324,6 +334,8 @@ data class FoodHit(
     val units: List<Serving>,
     val micros: Map<String, Double>,
     val score: Double,
+    /** v2.4: foods.image_url when the RPC returns it. */
+    val imageUrl: String? = null,
 ) {
     companion object {
         fun from(o: JSONObject): FoodHit {
@@ -341,13 +353,17 @@ data class FoodHit(
                 units = Serving.list(o.optJSONArray("units")),
                 micros = micros,
                 score = o.optDouble("score", 0.0),
+                imageUrl = MealItem.urlOf(o),
             )
         }
     }
 }
 
 /** A repeatable meal ("rice dal eggs whey") saved for one-tap logging. */
-data class SavedMeal(val id: String, val name: String, val items: List<MealItem>, val calories: Double, val proteinG: Double) {
+data class SavedMeal(val id: String, val name: String, val items: List<MealItem>, val calories: Double, val proteinG: Double, val imageUrl: String? = null) {
+    /** The item the picture search should be about: the biggest one on the plate, else the name. */
+    val pictureName: String get() = items.maxByOrNull { it.calories }?.name ?: name
+
     companion object {
         fun from(o: JSONObject): SavedMeal {
             val arr = o.optJSONArray("items") ?: JSONArray()
@@ -355,6 +371,7 @@ data class SavedMeal(val id: String, val name: String, val items: List<MealItem>
                 id = o.getString("id"), name = o.optString("name"),
                 items = (0 until arr.length()).map { MealItem.from(arr.getJSONObject(it)) },
                 calories = o.optDouble("calories", 0.0), proteinG = o.optDouble("protein_g", 0.0),
+                imageUrl = MealItem.urlOf(o),
             )
         }
     }
