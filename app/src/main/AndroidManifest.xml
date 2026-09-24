@@ -60,7 +60,23 @@
             <intent-filter>
                 <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
             </intent-filter>
+            <!-- v2.6 squad invite links: https://web-production-ff1cf.up.railway.app/join/<code> -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="web-production-ff1cf.up.railway.app" android:pathPrefix="/join/" />
+            </intent-filter>
         </activity>
+        <!-- v2.6 water reminders (fire inside the window until the goal is hit) + the "+1 glass" action. -->
+        <receiver
+            android:name=".alarm.WaterReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.sohum.bandlog.ACTION_WATER_REMINDER" />
+                <action android:name="com.sohum.bandlog.ACTION_WATER_ADD_GLASS" />
+            </intent-filter>
+        </receiver>
         <!-- Fires one meal nudge and re-arms tomorrow's. -->
         <receiver
             android:name=".alarm.MealReminderReceiver"

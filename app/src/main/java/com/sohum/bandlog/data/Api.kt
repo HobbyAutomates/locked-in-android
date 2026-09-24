@@ -245,10 +245,24 @@ object Api {
         (0 until arr.length()).map { WaterEntry.from(arr.getJSONObject(it)) }
     }
 
-    suspend fun logWater(date: String, ml: Int) = withContext(Dispatchers.IO) {
+    /** v2.6: one row per add, tagged with its [vessel] (glass | bottle | large | custom | reminder | widget) when the column exists. */
+    suspend fun logWater(date: String, ml: Int, vessel: String? = null) = withContext(Dispatchers.IO) {
         val uid = Session.userId ?: throw AuthException("Not signed in")
-        val payload = JSONObject().put("user_id", uid).put("date", date).put("ml", ml).toString()
-        run(rest("water_log").header("Prefer", "return=minimal").post(json(payload)).build(), "Log water"); Unit
+        val base = JSONObject().put("user_id", uid).put("date", date).put("ml", ml)
+        if (vessel == null) { run(rest("water_log").header("Prefer", "return=minimal").post(json(base.toString())).build(), "Log water"); return@withContext }
+        try {
+            run(rest("water_log").header("Prefer", "return=minimal").post(json(JSONObject(base.toString()).put("vessel", vessel).toString())).build(), "Log water")
+        } catch (e: ApiException) {
+            val m = e.message.orEmpty()
+            if ("vessel" in m || "column" in m || "PGRST204" in m) run(rest("water_log").header("Prefer", "return=minimal").post(json(base.toString())).build(), "Log water") else throw e
+        }
+        Unit
+    }
+
+    /** Today's water total straight from the server (the reminder receiver checks the goal with it). */
+    suspend fun waterTotal(date: String): Int = withContext(Dispatchers.IO) {
+        val arr = JSONArray(run(rest("water_log?select=ml&date=eq.$date").get().build(), "Load water"))
+        (0 until arr.length()).sumOf { arr.getJSONObject(it).optInt("ml", 0) }
     }
 
     suspend fun deleteWater(id: String) = withContext(Dispatchers.IO) { run(rest("water_log?id=eq.$id").delete().build(), "Delete water"); Unit }
@@ -318,7 +332,7 @@ object Api {
         (0 until arr.length()).map { Meal.from(arr.getJSONObject(it)) }
     }
 
-    suspend fun saveMeal(date: String, rawText: String, items: List<MealItem>, photoPath: String? = null) = withContext(Dispatchers.IO) {
+    suspend fun saveMeal(date: String, rawText: String, items: List<MealItem>, photoPath: String? = null): String = withContext(Dispatchers.IO) {
         val uid = Session.userId ?: throw AuthException("Not signed in")
         val mealPayload = JSONObject().put("user_id", uid).put("date", date).put("raw_text", rawText).put("photo_path", photoPath ?: JSONObject.NULL).toString()
         val created = run(rest("meals").header("Prefer", "return=representation").post(json(mealPayload)).build(), "Save meal")
@@ -327,7 +341,7 @@ object Api {
             val arr = JSONArray().apply { items.forEach { put(it.toJson(mealId, uid)) } }
             run(rest("meal_items").post(json(arr.toString())).build(), "Save meal items")
         }
-        Unit
+        mealId
     }
 
     suspend fun deleteMeal(id: String) = withContext(Dispatchers.IO) {
@@ -528,6 +542,19 @@ object Api {
         "$uid/avatar.jpg?v=${System.currentTimeMillis()}"
     }
 
+    /** v2.6: an uploaded squad photo — public avatars/<uid>/squad-<name>.jpg, returned as its public URL for groups.cover_url (matches the web). */
+    suspend fun uploadSquadPhoto(jpeg: ByteArray, name: String): String = withContext(Dispatchers.IO) {
+        SupabaseAuth.ensureFresh()
+        val token = Session.accessToken ?: throw AuthException("Not signed in")
+        val uid = Session.userId ?: throw AuthException("Not signed in")
+        val path = "$uid/$name.jpg"
+        val req = Request.Builder().url("$base/storage/v1/object/avatars/$path")
+            .header("apikey", key).header("Authorization", "Bearer $token").header("x-upsert", "true")
+            .post(jpeg.toRequestBody("image/jpeg".toMediaType())).build()
+        run(req, "Upload photo")
+        "$base/storage/v1/object/public/avatars/$path"
+    }
+
     /** Public URL for a profiles.avatar_path / squad_board.avatar_path value; null when unset. */
     fun avatarUrl(path: String?): String? = path?.trim()?.trimStart('/')?.ifBlank { null }?.let { "$base/storage/v1/object/public/avatars/$it" }
 
@@ -622,7 +649,8 @@ object Api {
         val m = JSONArray(run(rest("group_members?select=group_id,joined_at&user_id=eq.$uid&order=joined_at.asc").get().build(), "Load squads"))
         val ids = (0 until m.length()).map { m.getJSONObject(it).getString("group_id") }
         if (ids.isEmpty()) return@withContext emptyList()
-        val g = JSONArray(run(rest("groups?select=id,name,code,owner_id&id=in.(${ids.joinToString(",")})").get().build(), "Load squads"))
+        // v2.6: select=* so description / icon / tags / join_policy come through when they exist.
+        val g = JSONArray(run(rest("groups?select=*&id=in.(${ids.joinToString(",")})").get().build(), "Load squads"))
         val byId = (0 until g.length()).map { Squad.from(g.getJSONObject(it)) }.associateBy { it.id }
         ids.mapNotNull { byId[it] }
     }
@@ -705,5 +733,115 @@ object Api {
     suspend fun myNudges(): List<Nudge> {
         val arr = JSONArray(rpc("my_nudges", JSONObject(), "Load nudges"))
         return (0 until arr.length()).map { Nudge.from(arr.getJSONObject(it)) }
+    }
+
+    // ---- v2.6: usernames ----
+
+    /** `username_available(u)` → true / false; null when the RPC isn't there yet. */
+    suspend fun usernameAvailable(u: String): Boolean? = runCatching {
+        val body = rpc("username_available", JSONObject().put("u", u), "Check username").trim()
+        when {
+            body.equals("true", true) -> true
+            body.equals("false", true) -> false
+            else -> runCatching { JSONArray(body).opt(0).toString().toBoolean() }.getOrNull()
+        }
+    }.getOrNull()
+
+    // ---- v2.6: squads v2 ----
+
+    /** Every group id I'm in (the save paths post a feed item to each). */
+    suspend fun mySquadIds(): List<String> = withContext(Dispatchers.IO) {
+        val uid = Session.userId ?: throw AuthException("Not signed in")
+        val m = JSONArray(run(rest("group_members?select=group_id&user_id=eq.$uid").get().build(), "Load squads"))
+        (0 until m.length()).map { m.getJSONObject(it).getString("group_id") }
+    }
+
+    /** Owner PATCH of the v2.6 group columns; false when nothing changed or the columns aren't there. */
+    suspend fun patchGroup(groupId: String, fields: JSONObject): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            JSONArray(run(rest("groups?id=eq.$groupId").header("Prefer", "return=representation").patch(json(fields.toString())).build(), "Save squad")).length() > 0
+        }.getOrDefault(false)
+    }
+
+    /** `group_by_code(p_code)` → the squad behind an invite code (id, name, join_policy, joined, requested…); null when none. */
+    suspend fun groupByCode(code: String): JSONObject? {
+        val body = rpc("group_by_code", JSONObject().put("p_code", code.uppercase().trim()), "Find squad").trim()
+        return runCatching { JSONArray(body).optJSONObject(0) }.getOrNull() ?: runCatching { JSONObject(body) }.getOrNull()?.takeIf { it.has("id") }
+    }
+
+    /** The id of the squad behind an invite code: group_by_code, else a direct read when RLS allows it. */
+    suspend fun groupIdForCode(code: String): String? =
+        runCatching { groupByCode(code)?.optString("id")?.ifBlank { null } }.getOrNull() ?: withContext(Dispatchers.IO) {
+            runCatching {
+                JSONArray(run(rest("groups?select=id&code=eq.${code.uppercase().trim()}").get().build(), "Load squad")).optJSONObject(0)?.optString("id")?.ifBlank { null }
+            }.getOrNull()
+        }
+
+    /** `request_join(g)` → 'member' (already in) | 'joined' (open squad) | 'requested' (request-only squad). */
+    suspend fun requestJoin(groupId: String): String =
+        rpc("request_join", JSONObject().put("g", groupId), "Join squad").trim().trim('"').ifBlank { "joined" }
+    suspend fun approveJoin(requestId: String) { rpc("approve_join", JSONObject().put("req", requestId), "Approve") }
+    suspend fun declineJoin(requestId: String) { rpc("decline_join", JSONObject().put("req", requestId), "Decline") }
+
+    /** Pending requests for a squad I own: `group_requests(g)` (owner only), else the table itself. */
+    suspend fun joinRequests(groupId: String): List<JoinRequest> {
+        val arr = runCatching { JSONArray(rpc("group_requests", JSONObject().put("g", groupId), "Load requests")) }.getOrElse {
+            withContext(Dispatchers.IO) { JSONArray(run(rest("group_join_requests?select=*&group_id=eq.$groupId&status=eq.pending&order=created_at.asc").get().build(), "Load requests")) }
+        }
+        return (0 until arr.length()).map { JoinRequest.from(arr.getJSONObject(it)) }
+    }
+
+    /** `group_feed(g, before, n)`, newest first. Throws when the RPC isn't there (the tabs are hidden). */
+    suspend fun groupFeed(groupId: String, before: String? = null, n: Int = 60, kinds: List<String>? = null): List<GroupPost> {
+        val payload = JSONObject().put("g", groupId).put("before", before ?: JSONObject.NULL).put("n", n)
+        if (kinds != null) payload.put("kinds", JSONArray(kinds))
+        val arr = JSONArray(rpc("group_feed", payload, "Load squad feed"))
+        return (0 until arr.length()).map { GroupPost.from(arr.getJSONObject(it)) }
+    }
+
+    /**
+     * `post_to_my_groups(p_kind, p_body, p_ref, p_photo)` → how many squads got it. The server fans
+     * out to every squad I'm in, respects share_stats, and re-posting the same [ref] updates the post.
+     */
+    suspend fun postToMyGroups(kind: String, body: String, ref: String? = null, photoPath: String? = null): Int {
+        val payload = JSONObject().put("p_kind", kind).put("p_body", body.take(500))
+            .put("p_ref", ref ?: JSONObject.NULL).put("p_photo", photoPath ?: JSONObject.NULL)
+        return rpc("post_to_my_groups", payload, "Post to squads").trim().trim('"').toIntOrNull() ?: 0
+    }
+
+    /** Inserts one post (message / meal / workout / pr / photo) into each of [groupIds]. */
+    suspend fun postToGroups(groupIds: List<String>, kind: String, body: String, refId: String? = null, photoPath: String? = null) = withContext(Dispatchers.IO) {
+        val uid = Session.userId ?: throw AuthException("Not signed in")
+        if (groupIds.isEmpty()) return@withContext
+        val arr = JSONArray().apply {
+            groupIds.forEach { g ->
+                put(JSONObject().put("group_id", g).put("user_id", uid).put("kind", kind).put("body", body.take(500))
+                    .put("ref_id", refId ?: JSONObject.NULL).put("photo_path", photoPath ?: JSONObject.NULL))
+            }
+        }
+        run(rest("group_posts").header("Prefer", "return=minimal").post(json(arr.toString())).build(), "Post to squad"); Unit
+    }
+
+    suspend fun groupLeaderboard(groupId: String): List<LeaderRow> {
+        val arr = JSONArray(rpc("group_leaderboard", JSONObject().put("g", groupId), "Load leaderboard"))
+        return (0 until arr.length()).map { LeaderRow.from(arr.getJSONObject(it)) }
+    }
+
+    suspend fun groupMembersDetail(groupId: String): List<MemberDetail> {
+        val arr = JSONArray(rpc("group_members_detail", JSONObject().put("g", groupId), "Load members"))
+        return (0 until arr.length()).map { MemberDetail.from(arr.getJSONObject(it)) }
+    }
+
+    /** Uploads a JPEG to group-photos/<uid>/<name>.jpg (readable by squad-mates); returns the path. */
+    suspend fun uploadGroupPhoto(jpeg: ByteArray, name: String = java.util.UUID.randomUUID().toString()): String = withContext(Dispatchers.IO) {
+        SupabaseAuth.ensureFresh()
+        val token = Session.accessToken ?: throw AuthException("Not signed in")
+        val uid = Session.userId ?: throw AuthException("Not signed in")
+        val path = "$uid/$name.jpg"
+        val req = Request.Builder().url("$base/storage/v1/object/group-photos/$path")
+            .header("apikey", key).header("Authorization", "Bearer $token").header("x-upsert", "true")
+            .post(jpeg.toRequestBody("image/jpeg".toMediaType())).build()
+        run(req, "Upload photo")
+        path
     }
 }

@@ -34,6 +34,7 @@ import com.sohum.bandlog.util.QuantityFood
  * Debug builds only: renders the v2.5 screens without a session so their layout can be checked
  * (fontScale 1.3, 360 dp) on an emulator.
  *   adb shell am start -n com.sohum.bandlog/.DebugPreviewActivity --es screen meal|workout|roti|whey|loose
+ *   v2.6: water | squadcreate | squadicon | squadpolicy | username | userphoto | squadboard | squadinfo
  * Presets are a local copy of data/presets.json (roti left at the old "2 roti" default on purpose).
  */
 class DebugPreviewActivity : ComponentActivity() {
@@ -46,11 +47,35 @@ class DebugPreviewActivity : ComponentActivity() {
             BandLogTheme(dark = isSystemInDarkTheme()) {
                 val vm: AppViewModel = viewModel()
                 var seeded by remember { mutableStateOf(false) }
-                LaunchedEffect(Unit) { vm.debugSeed(PRESETS, seedWorkouts()); seeded = true }
+                LaunchedEffect(Unit) {
+                    vm.debugSeed(PRESETS, seedWorkouts())
+                    val now = java.time.OffsetDateTime.now()
+                    vm.debugSeedWater(
+                        com.sohum.bandlog.data.Profile(name = "Sohum Chhabria", waterGoalMl = 2500, waterGlassMl = 250, usernameSupported = true, weightKg = 70.0, heightCm = 175.0, dob = "2008-05-01"),
+                        listOf(500, 250, 500, 250, 250).mapIndexed { i, ml -> com.sohum.bandlog.data.WaterEntry("dbg-w$i", Dates.today(), ml, now.minusMinutes(40L * i).toString(), "glass") },
+                    )
+                    seeded = true
+                }
                 Surface(Modifier.fillMaxSize(), color = palette.bg) {
                     if (!seeded) return@Surface
                     val today = Dates.today()
                     when (screen) {
+                        "water" -> com.sohum.bandlog.ui.today.WaterScreen(vm) { finish() }
+                        "squadcreate", "squadicon", "squadpolicy" -> {
+                            val sq: com.sohum.bandlog.ui.squad.SquadViewModel = viewModel()
+                            com.sohum.bandlog.ui.squad.CreateSquadFlow(sq, "Sohum", initialStep = when (screen) { "squadicon" -> 1; "squadpolicy" -> 2; else -> 0 }) { finish() }
+                        }
+                        "username", "userphoto" -> com.sohum.bandlog.ui.squad.UsernameFlow(vm, initialStep = if (screen == "userphoto") 1 else 0) { finish() }
+                        "squadboard", "squadinfo", "squadfeed", "squadchat" -> {
+                            val sq: com.sohum.bandlog.ui.squad.SquadViewModel = viewModel()
+                            var ready by remember { mutableStateOf(false) }
+                            LaunchedEffect(Unit) { seedSquad(sq); ready = true }
+                            val s = sq.open
+                            if (ready && s != null) {
+                                if (screen == "squadinfo") com.sohum.bandlog.ui.squad.SquadInfoPage(sq, s) { finish() }
+                                else com.sohum.bandlog.ui.squad.SquadPage(sq, s, initialTab = when (screen) { "squadchat" -> 0; "squadfeed" -> 1; else -> 2 })
+                            }
+                        }
                         "workout" -> LogScreen(vm, null, today, startOnMeal = false, onClose = { finish() })
                         "roti", "whey", "loose", "idli", "dal" -> {
                             val id = when (screen) { "loose" -> "chicken-breast"; "idli" -> "idli"; "dal" -> "dal-tadka"; else -> screen }
@@ -62,6 +87,34 @@ class DebugPreviewActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun seedSquad(sq: com.sohum.bandlog.ui.squad.SquadViewModel) {
+        val squad = com.sohum.bandlog.data.Squad("dbg-sq", "Fuel & Flex", "FLEX42", "me", description = "Protein first, excuses last.", icon = "salad", joinPolicy = "open")
+        val t = java.time.OffsetDateTime.now()
+        val trophy = String(Character.toChars(0x1F3C6))
+        fun post(id: String, kind: String, body: String, name: String, user: String, mins: Long) =
+            com.sohum.bandlog.data.GroupPost(id, "dbg-sq", user, kind, body, null, null, t.minusMinutes(mins).toString(), name, name.lowercase().substringBefore(' ') + "24", null)
+        sq.debugSeed(
+            listOf(squad),
+            listOf(
+                post("m2", "message", "In. Bringing the bands", "Hobby H", "u3", 3),
+                post("m1", "message", "Leg day at 6?", "Ayaan Khan", "u2", 5),
+                post("p1", "pr", "$trophy Bench press 45 kg \u00D7 8", "Ayaan Khan", "u2", 12),
+                post("p2", "meal", "logged Dal tadka + Roti + Curd \u00B7 420 kcal", "Ayaan Khan", "u2", 50),
+                post("p3", "workout", "Gym \u00B7 5 exercises \u00B7 42 min", "Hobby H", "u3", 95),
+            ),
+            listOf(
+                com.sohum.bandlog.data.LeaderRow("u2", "Ayaan Khan", "ayaan24", null, 12, 340),
+                com.sohum.bandlog.data.LeaderRow("u3", "Hobby H", "hobby24", null, 7, 210),
+                com.sohum.bandlog.data.LeaderRow("u4", "Riya Menon", "riya.lifts", null, 3, 90),
+            ),
+            listOf(
+                com.sohum.bandlog.data.MemberDetail("u3", "Hobby H", "hobby24", null, true, 7, ""),
+                com.sohum.bandlog.data.MemberDetail("u2", "Ayaan Khan", "ayaan24", null, false, 12, ""),
+                com.sohum.bandlog.data.MemberDetail("u4", "Riya Menon", "riya.lifts", null, false, 3, ""),
+            ),
+        )
     }
 
     private fun seedWorkouts(): List<Workout> {

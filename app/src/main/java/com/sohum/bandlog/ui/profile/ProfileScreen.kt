@@ -80,11 +80,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** Where a Profile row can take you. Rendered as full-screen pages by MainActivity. */
-enum class ProfilePage { PERSONAL, GOALS, GOAL_WEIGHT, REMINDERS, WEIGHT_HISTORY, BADGES, PREFERENCES, APPEARANCE, TRACKING, PRIVACY, ACCOUNT }
+enum class ProfilePage { PERSONAL, GOALS, GOAL_WEIGHT, REMINDERS, WEIGHT_HISTORY, BADGES, PREFERENCES, APPEARANCE, TRACKING, PRIVACY, ACCOUNT, USERNAME }
 
 private const val INVITE_TEXT =
     "Locked In — workouts, meals by voice, label scanner. " +
-        "Android: https://evizkfvltacrfngsgbuu.supabase.co/storage/v1/object/public/app/LockedIn-17.apk · " +
+        "Android: https://evizkfvltacrfngsgbuu.supabase.co/storage/v1/object/public/app/LockedIn-18.apk · " +
         "iPhone: https://web-production-ff1cf.up.railway.app (Safari → Add to Home Screen)"
 
 /**
@@ -155,6 +155,12 @@ fun ProfileScreen(
                             NameField(prof.name, placeholder = Names.nameFromEmail(Session.email).ifBlank { "Enter your name" }) { newName -> vm.launch { vm.saveProfile(vm.profile.copy(name = newName)) } }
                             Session.email?.let { Text(it, fontSize = 13.sp, color = p.muted, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
                             prof.age?.let { Text("$it years old", fontSize = 12.sp, color = p.muted) }
+                            // v2.6: the squad handle; tap to create / change it (username + photo flow).
+                            if (prof.usernameSupported) Text(
+                                prof.username?.let { "@$it" } ?: "Create your squad username ›",
+                                fontSize = 13.sp, fontWeight = FontWeight(700), color = if (prof.username != null) p.ink else p.blue,
+                                modifier = Modifier.clickable { onOpen(ProfilePage.USERNAME) }.padding(top = 2.dp),
+                            )
                         }
                     }
                     avatarError?.let { ErrorNote(it, Modifier.padding(bottom = 10.dp)) }

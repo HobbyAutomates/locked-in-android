@@ -1,15 +1,7 @@
 package com.sohum.bandlog.ui.squad
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
-import com.sohum.bandlog.ui.components.CrossIcon
-import androidx.compose.ui.draw.shadow
-import androidx.compose.foundation.layout.heightIn
-import android.content.Intent
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -34,16 +27,15 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -55,92 +47,140 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.sohum.bandlog.data.Api
+import com.sohum.bandlog.data.GroupPost
+import com.sohum.bandlog.data.JoinRequest
+import com.sohum.bandlog.data.LeaderRow
+import com.sohum.bandlog.data.MemberDetail
 import com.sohum.bandlog.data.Session
 import com.sohum.bandlog.data.Squad
 import com.sohum.bandlog.data.SquadMember
 import com.sohum.bandlog.ui.AppViewModel
 import com.sohum.bandlog.ui.components.Card
-import com.sohum.bandlog.ui.components.CheckIcon
-import com.sohum.bandlog.ui.components.CopyIcon
 import com.sohum.bandlog.ui.components.ErrorNote
-import com.sohum.bandlog.ui.components.FistIcon
-import com.sohum.bandlog.ui.components.Flame
 import com.sohum.bandlog.ui.components.PeopleIcon
-import com.sohum.bandlog.ui.components.PencilIcon
 import com.sohum.bandlog.ui.components.PillButton
 import com.sohum.bandlog.ui.components.Rise
 import com.sohum.bandlog.ui.components.ScreenTitle
-import com.sohum.bandlog.ui.components.ShareIcon
-import com.sohum.bandlog.ui.components.SmallChip
 import com.sohum.bandlog.ui.components.pressable
 import com.sohum.bandlog.ui.theme.palette
-import com.sohum.bandlog.util.Dates
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 
-private const val APK_URL = "https://evizkfvltacrfngsgbuu.supabase.co/storage/v1/object/public/app/LockedIn-17.apk"
-private const val WEB_URL = "https://web-production-ff1cf.up.railway.app"
-
-fun squadInviteText(code: String) = "Join my Locked In squad: code $code — Android $APK_URL · iPhone $WEB_URL"
-
-/** Squads state: my squads, the selected board, who I've nudged today. */
+/**
+ * Squads state (activity-scoped, shared by the Squad tab and the shell's full-screen squad pages):
+ * my squads, the open squad's chat / feed / leaderboard / members / requests, and the flows.
+ */
 class SquadViewModel : ViewModel() {
     var squads by mutableStateOf<List<Squad>>(emptyList()); private set
-    var selectedId by mutableStateOf<String?>(null); private set
-    var board by mutableStateOf<List<SquadMember>>(emptyList()); private set
-    var sent by mutableStateOf<Set<String>>(emptySet()); private set
     var loading by mutableStateOf(false); private set
     var loaded by mutableStateOf(false); private set
     var busy by mutableStateOf(false); private set
     var error by mutableStateOf<String?>(null)
-    /** Set right after a create: (name, code) for the big shareable code card. */
-    var created by mutableStateOf<Pair<String, String>?>(null)
+    /** A short success line ("Request sent — the owner will let you in"). */
+    var notice by mutableStateOf<String?>(null)
 
-    val selected: Squad? get() = squads.firstOrNull { it.id == selectedId }
+    // ---- which full-screen page is up (rendered by the shell over the tabs) ----
+    var openId by mutableStateOf<String?>(null); private set
+    var infoOpen by mutableStateOf(false)
+    var creating by mutableStateOf(false)
+    var profileFlow by mutableStateOf(false)
+    /** "Back" on the username flow: don't pop it again this session. */
+    var profileFlowDismissed by mutableStateOf(false)
+
+    val open: Squad? get() = squads.firstOrNull { it.id == openId }
+
+    // ---- the open squad ----
+    var posts by mutableStateOf<List<GroupPost>>(emptyList()); private set
+    /** False once group_feed has 404'd (Chat and Feed tabs are hidden); null until the first read. */
+    var feedSupported by mutableStateOf<Boolean?>(null); private set
+    var leaders by mutableStateOf<List<LeaderRow>>(emptyList()); private set
+    var members by mutableStateOf<List<MemberDetail>>(emptyList()); private set
+    var requests by mutableStateOf<List<JoinRequest>>(emptyList()); private set
+    /** The v2.0 board: who trained today (members list nudges). */
+    var board by mutableStateOf<List<SquadMember>>(emptyList()); private set
+    var sent by mutableStateOf<Set<String>>(emptySet()); private set
+    var pageLoading by mutableStateOf(false); private set
+    var posting by mutableStateOf(false); private set
 
     /** v2.3 Discover: public squads, or null when the `public_groups` RPC isn't there (section hidden). */
     var discover by mutableStateOf<List<com.sohum.bandlog.data.PublicSquad>?>(null); private set
     var joiningId by mutableStateOf<String?>(null); private set
 
-    fun loadDiscover() {
-        viewModelScope.launch { discover = runCatching { Api.publicGroups() }.getOrNull() }
-    }
+    fun loadDiscover() { viewModelScope.launch { discover = runCatching { Api.publicGroups() }.getOrNull() } }
 
-    fun joinPublic(id: String, display: String) {
-        viewModelScope.launch {
-            joiningId = id; error = null
-            try { Api.joinPublicSquad(id, display); load(id); loadDiscover() }
-            catch (e: Exception) { error = friendly(e.message) }
-            finally { joiningId = null }
-        }
-    }
-
-    fun load(prefer: String? = selectedId) {
+    fun load() {
         viewModelScope.launch {
             loading = true
             try {
-                coroutineScope {
-                    val s = async { Api.mySquads() }
-                    val n = async { runCatching { Api.sentNudges() }.getOrDefault(sent) }
-                    squads = s.await(); sent = n.await()
-                }
-                selectedId = squads.firstOrNull { it.id == prefer }?.id ?: squads.firstOrNull()?.id
-                board = selectedId?.let { runCatching { Api.squadBoard(it) }.getOrElse { e -> error = e.message; emptyList() } } ?: emptyList()
+                squads = Api.mySquads()
                 loaded = true
-            } catch (e: Exception) {
-                error = e.message ?: "Couldn't load your squads"
-            } finally { loading = false }
+            } catch (e: Exception) { error = e.message ?: "Couldn't load your squads" } finally { loading = false }
         }
     }
 
-    fun select(id: String) {
-        if (id == selectedId) return
-        selectedId = id; board = emptyList()
-        viewModelScope.launch { board = runCatching { Api.squadBoard(id) }.getOrElse { e -> error = e.message; emptyList() } }
+    private suspend fun reloadSquads() { runCatching { squads = Api.mySquads() }; loaded = true }
+
+    fun openSquad(id: String, info: Boolean = false) {
+        if (openId != id) { posts = emptyList(); leaders = emptyList(); members = emptyList(); requests = emptyList(); board = emptyList() }
+        openId = id; infoOpen = info
+        loadPage(id)
+    }
+
+    fun close() { openId = null; infoOpen = false }
+
+    fun loadPage(id: String = openId ?: "") {
+        if (id.isBlank()) return
+        viewModelScope.launch {
+            pageLoading = true
+            coroutineScope {
+                val f = async { runCatching { Api.groupFeed(id) } }
+                val b = async { runCatching { Api.squadBoard(id) }.getOrDefault(emptyList()) }
+                val l = async { runCatching { Api.groupLeaderboard(id) }.getOrNull() }
+                val m = async { runCatching { Api.groupMembersDetail(id) }.getOrNull() }
+                val n = async { runCatching { Api.sentNudges() }.getOrDefault(sent) }
+                val sq = squads.firstOrNull { it.id == id }
+                val r = async { if (sq != null && sq.ownerId == Session.userId) runCatching { Api.joinRequests(id) }.getOrDefault(emptyList()) else emptyList() }
+                f.await().onSuccess { posts = it; feedSupported = true }.onFailure { if (feedSupported != true) feedSupported = false }
+                board = b.await(); sent = n.await(); requests = r.await()
+                // Degrade to the v2.0 board when the v2.6 RPCs aren't there yet.
+                leaders = l.await()?.sortedWith(compareBy<LeaderRow> { if (it.rank > 0) it.rank else Int.MAX_VALUE }.thenByDescending { it.flames }.thenByDescending { it.points })
+                    ?: board.map { LeaderRow(it.userId, it.name, null, it.avatarPath, it.weekStreak, 0) }.sortedByDescending { it.flames }
+                members = m.await() ?: board.map { MemberDetail(it.userId, it.name, null, it.avatarPath, it.isOwner, it.weekStreak, "") }
+            }
+            pageLoading = false
+        }
+    }
+
+    /** Chat polls this every 5 s while it's on screen. */
+    fun refreshFeed() {
+        val id = openId ?: return
+        if (feedSupported == false) return
+        viewModelScope.launch { runCatching { Api.groupFeed(id) }.onSuccess { if (openId == id) { posts = it; feedSupported = true } } }
+    }
+
+    fun send(text: String) {
+        val id = openId ?: return
+        val body = text.trim().take(500)
+        if (body.isBlank()) return
+        viewModelScope.launch {
+            posting = true; error = null
+            try { Api.postToGroups(listOf(id), "message", body); runCatching { posts = Api.groupFeed(id) } }
+            catch (e: Exception) { error = friendly(e.message) } finally { posting = false }
+        }
+    }
+
+    fun postPhoto(bmp: android.graphics.Bitmap) {
+        val id = openId ?: return
+        viewModelScope.launch {
+            posting = true; error = null
+            try {
+                val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { com.sohum.bandlog.util.Images.jpeg(com.sohum.bandlog.util.Images.fitWithin(bmp, 1080), 84) }
+                val path = Api.uploadGroupPhoto(bytes)
+                Api.postToGroups(listOf(id), "photo", "shared a photo", null, path)
+                runCatching { posts = Api.groupFeed(id) }
+            } catch (e: Exception) { error = friendly(e.message) } finally { posting = false }
+        }
     }
 
     private fun act(block: suspend () -> Unit) {
@@ -153,52 +193,132 @@ class SquadViewModel : ViewModel() {
     private fun friendly(msg: String?): String = when {
         msg == null -> "Something went wrong"
         msg.contains("No group", ignoreCase = true) -> "No squad with that code"
+        msg.contains("(404)") -> "Squads v2 isn't live on the server yet"
         else -> msg.substringAfter(": ", msg)
     }
 
-    fun create(name: String, display: String) = act {
-        val (id, code) = Api.createSquad(name.trim().take(40), display)
-        created = name.trim() to code
-        load(id)
+    private fun needsRequest(msg: String?): Boolean =
+        msg != null && listOf("request", "private", "approval", "approve", "join_policy").any { msg.contains(it, ignoreCase = true) }
+
+    /**
+     * v2.6 create: `create_group`, then PATCH description / icon / tags / join_policy (and upload
+     * the photo when one was picked instead of a preset); opens the new squad's invite page.
+     */
+    fun createV2(name: String, description: String, iconKey: String, photo: android.graphics.Bitmap?, tags: List<String>, private: Boolean, display: String) = act {
+        val (id, _) = Api.createSquad(name.trim().take(40), display)
+        var icon: String? = iconKey
+        var coverUrl: String? = null
+        if (photo != null) {
+            runCatching {
+                val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { com.sohum.bandlog.util.Images.jpeg(com.sohum.bandlog.util.Images.squareCrop(photo, 512), 85) }
+                coverUrl = Api.uploadSquadPhoto(bytes, "squad-${System.currentTimeMillis()}")
+                icon = null // web format: an uploaded photo lives in cover_url, icon stays null
+            }
+        }
+        val fields = org.json.JSONObject().put("description", description.trim().take(200)).put("icon", icon ?: org.json.JSONObject.NULL)
+            .put("cover_url", coverUrl ?: org.json.JSONObject.NULL)
+            .put("tags", org.json.JSONArray(tags)).put("join_policy", if (private) "request" else "open")
+        if (!Api.patchGroup(id, fields)) {
+            // Older server: try the columns one by one so whichever exist still save.
+            fields.keys().forEach { k -> Api.patchGroup(id, org.json.JSONObject().put(k, fields.get(k))) }
+        }
+        reloadSquads()
+        creating = false
+        openSquad(id, info = true)
     }
 
-    fun join(code: String, display: String) = act {
-        val id = Api.joinSquad(code, display)
-        load(id)
+    /**
+     * Invite code / link: `group_by_code` → `request_join(g)` ('member' | 'joined' | 'requested');
+     * on an older server, `join_group` (which files a request itself for request-only squads).
+     */
+    fun joinByCode(code: String, display: String) = act {
+        val found = runCatching { Api.groupByCode(code) }
+        if (found.isSuccess) {
+            val g = found.getOrNull() ?: throw IllegalStateException("No squad with that code")
+            val id = g.getString("id")
+            when (Api.requestJoin(id)) {
+                "requested" -> notice = "Request sent to ${g.optString("name").ifBlank { "the squad" }} — the owner will let you in"
+                else -> { reloadSquads(); if (squads.any { it.id == id }) openSquad(id) else notice = "You're in" }
+            }
+            return@act
+        }
+        try {
+            val id = Api.joinSquad(code, display)
+            reloadSquads()
+            if (squads.any { it.id == id }) openSquad(id) else notice = "You're in"
+        } catch (e: Exception) {
+            if (!needsRequest(e.message)) throw e
+            val gid = Api.groupIdForCode(code) ?: throw e
+            Api.requestJoin(gid)
+            notice = "Request sent — the owner will let you in"
+        }
     }
+
+    fun joinPublic(id: String, display: String) {
+        viewModelScope.launch {
+            joiningId = id; error = null
+            try {
+                val status = runCatching { Api.requestJoin(id) }.getOrElse { Api.joinPublicSquad(id, display); "joined" }
+                if (status == "requested") notice = "Request sent — the owner will let you in"
+                else { reloadSquads(); loadDiscover(); openSquad(id) }
+            }
+            catch (e: Exception) {
+                if (needsRequest(e.message)) runCatching { Api.requestJoin(id); notice = "Request sent — the owner will let you in" }.onFailure { error = friendly(it.message) }
+                else error = friendly(e.message)
+            }
+            finally { joiningId = null }
+        }
+    }
+
+    fun approve(r: JoinRequest) = act { Api.approveJoin(r.id); requests = requests - r; loadPage() }
+    fun decline(r: JoinRequest) = act { Api.declineJoin(r.id); requests = requests - r }
 
     fun rename(id: String, name: String) = act {
         if (!Api.renameSquad(id, name.trim().take(40))) throw IllegalStateException("Only the squad's owner can rename it")
-        load(id)
+        reloadSquads()
+    }
+
+    fun setPrivate(id: String, private: Boolean) = act {
+        if (!Api.patchGroup(id, org.json.JSONObject().put("join_policy", if (private) "request" else "open"))) throw IllegalStateException("Couldn't change that — only the owner can")
+        reloadSquads()
     }
 
     fun leave(id: String) = act {
         Api.leaveSquad(id)
-        load(null)
+        close()
+        reloadSquads()
     }
 
-    fun nudge(member: SquadMember) {
-        val g = selectedId ?: return
-        sent = sent + member.userId
+    fun nudge(userId: String) {
+        val g = openId ?: return
+        sent = sent + userId
         viewModelScope.launch {
-            runCatching { Api.nudge(g, member.userId) }.onFailure { e -> sent = sent - member.userId; error = e.message ?: "Couldn't send the nudge" }
+            runCatching { Api.nudge(g, userId) }.onFailure { e -> sent = sent - userId; error = e.message ?: "Couldn't send the nudge" }
         }
+    }
+
+    /** Debug builds only (DebugPreviewActivity): canned data for layout screenshots. */
+    internal fun debugSeed(squads: List<Squad>, posts: List<GroupPost>, leaders: List<LeaderRow>, members: List<MemberDetail>) {
+        this.squads = squads; this.posts = posts; this.leaders = leaders; this.members = members; feedSupported = true; loaded = true
+        openId = squads.firstOrNull()?.id
     }
 }
 
 /**
- * The Squad tab: create a squad or join with a 6-letter code; once in, the board — who's locked in
- * today, this week's dots, streaks, protein & calories for members who share them, and a nudge for
- * anyone who hasn't trained yet.
+ * The Squad tab (v2.6): my squads as cards (tap → the squad's Chat · Feed · Leaderboard page),
+ * Discover public squads, and create / join. The one-time username + photo flow runs first.
  */
 @Composable
 fun SquadScreen(vm: AppViewModel, onOpenProfile: () -> Unit) {
     val p = palette
     val sq: SquadViewModel = viewModel()
-    var adding by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
+    var joining by remember { mutableStateOf(false) }
     var howItWorks by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { sq.load(); sq.loadDiscover() }
+    LaunchedEffect(vm.profile.usernameSupported, vm.profile.username, vm.loadedOnce) {
+        if (vm.loadedOnce && vm.profile.usernameSupported && vm.profile.username == null && !sq.profileFlowDismissed) sq.profileFlow = true
+    }
     val display = com.sohum.bandlog.util.Names.display(vm.profile.name, Session.email, "Member")
 
     Column(
@@ -207,23 +327,22 @@ fun SquadScreen(vm: AppViewModel, onOpenProfile: () -> Unit) {
     ) {
         Rise(0) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                ScreenTitle("Squad")
-                if (sq.loading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = p.muted)
+                Column {
+                    ScreenTitle("Squad")
+                    vm.profile.username?.let { Text("@$it", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted, modifier = Modifier.clickable { sq.profileFlow = true }) }
+                }
+                if (sq.loading || sq.busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = p.muted)
                 else Box {
                     Box(
                         Modifier.size(44.dp).pressable().shadow(8.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow)
-                            .background(if (adding) p.card else p.btn, CircleShape).clickable { if (adding) adding = false else menu = true },
+                            .background(p.btn, CircleShape).clickable { menu = true },
                         contentAlignment = Alignment.Center,
-                    ) {
-                        if (adding) Icon(CrossIcon, "Close", tint = p.ink, modifier = Modifier.size(14.dp))
-                        else Text("+", fontSize = 24.sp, fontWeight = FontWeight(600), color = p.btnInk, modifier = Modifier.padding(bottom = 2.dp))
-                    }
-                    // v2.3: the + is a small menu.
+                    ) { Text("+", fontSize = 24.sp, fontWeight = FontWeight(600), color = p.btnInk, modifier = Modifier.padding(bottom = 2.dp)) }
                     androidx.compose.material3.DropdownMenu(menu, { menu = false }, Modifier.background(p.card)) {
-                        listOf("Create private squad", "Join with code", "How squads work").forEachIndexed { i, label ->
+                        listOf("Create a squad", "Join with code", "How squads work").forEachIndexed { i, label ->
                             androidx.compose.material3.DropdownMenuItem(
                                 text = { Text(label, fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink) },
-                                onClick = { menu = false; if (i < 2) adding = true else howItWorks = true },
+                                onClick = { menu = false; when (i) { 0 -> sq.creating = true; 1 -> joining = true; else -> howItWorks = true } },
                             )
                         }
                     }
@@ -231,29 +350,56 @@ fun SquadScreen(vm: AppViewModel, onOpenProfile: () -> Unit) {
             }
         }
         ErrorNote(sq.error)
-
-        val created = sq.created
-        if (created != null) {
-            Rise(1) { CreatedCard(created.first, created.second, onDone = { sq.created = null; adding = false }) }
-        } else if (sq.loaded && (sq.squads.isEmpty() || adding)) {
-            StartCards(sq.busy, onCreate = { sq.create(it, display) }, onJoin = { sq.join(it, display); adding = false })
-        }
-
-        // v2.3 Discover: public squads above my own; hidden when the RPC isn't live yet or there are none.
-        val publicSquads = sq.discover?.filter { d -> sq.squads.none { it.id == d.id } }.orEmpty()
-        if (publicSquads.isNotEmpty() && sq.created == null) {
-            Rise(1) { DiscoverSection(publicSquads, sq.joiningId) { sq.joinPublic(it, display) } }
-        }
-
-        if (sq.squads.size > 1) {
-            Rise(1) {
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    sq.squads.forEach { s -> SmallChip(s.name, { sq.select(s.id) }, filled = s.id == sq.selectedId) }
+        sq.notice?.let { n ->
+            Card(padding = 14.dp) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(n, fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink, modifier = Modifier.weight(1f))
+                    Text("OK", fontSize = 13.sp, fontWeight = FontWeight(700), color = p.muted, modifier = Modifier.clickable { sq.notice = null }.padding(8.dp))
                 }
             }
         }
 
-        sq.selected?.let { squad -> Board(sq, squad, Session.userId.orEmpty(), vm.profile.shareStats, onOpenProfile) }
+        if (sq.loaded && (sq.squads.isEmpty() || joining)) {
+            StartCards(sq.busy, showCreate = sq.squads.isEmpty(), onCreate = { sq.creating = true }, onJoin = { sq.joinByCode(it, display); joining = false })
+        }
+
+        if (sq.squads.isNotEmpty()) {
+            Text("Your squads", fontSize = 17.sp, fontWeight = FontWeight(800), letterSpacing = (-0.4).sp, color = p.ink, modifier = Modifier.padding(start = 2.dp, top = 4.dp))
+            sq.squads.forEachIndexed { i, s ->
+                Rise(1 + i) {
+                    Card(onClick = { sq.openSquad(s.id) }, padding = 14.dp) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            SquadIconView(s.icon, s.name, 52.dp, cover = s.coverUrl)
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(s.name, fontSize = 16.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1)
+                                Text(
+                                    s.description.ifBlank { if (s.ownerId == Session.userId) "You own this squad" else "Tap for chat, feed and the leaderboard" },
+                                    fontSize = 12.sp, color = p.muted, maxLines = 2,
+                                )
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Box(Modifier.background(p.card2, CircleShape).padding(horizontal = 10.dp, vertical = 4.dp)) {
+                                Text(if (s.isPrivate) "Private" else "Public", fontSize = 11.sp, fontWeight = FontWeight(700), color = p.muted)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // v2.3 Discover: public squads I'm not in; hidden when the RPC isn't live yet or there are none.
+        val publicSquads = sq.discover?.filter { d -> sq.squads.none { it.id == d.id } }.orEmpty()
+        if (publicSquads.isNotEmpty()) {
+            Rise(2 + sq.squads.size) { DiscoverSection(publicSquads, sq.joiningId) { sq.joinPublic(it, display) } }
+        }
+
+        Rise(3 + sq.squads.size) {
+            Row(Modifier.fillMaxWidth().clickable(onClick = onOpenProfile).padding(vertical = 4.dp), horizontalArrangement = Arrangement.Center) {
+                Text("You share ${if (vm.profile.shareStats) "streaks, meals + protein & calories" else "streaks and workouts only"} · ", fontSize = 12.sp, color = p.muted)
+                Text("change", fontSize = 12.sp, fontWeight = FontWeight(700), color = p.ink)
+            }
+        }
     }
     if (howItWorks) HowSquadsWorkSheet { howItWorks = false }
 }
@@ -266,7 +412,8 @@ private fun DiscoverSection(squads: List<com.sohum.bandlog.data.PublicSquad>, jo
         squads.take(8).forEach { s ->
             Card(padding = 12.dp) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    com.sohum.bandlog.ui.components.RemoteImage(url = s.coverUrl, size = 56.dp, radius = 14.dp, fallback = PeopleIcon)
+                    if (s.icon == null && s.coverUrl != null) com.sohum.bandlog.ui.components.RemoteImage(url = s.coverUrl, size = 52.dp, radius = 26.dp, fallback = PeopleIcon)
+                    else SquadIconView(s.icon, s.name, 52.dp)
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(s.name, fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1)
@@ -275,12 +422,9 @@ private fun DiscoverSection(squads: List<com.sohum.bandlog.data.PublicSquad>, jo
                     }
                     Spacer(Modifier.width(8.dp))
                     val busy = joiningId == s.id
-                    Box(
-                        Modifier.heightIn(min = 44.dp).pressable().clickable(enabled = joiningId == null) { onJoin(s.id) },
-                        contentAlignment = Alignment.Center,
-                    ) {
+                    Box(Modifier.heightIn(min = 44.dp).pressable().clickable(enabled = joiningId == null) { onJoin(s.id) }, contentAlignment = Alignment.Center) {
                         Box(Modifier.height(34.dp).background(p.btn, CircleShape).padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
-                            Text(if (busy) "Joining…" else "+ Join", fontSize = 13.sp, fontWeight = FontWeight(700), color = p.btnInk, maxLines = 1)
+                            Text(if (busy) "Joining…" else if (s.joinPolicy == "request") "Ask to join" else "+ Join", fontSize = 13.sp, fontWeight = FontWeight(700), color = p.btnInk, maxLines = 1)
                         }
                     }
                 }
@@ -295,11 +439,11 @@ private fun HowSquadsWorkSheet(onDismiss: () -> Unit) {
     val p = palette
     com.sohum.bandlog.ui.components.BottomSheet(title = "How squads work", onDismiss = onDismiss, primary = "Got it", onPrimary = onDismiss) {
         listOf(
-            "Create a private squad and share its 6-letter code, or join a friend's with theirs.",
-            "Public squads show up under Discover — tap + Join, no code needed.",
-            "The board shows who's locked in today, this week's training dots and streaks.",
-            "Protein and calories show only for members who share them (Profile → Share with squads).",
-            "Nudge anyone who hasn't trained yet — once a day.",
+            "Create a squad, pick an icon, and share its invite link — WhatsApp works best.",
+            "Public squads show up under Discover. Private ones need the owner to approve a request (invite links still let friends straight in).",
+            "Chat with the squad; meals, workouts and PRs you log land in its Feed automatically.",
+            "The Leaderboard ranks everyone by their streak flames.",
+            "Meals show only when you share stats (Profile → Share with squads).",
         ).forEach { line ->
             Row(Modifier.padding(bottom = 10.dp)) {
                 Box(Modifier.padding(top = 6.dp).size(6.dp).background(p.ink, CircleShape))
@@ -311,37 +455,33 @@ private fun HowSquadsWorkSheet(onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun StartCards(busy: Boolean, onCreate: (String) -> Unit, onJoin: (String) -> Unit) {
+private fun StartCards(busy: Boolean, showCreate: Boolean, onCreate: () -> Unit, onJoin: (String) -> Unit) {
     val p = palette
-    var name by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
     val focus = LocalFocusManager.current
-    Rise(1) {
+    if (showCreate) Rise(1) {
         Card(padding = 18.dp) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(40.dp).background(p.btn, CircleShape), contentAlignment = Alignment.Center) { Icon(PeopleIcon, null, tint = p.btnInk, modifier = Modifier.size(20.dp)) }
-                Spacer(Modifier.width(10.dp))
-                Column {
+                SquadIconView("biceps", "", 44.dp)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
                     Text("Create a squad", fontSize = 16.sp, fontWeight = FontWeight(700), color = p.ink)
-                    Text("Get a 6-letter code to share with friends", fontSize = 12.sp, color = p.muted)
+                    Text("Chat, a shared feed and a streak leaderboard", fontSize = 12.sp, color = p.muted)
                 }
             }
             Spacer(Modifier.height(12.dp))
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Field(name, { name = it.take(40) }, "Squad name", Modifier.weight(1f)) { if (name.isNotBlank()) { focus.clearFocus(); onCreate(name) } }
-                PillButton("Create", { focus.clearFocus(); onCreate(name) }, Modifier.width(96.dp), enabled = name.isNotBlank() && !busy, height = 46.dp)
-            }
+            PillButton("Create a squad", onCreate, height = 48.dp)
         }
     }
     Rise(2) {
         Card(padding = 18.dp) {
             Text("Join with a code", fontSize = 16.sp, fontWeight = FontWeight(700), color = p.ink)
-            Text("Ask a friend for their squad code", fontSize = 12.sp, color = p.muted)
+            Text("Ask a friend for their squad code or invite link", fontSize = 12.sp, color = p.muted)
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Box(Modifier.weight(1f).height(46.dp).background(p.card2, RoundedCornerShape(14.dp)).padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
                     BasicTextField(
-                        code, { code = it.filter { c -> c.isLetterOrDigit() }.uppercase().take(6) }, singleLine = true,
+                        code, { code = it.substringAfterLast("/join/").filter { c -> c.isLetterOrDigit() }.uppercase().take(6) }, singleLine = true,
                         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters, imeAction = ImeAction.Go),
                         keyboardActions = KeyboardActions(onGo = { if (code.length == 6) { focus.clearFocus(); onJoin(code) } }),
                         textStyle = TextStyle(fontSize = 20.sp, fontWeight = FontWeight(800), color = p.ink, letterSpacing = 5.sp, textAlign = TextAlign.Center),
@@ -354,188 +494,6 @@ private fun StartCards(busy: Boolean, onCreate: (String) -> Unit, onJoin: (Strin
                 }
                 PillButton("Join", { focus.clearFocus(); onJoin(code) }, Modifier.width(96.dp), enabled = code.length == 6 && !busy, height = 46.dp)
             }
-        }
-    }
-}
-
-@Composable
-private fun Field(value: String, onChange: (String) -> Unit, hint: String, modifier: Modifier = Modifier, onDone: () -> Unit) {
-    val p = palette
-    Box(modifier.height(46.dp).background(p.card2, RoundedCornerShape(14.dp)).padding(horizontal = 14.dp), contentAlignment = Alignment.CenterStart) {
-        BasicTextField(
-            value, onChange, singleLine = true,
-            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { onDone() }),
-            textStyle = TextStyle(fontSize = 15.sp, color = p.ink), cursorBrush = SolidColor(p.ink), modifier = Modifier.fillMaxWidth(),
-            decorationBox = { inner -> if (value.isEmpty()) Text(hint, fontSize = 15.sp, color = p.muted, maxLines = 1); inner() },
-        )
-    }
-}
-
-private fun shareInvite(ctx: android.content.Context, code: String) {
-    runCatching {
-        ctx.startActivity(
-            Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, squadInviteText(code)) }, "Invite to your squad"),
-        )
-    }
-}
-
-@Composable
-private fun CreatedCard(name: String, code: String, onDone: () -> Unit) {
-    val p = palette
-    val ctx = LocalContext.current
-    Card(padding = 20.dp) {
-        Text("$name is live", fontSize = 13.sp, fontWeight = FontWeight(700), color = p.muted)
-        Text("Send your friends this code", fontSize = 15.sp, color = p.ink, modifier = Modifier.padding(top = 2.dp, bottom = 10.dp))
-        CodePill(code, big = true) { shareInvite(ctx, code) }
-        Spacer(Modifier.height(12.dp))
-        PillButton("See the board", onDone, height = 48.dp, bg = p.card2, fg = p.ink)
-    }
-}
-
-/** The squad code as one big pill: tap it to copy; the round button beside it shares an invite. */
-@Composable
-private fun CodePill(code: String, big: Boolean = false, onShare: () -> Unit) {
-    val p = palette
-    val clip = LocalClipboardManager.current
-    val scope = rememberCoroutineScope()
-    var copied by remember { mutableStateOf(false) }
-    val h = if (big) 64.dp else 56.dp
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(
-            Modifier.weight(1f).height(h).pressable().background(p.card2, CircleShape)
-                .clickable { clip.setText(AnnotatedString(code)); copied = true; scope.launch { delay(1500); copied = false } }
-                .padding(start = 22.dp, end = 18.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(code, fontSize = if (big) 30.sp else 24.sp, fontWeight = FontWeight(800), letterSpacing = if (big) 6.sp else 5.sp, color = p.ink, modifier = Modifier.weight(1f), maxLines = 1)
-            Icon(if (copied) CheckIcon else CopyIcon, null, tint = if (copied) p.green else p.muted, modifier = Modifier.size(16.dp))
-            Text(if (copied) " Copied" else " Copy", fontSize = 12.sp, fontWeight = FontWeight(700), color = if (copied) p.green else p.muted)
-        }
-        Box(Modifier.size(h).pressable().background(p.btn, CircleShape).clickable(onClick = onShare), contentAlignment = Alignment.Center) {
-            Icon(ShareIcon, "Invite friends", tint = p.btnInk, modifier = Modifier.size(20.dp))
-        }
-    }
-}
-
-@Composable
-private fun Board(sq: SquadViewModel, squad: Squad, me: String, shareStats: Boolean, onOpenProfile: () -> Unit) {
-    val p = palette
-    val ctx = LocalContext.current
-    val focus = LocalFocusManager.current
-    val today = Dates.today()
-    val weekStart = Dates.weekStart(today)
-    val days = (0..6).map { Dates.addDays(weekStart, it.toLong()) }
-    val dayFmt = remember { DateTimeFormatter.ofPattern("EEEEE", Locale.ENGLISH) }
-    var renaming by remember(squad.id) { mutableStateOf(false) }
-    var newName by remember(squad.id) { mutableStateOf(squad.name) }
-    var confirmLeave by remember(squad.id) { mutableStateOf(false) }
-    val isOwner = squad.ownerId == me
-    val members = sq.board.sortedWith(compareByDescending<SquadMember> { it.weekStreak }.thenBy { if (it.userId == me) 0 else 1 })
-
-    Rise(2) {
-        Card(padding = 18.dp) {
-            if (renaming) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Field(newName, { newName = it.take(40) }, "Squad name", Modifier.weight(1f)) { focus.clearFocus(); sq.rename(squad.id, newName); renaming = false }
-                    PillButton("Save", { focus.clearFocus(); sq.rename(squad.id, newName); renaming = false }, Modifier.width(86.dp), enabled = newName.isNotBlank() && !sq.busy, height = 46.dp)
-                }
-            } else {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(squad.name, fontSize = 22.sp, fontWeight = FontWeight(800), letterSpacing = (-0.5).sp, color = p.ink, maxLines = 1, modifier = Modifier.weight(1f))
-                    if (isOwner) Box(Modifier.size(32.dp).background(p.card2, CircleShape).clickable { renaming = true }, contentAlignment = Alignment.Center) {
-                        Icon(PencilIcon, "Rename squad", tint = p.ink, modifier = Modifier.size(14.dp))
-                    }
-                }
-            }
-            Text("${sq.board.size} member${if (sq.board.size == 1) "" else "s"} · tap the code to copy it", fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(bottom = 10.dp))
-            CodePill(squad.code) { shareInvite(ctx, squad.code) }
-        }
-    }
-
-    members.forEachIndexed { i, m ->
-        val todayRow = m.day(today)
-        val trainedToday = todayRow?.trained == true
-        val trainedDays = m.days.filter { it.trained }.map { it.date }.toSet()
-        val isMe = m.userId == me
-        val already = m.userId in sq.sent
-        Rise(3 + i) {
-            Card(padding = 14.dp) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(44.dp)) {
-                        com.sohum.bandlog.ui.components.Avatar(com.sohum.bandlog.data.Api.avatarUrl(m.avatarPath), com.sohum.bandlog.util.Names.initials(m.name), 44.dp)
-                        Box(Modifier.align(Alignment.BottomEnd).size(13.dp).background(p.card, CircleShape).padding(2.dp).background(if (trainedToday) p.green else p.hair, CircleShape))
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(m.name + (if (isMe) " · you" else "") + (if (m.isOwner) " · owner" else ""), fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1)
-                        Text(if (trainedToday) "Locked in today" else "Not yet today", fontSize = 12.sp, fontWeight = if (trainedToday) FontWeight(700) else FontWeight(500), color = if (trainedToday) p.green else p.muted)
-                    }
-                    Flame(p.flame, 18.dp)
-                    Text(" ${m.weekStreak}", fontSize = 15.sp, fontWeight = FontWeight(800), color = p.ink)
-                    if (!isMe && !trainedToday) {
-                        Spacer(Modifier.width(6.dp))
-                        // One tap, no confirm: the nudge goes out and the pill greys.
-                        Box(Modifier.heightIn(min = 44.dp).pressable().clickable(enabled = !already) { sq.nudge(m) }, contentAlignment = Alignment.Center) {
-                            Row(
-                                Modifier.height(32.dp).background(if (already) p.card2 else p.btn, CircleShape).padding(horizontal = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Icon(FistIcon, null, tint = if (already) p.muted else p.btnInk, modifier = Modifier.size(13.dp))
-                                Text(if (already) " Nudged" else " Nudge", fontSize = 12.sp, fontWeight = FontWeight(700), color = if (already) p.muted else p.btnInk)
-                            }
-                        }
-                    }
-                }
-                Spacer(Modifier.height(12.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        days.forEach { d ->
-                            val did = d in trainedDays
-                            val future = d > today
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Box(
-                                    Modifier.size(15.dp)
-                                        .then(if (d == today) Modifier.border(1.5.dp, p.ink, CircleShape).padding(2.5.dp) else Modifier)
-                                        .then(if (did) Modifier.background(p.green, CircleShape) else Modifier.border(1.5.dp, if (future) p.track else p.hair, CircleShape)),
-                                )
-                                Text(Dates.parse(d).format(dayFmt), fontSize = 9.sp, fontWeight = FontWeight(600), color = p.muted)
-                            }
-                        }
-                    }
-                    Spacer(Modifier.weight(1f))
-                    Text(
-                        if (m.shareStats) "${(todayRow?.proteinG ?: 0.0).toInt()} g · ${String.format(Locale.US, "%,d", (todayRow?.calories ?: 0.0).toInt())} kcal" else "streaks only",
-                        fontSize = 13.sp, fontWeight = FontWeight(600), color = if (m.shareStats) p.ink else p.muted,
-                    )
-                }
-            }
-        }
-    }
-
-    Rise(4 + members.size) {
-        Row(Modifier.fillMaxWidth().clickable(onClick = onOpenProfile).padding(vertical = 4.dp), horizontalArrangement = Arrangement.Center) {
-            Text("You share ${if (shareStats) "streaks + protein & calories" else "streaks only"} · ", fontSize = 12.sp, color = p.muted)
-            Text("change", fontSize = 12.sp, fontWeight = FontWeight(700), color = p.ink)
-        }
-    }
-
-    Rise(5 + members.size) {
-        if (confirmLeave) {
-            Card(padding = 16.dp) {
-                Text("Leave ${squad.name}?", fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink)
-                Text(
-                    when { sq.board.size <= 1 -> "You're the last one in, so the squad will be deleted."; isOwner -> "The longest-standing member becomes the owner."; else -> "You can rejoin any time with the code." },
-                    fontSize = 12.sp, color = p.muted,
-                )
-                Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    PillButton("Stay", { confirmLeave = false }, Modifier.weight(1f), height = 44.dp, bg = p.card2, fg = p.ink)
-                    PillButton("Leave", { confirmLeave = false; sq.leave(squad.id) }, Modifier.weight(1f), enabled = !sq.busy, height = 44.dp, bg = p.red, fg = androidx.compose.ui.graphics.Color.White)
-                }
-            }
-        } else {
-            Text("Leave squad", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.red, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().clickable { confirmLeave = true }.padding(vertical = 8.dp))
         }
     }
 }

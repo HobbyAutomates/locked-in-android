@@ -97,6 +97,10 @@ class MainActivity : ComponentActivity() {
     private val openMealTick = mutableIntStateOf(0)
     /** Bumped when the 9 pm wrap notification is tapped; the shell lands on Home with the Wrap card. */
     private val openWrapTick = mutableIntStateOf(0)
+    /** v2.6: bumped when a water reminder is tapped; the shell opens the Water page. */
+    private val openWaterTick = mutableIntStateOf(0)
+    /** v2.6: the code of a tapped invite link (…/join/<code>); the shell joins it on the Squad tab. */
+    private val joinCode = mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -104,6 +108,7 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
         // A reboot or update clears AlarmManager; re-arm here too in case the receiver was missed.
         runCatching { com.sohum.bandlog.alarm.MealAlarms.rescheduleAll(this) }
+        runCatching { com.sohum.bandlog.alarm.WaterAlarms.reschedule(this) }
         enableEdgeToEdge()
         setContent {
             var themeMode by remember { mutableStateOf(ThemePrefs.get(this)) }
@@ -122,7 +127,7 @@ class MainActivity : ComponentActivity() {
                         // so a brand-new account never flashes the empty tab shell.
                         !vm.loadedOnce && vm.error == null -> BootSplash()
                         vm.needsOnboarding -> OnboardingScreen(vm, onDone = {}, onSkip = { vm.onboardingSkipped = true })
-                        else -> MainShell(vm, updateVm, themeMode, openMealTick.intValue, openWrapTick.intValue) { themeMode = it; ThemePrefs.set(this, it) }
+                        else -> MainShell(vm, updateVm, themeMode, openMealTick.intValue, openWrapTick.intValue, openWaterTick.intValue, joinCode.value, { joinCode.value = null }) { themeMode = it; ThemePrefs.set(this, it) }
                     }
                 }
                 UpdateDialog(updateVm)
@@ -140,6 +145,14 @@ class MainActivity : ComponentActivity() {
         when (i?.getStringExtra(EXTRA_OPEN)) {
             OPEN_MEAL -> openMealTick.intValue++
             OPEN_WRAP -> { runCatching { com.sohum.bandlog.util.Wrap.undismiss(this) }; openWrapTick.intValue++ }
+            OPEN_WATER -> openWaterTick.intValue++
+        }
+        // v2.6 invite link: https://web-production-ff1cf.up.railway.app/join/<code>
+        i?.data?.takeIf { i.action == android.content.Intent.ACTION_VIEW }?.let { uri ->
+            val segs = uri.pathSegments
+            val at = segs.indexOf("join")
+            segs.getOrNull(at + 1)?.filter { it.isLetterOrDigit() }?.uppercase()?.takeIf { at >= 0 && it.length in 4..12 }?.let { joinCode.value = it }
+            i.data = null
         }
         // Consume it so a rotation / re-delivery doesn't reopen the same thing.
         i?.removeExtra(EXTRA_OPEN)
@@ -149,6 +162,7 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_OPEN = "open"
         const val OPEN_MEAL = "meal"
         const val OPEN_WRAP = "wrap"
+        const val OPEN_WATER = "water"
     }
 }
 
@@ -167,7 +181,7 @@ private data class LogRequest(val workout: Workout?, val date: String, val meal:
 private data class Tab(val label: String, val icon: ImageVector)
 
 /** A full-screen page pushed over the tab shell (Profile detail screens, Badges). */
-private enum class Page { PERSONAL, GOALS, GOAL_WEIGHT, REMINDERS, WEIGHT_HISTORY, WEIGHT_LOG, BADGES, CALENDAR, PREFERENCES, APPEARANCE, TRACKING, PRIVACY, ACCOUNT }
+private enum class Page { WATER, PERSONAL, GOALS, GOAL_WEIGHT, REMINDERS, WEIGHT_HISTORY, WEIGHT_LOG, BADGES, CALENDAR, PREFERENCES, APPEARANCE, TRACKING, PRIVACY, ACCOUNT }
 
 /** v2.4: pages opened from Preferences go back to Preferences; everything else closes. */
 private fun parentOf(page: Page, fromPrefs: Boolean): Page? = when (page) {
@@ -180,15 +194,17 @@ private fun parentOf(page: Page, fromPrefs: Boolean): Page? = when (page) {
 private enum class DialItem(val label: String) { MEAL("Meal"), WORKOUT("Workout"), EXERCISE("Exercise"), WATER("Water"), WEIGHT("Weight") }
 
 @Composable
-private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: ThemeMode, openMealTick: Int, openWrapTick: Int, onThemeMode: (ThemeMode) -> Unit) {
+private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: ThemeMode, openMealTick: Int, openWrapTick: Int, openWaterTick: Int, joinCode: String?, onJoinHandled: () -> Unit, onThemeMode: (ThemeMode) -> Unit) {
     val p = palette
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val sq: com.sohum.bandlog.ui.squad.SquadViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var log by remember { mutableStateOf<LogRequest?>(null) }
     var page by remember { mutableStateOf<Page?>(null) }
     // Reminders is reachable from Preferences; remember that so Back returns there.
     var fromPrefs by remember { mutableStateOf(false) }
     var dial by remember { mutableStateOf(false) }
-    var waterSheet by remember { mutableStateOf(false) }
+    var waterParty by remember { mutableStateOf(false) }
     // v2.0: Squad takes Calendar's slot; since v2.1 Calendar is an icon in Home's header, pushed as a page.
     val tabs = listOf(Tab("Home", Icons.Outlined.Home), Tab("Squad", com.sohum.bandlog.ui.components.PeopleIcon), Tab("Scan", com.sohum.bandlog.ui.components.ScanFilledIcon), Tab("Progress", Icons.Outlined.SignalCellularAlt), Tab("Profile", Icons.Outlined.Person))
 
@@ -206,6 +222,40 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
     LaunchedEffect(vm.addFoodTick) {
         if (vm.addFoodTick > seenAddFood) { seenAddFood = vm.addFoodTick; page = null; log = LogRequest(null, Dates.today(), true) }
     }
+    // v2.6: a tapped water reminder opens the Water page.
+    LaunchedEffect(openWaterTick) {
+        if (openWaterTick > 0) { log = null; page = Page.WATER }
+    }
+    // v2.6: a tapped invite link joins (or requests to join) on the Squad tab.
+    LaunchedEffect(joinCode, vm.loadedOnce) {
+        if (joinCode != null && vm.loadedOnce) {
+            page = null; log = null; tab = 1
+            sq.joinByCode(joinCode, com.sohum.bandlog.util.Names.display(vm.profile.name, com.sohum.bandlog.data.Session.email, "Member"))
+            onJoinHandled()
+        }
+    }
+    // v2.6 water: keep the reminder receiver's mirror current (today's total, goal, glass, window).
+    LaunchedEffect(vm.waterToday, vm.profile.waterGoalMl, vm.profile.waterGlassMl, vm.loadedOnce) {
+        if (!vm.loadedOnce) return@LaunchedEffect
+        com.sohum.bandlog.util.WaterPrefs.cacheTotal(ctx, Dates.today(), vm.waterToday)
+        val cur = com.sohum.bandlog.util.WaterPrefs.load(ctx)
+        com.sohum.bandlog.util.WaterPrefs.save(ctx, cur.copy(goalMl = vm.profile.waterGoalMl, glassMl = vm.profile.waterGlassMl))
+    }
+    LaunchedEffect(vm.profile.waterReminderEveryMin, vm.profile.waterReminderFrom, vm.profile.waterReminderTo) {
+        val every = vm.profile.waterReminderEveryMin ?: return@LaunchedEffect
+        val cur = com.sohum.bandlog.util.WaterPrefs.load(ctx)
+        val next = cur.copy(from = vm.profile.waterReminderFrom ?: cur.from, to = vm.profile.waterReminderTo ?: cur.to, every = every)
+        if (next != cur) { com.sohum.bandlog.util.WaterPrefs.save(ctx, next); com.sohum.bandlog.alarm.WaterAlarms.reschedule(ctx) }
+    }
+    // v2.6: confetti the first time today's water crosses the goal.
+    var seenGoalTick by rememberSaveable { mutableIntStateOf(vm.waterGoalTick) }
+    LaunchedEffect(vm.waterGoalTick) {
+        if (vm.waterGoalTick > seenGoalTick) {
+            seenGoalTick = vm.waterGoalTick
+            val d = Dates.today()
+            if (vm.celebrationsOn && !com.sohum.bandlog.util.WaterPrefs.celebrated(ctx, d)) { com.sohum.bandlog.util.WaterPrefs.markCelebrated(ctx, d); waterParty = true }
+        }
+    }
     // A tapped 9 pm wrap lands on Home, where the Wrap card sits on top.
     LaunchedEffect(openWrapTick) {
         if (openWrapTick > 0) { page = null; log = null; tab = 0 }
@@ -215,7 +265,7 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             Box(Modifier.weight(1f)) {
                 when (tab) {
-                    0 -> TodayScreen(vm, onOpenWorkout = { w -> log = LogRequest(w, Dates.today(), false) }, onLogExercise = { log = LogRequest(null, Dates.today(), false, exercise = true) }, onOpenCalendar = { page = Page.CALENDAR }, onLog = { d -> log = LogRequest(null, d, false) }, wrapTick = openWrapTick, onLogWater = { waterSheet = true })
+                    0 -> TodayScreen(vm, onOpenWorkout = { w -> log = LogRequest(w, Dates.today(), false) }, onLogExercise = { log = LogRequest(null, Dates.today(), false, exercise = true) }, onOpenCalendar = { page = Page.CALENDAR }, onLog = { d -> log = LogRequest(null, d, false) }, wrapTick = openWrapTick, onLogWater = { page = Page.WATER })
                     1 -> com.sohum.bandlog.ui.squad.SquadScreen(vm, onOpenProfile = { tab = 4 })
                     2 -> com.sohum.bandlog.ui.scan.ScanTab(vm)
                     3 -> ProgressScreen(vm) { page = Page.BADGES }
@@ -232,6 +282,7 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
                             ProfilePage.TRACKING -> Page.TRACKING
                             ProfilePage.PRIVACY -> Page.PRIVACY
                             ProfilePage.ACCOUNT -> Page.ACCOUNT
+                            ProfilePage.USERNAME -> { sq.profileFlow = true; null }
                         }
                         fromPrefs = false
                     }
@@ -255,7 +306,7 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
                     DialItem.MEAL -> log = LogRequest(null, today, true)
                     DialItem.WORKOUT -> log = LogRequest(null, today, false)
                     DialItem.EXERCISE -> log = LogRequest(null, today, false, exercise = true)
-                    DialItem.WATER -> waterSheet = true
+                    DialItem.WATER -> page = Page.WATER
                     DialItem.WEIGHT -> page = Page.WEIGHT_LOG
                 }
             }
@@ -292,6 +343,7 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
                 val back: () -> Unit = { page = parentOf(current, fromPrefs) }
                 BackHandler { back() }
                 when (current) {
+                    Page.WATER -> com.sohum.bandlog.ui.today.WaterScreen(vm, back)
                     Page.PERSONAL -> PersonalDetailsScreen(vm, back) { page = Page.GOAL_WEIGHT }
                     Page.GOALS -> NutritionGoalsScreen(vm, back) { page = Page.PERSONAL }
                     Page.GOAL_WEIGHT -> GoalWeightScreen(vm, back)
@@ -328,7 +380,10 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
             }
         }
 
-        if (waterSheet) com.sohum.bandlog.ui.today.LogWaterSheet(vm) { waterSheet = false }
+        // v2.6 squads: the profile / create flows and the open squad, full screen over the tabs.
+        com.sohum.bandlog.ui.squad.SquadOverlays(vm)
+
+        if (waterParty) com.sohum.bandlog.ui.today.WaterGoalParty { waterParty = false }
     }
 }
 

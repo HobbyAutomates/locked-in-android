@@ -493,3 +493,114 @@ fun workoutKindIcon(kind: String, name: String = ""): ImageVector = when (kind) 
     "yoga" -> YogaIcon
     else -> BandIcon
 }
+
+// ---- v2.6: squad icons (Cal AI-style pre-made group photos: a white mark on a gradient disc) ----
+
+private fun circle(b: androidx.compose.ui.graphics.vector.PathBuilder, cx: Float, cy: Float, r: Float) {
+    b.moveTo(cx - r, cy); b.arcTo(r, r, 0f, true, true, cx + r, cy); b.arcTo(r, r, 0f, true, true, cx - r, cy); b.close()
+}
+
+/** A filled mark with an optional stroked overlay (stems, handles, veins). */
+private fun mark(name: String, fillPath: androidx.compose.ui.graphics.vector.PathBuilder.() -> Unit, strokePath: (androidx.compose.ui.graphics.vector.PathBuilder.() -> Unit)? = null) =
+    ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f).apply {
+        path(fill = SolidColor(Color.Black), pathFillType = PathFillType.NonZero, pathBuilder = fillPath)
+        if (strokePath != null) path(fill = null, stroke = SolidColor(Color.Black), strokeLineWidth = 1.8f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round, pathBuilder = strokePath)
+    }.build()
+
+val BicepsMark: ImageVector by lazy {
+    mark("Biceps", {
+        // shoulder → bicep bulge → forearm up to the fist → elbow → back along the underside
+        moveTo(2f, 20.5f); verticalLineTo(14.5f); curveTo(2f, 12.5f, 3.5f, 11.5f, 5.5f, 11.5f)
+        curveTo(6f, 7f, 10.5f, 6.5f, 12.8f, 9.8f); lineTo(13f, 7f); lineTo(12f, 4.8f)
+        curveTo(11.8f, 3.6f, 12.8f, 2.7f, 14f, 3f); lineTo(16.8f, 3.8f); curveTo(18f, 4.2f, 18.2f, 5.4f, 17.4f, 6.2f)
+        lineTo(16.2f, 7.2f); lineTo(17.5f, 11.2f); curveTo(20.5f, 12.5f, 21.5f, 16f, 19.5f, 18.3f)
+        curveTo(18f, 20f, 15f, 20.5f, 12f, 20.5f); close()
+    })
+}
+
+val DumbbellMark: ImageVector by lazy {
+    mark("DumbbellFill", {
+        moveTo(6f, 11f); horizontalLineTo(18f); verticalLineTo(13f); horizontalLineTo(6f); close()
+        moveTo(3.5f, 7.5f); horizontalLineTo(6.5f); verticalLineTo(16.5f); horizontalLineTo(3.5f); close()
+        moveTo(17.5f, 7.5f); horizontalLineTo(20.5f); verticalLineTo(16.5f); horizontalLineTo(17.5f); close()
+        moveTo(1.5f, 9.5f); horizontalLineTo(3.5f); verticalLineTo(14.5f); horizontalLineTo(1.5f); close()
+        moveTo(20.5f, 9.5f); horizontalLineTo(22.5f); verticalLineTo(14.5f); horizontalLineTo(20.5f); close()
+    })
+}
+
+val SaladMark: ImageVector by lazy {
+    mark("Salad", {
+        moveTo(3f, 11.5f); horizontalLineTo(21f); curveTo(21f, 16.5f, 17f, 20.5f, 12f, 20.5f); curveTo(7f, 20.5f, 3f, 16.5f, 3f, 11.5f); close()
+        moveTo(7.5f, 10.5f); curveTo(6.5f, 7.5f, 8.5f, 5f, 11f, 5.8f); curveTo(11.2f, 8f, 10f, 10f, 7.5f, 10.5f); close()
+        moveTo(12.5f, 10.5f); curveTo(12.8f, 7.2f, 15.5f, 5.5f, 18f, 6.6f); curveTo(17.5f, 8.8f, 15.2f, 10.5f, 12.5f, 10.5f); close()
+    })
+}
+
+val CherryMark: ImageVector by lazy {
+    mark("Cherry", { circle(this, 7.5f, 16.5f, 4f); circle(this, 16.5f, 15.5f, 4f) }) {
+        moveTo(7.5f, 12.5f); curveTo(8.5f, 8f, 11f, 5f, 14f, 3.5f); moveTo(16.5f, 11.5f); curveTo(16f, 8f, 15f, 5.5f, 14f, 3.5f)
+        moveTo(14f, 3.5f); curveTo(16f, 2.5f, 18.5f, 3f, 19.5f, 4.5f)
+    }
+}
+
+val AppleMark: ImageVector by lazy {
+    mark("Apple", {
+        moveTo(12f, 7.5f); curveTo(9f, 6f, 4.5f, 7f, 4.5f, 12.5f); curveTo(4.5f, 17f, 8f, 21f, 10f, 21f)
+        curveTo(11f, 21f, 11.5f, 20.5f, 12f, 20.5f); curveTo(12.5f, 20.5f, 13f, 21f, 14f, 21f)
+        curveTo(16f, 21f, 19.5f, 17f, 19.5f, 12.5f); curveTo(19.5f, 7f, 15f, 6f, 12f, 7.5f); close()
+        moveTo(12.3f, 6.2f); curveTo(12.3f, 4.2f, 13.8f, 2.6f, 15.8f, 2.6f); curveTo(15.8f, 4.6f, 14.3f, 6.2f, 12.3f, 6.2f); close()
+    })
+}
+
+val BoltMark: ImageVector by lazy {
+    mark("Bolt", { moveTo(13.5f, 2f); lineTo(4f, 14f); horizontalLineTo(11f); lineTo(10f, 22f); lineTo(20f, 9.5f); horizontalLineTo(13f); close() })
+}
+
+val TrophyMark: ImageVector by lazy {
+    mark("Trophy", {
+        moveTo(7f, 3f); horizontalLineTo(17f); verticalLineTo(9f); curveTo(17f, 12f, 15f, 14f, 12f, 14f); curveTo(9f, 14f, 7f, 12f, 7f, 9f); close()
+        moveTo(11f, 13.5f); horizontalLineTo(13f); verticalLineTo(18f); horizontalLineTo(11f); close()
+        moveTo(7.5f, 18f); horizontalLineTo(16.5f); verticalLineTo(21f); horizontalLineTo(7.5f); close()
+    }) {
+        moveTo(7f, 5f); horizontalLineTo(4f); verticalLineTo(7f); curveTo(4f, 9f, 5.5f, 10.5f, 7.5f, 10.5f)
+        moveTo(17f, 5f); horizontalLineTo(20f); verticalLineTo(7f); curveTo(20f, 9f, 18.5f, 10.5f, 16.5f, 10.5f)
+    }
+}
+
+val HeartMark: ImageVector by lazy {
+    mark("Heart", {
+        moveTo(12f, 21f); curveTo(12f, 21f, 3f, 15f, 3f, 9f); curveTo(3f, 6f, 5.2f, 4f, 7.8f, 4f); curveTo(9.6f, 4f, 11.1f, 5f, 12f, 6.4f)
+        curveTo(12.9f, 5f, 14.4f, 4f, 16.2f, 4f); curveTo(18.8f, 4f, 21f, 6f, 21f, 9f); curveTo(21f, 15f, 12f, 21f, 12f, 21f); close()
+    })
+}
+
+val MountainMark: ImageVector by lazy {
+    mark("Mountain", { moveTo(1.5f, 20f); lineTo(8.5f, 7.5f); lineTo(13f, 14f); lineTo(16f, 10f); lineTo(22.5f, 20f); close() })
+}
+
+val LeafMark: ImageVector by lazy {
+    mark("Leaf", { moveTo(4.5f, 19.5f); curveTo(4.5f, 10f, 10.5f, 4f, 20f, 4f); curveTo(20f, 13.5f, 14f, 19.5f, 4.5f, 19.5f); close() }) {
+        moveTo(3f, 21f); lineTo(14f, 10f)
+    }
+}
+
+/** One pre-made squad icon: a key saved in groups.icon, its name, the mark, and the disc gradient. */
+data class SquadIconPreset(val key: String, val label: String, val icon: ImageVector, val from: Color, val to: Color)
+
+/** The 12 squad icons of the create flow (keys shared with the web app). */
+val SQUAD_ICONS: List<SquadIconPreset> by lazy {
+    listOf(
+        SquadIconPreset("biceps", "Biceps", BicepsMark, Color(0xFFD7261E), Color(0xFFF7797D)),
+        SquadIconPreset("salad", "Salad", SaladMark, Color(0xFF2E8B1E), Color(0xFF9ACD6B)),
+        SquadIconPreset("cherry", "Cherry", CherryMark, Color(0xFF8E1B3A), Color(0xFFC2566E)),
+        SquadIconPreset("dumbbell", "Dumbbell", DumbbellMark, Color(0xFF34457A), Color(0xFF6F86C9)),
+        SquadIconPreset("flame", "Flame", FlameIcon, Color(0xFFF26B1D), Color(0xFFFFB24D)),
+        SquadIconPreset("run", "Run", RunIcon, Color(0xFF0F8C8C), Color(0xFF4FD1C5)),
+        SquadIconPreset("apple", "Apple", AppleMark, Color(0xFF3FA34D), Color(0xFFA8E063)),
+        SquadIconPreset("bolt", "Bolt", BoltMark, Color(0xFFE08E0B), Color(0xFFF8D71C)),
+        SquadIconPreset("trophy", "Trophy", TrophyMark, Color(0xFFB8860B), Color(0xFFF3C74E)),
+        SquadIconPreset("heart", "Heart", HeartMark, Color(0xFFE0357B), Color(0xFFFF8FB1)),
+        SquadIconPreset("mountain", "Mountain", MountainMark, Color(0xFF5B3CC4), Color(0xFF9F7AEA)),
+        SquadIconPreset("leaf", "Leaf", LeafMark, Color(0xFF1F7A4C), Color(0xFF6EE7A8)),
+    )
+}

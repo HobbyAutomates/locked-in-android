@@ -233,6 +233,18 @@ data class Profile(
     val addBurnedToGoal: Boolean? = null,
     val rolloverCalories: Boolean? = null,
     val waterGoalMl: Int = 2500,
+    // ---- v2.6 (null / defaults while the web agent's columns aren't there yet) ----
+    /** Unique handle for squads; null until the one-time "Create a username" flow runs. */
+    val username: String? = null,
+    /** True when the profiles row has a `username` column at all (the flow is skipped otherwise). */
+    val usernameSupported: Boolean = false,
+    /** "HH:mm" window for water reminders; null = column missing / never set. */
+    val waterReminderFrom: String? = null,
+    val waterReminderTo: String? = null,
+    /** 0 (never) / 30 / 60 / 120 / 180 / 240; null = column missing / never set. */
+    val waterReminderEveryMin: Int? = null,
+    /** One "glass" in mL (the + / − beside the bottle, the goal in glasses). */
+    val waterGlassMl: Int = 250,
 ) {
     /** The lens a report opens on: `goal` follows the weight goal (lose → cutting, gain → bulking, else protein). */
     val initialLens: String
@@ -281,6 +293,12 @@ data class Profile(
             addBurnedToGoal = if (!o.has("add_burned_to_goal")) null else o.optBoolean("add_burned_to_goal", false),
             rolloverCalories = if (!o.has("rollover_calories")) null else o.optBoolean("rollover_calories", false),
             waterGoalMl = if (!o.has("water_goal_ml") || o.isNull("water_goal_ml")) 2500 else o.optInt("water_goal_ml", 2500).coerceIn(250, 10_000),
+            username = if (!o.has("username")) null else o.str("username"),
+            usernameSupported = o.has("username"),
+            waterReminderFrom = if (!o.has("water_reminder_from")) null else o.str("water_reminder_from")?.take(5),
+            waterReminderTo = if (!o.has("water_reminder_to")) null else o.str("water_reminder_to")?.take(5),
+            waterReminderEveryMin = if (!o.has("water_reminder_every_min") || o.isNull("water_reminder_every_min")) null else o.optInt("water_reminder_every_min", 0),
+            waterGlassMl = if (!o.has("water_glass_ml") || o.isNull("water_glass_ml")) 250 else o.optInt("water_glass_ml", 250).coerceIn(50, 2000),
         )
     }
 }
@@ -299,9 +317,12 @@ data class WeightEntry(val id: String, val date: String, val weightKg: Double, v
 }
 
 /** One row of `bandlog.water_log` (v2.3). */
-data class WaterEntry(val id: String, val date: String, val ml: Int, val createdAt: String) {
+data class WaterEntry(val id: String, val date: String, val ml: Int, val createdAt: String, val vessel: String? = null) {
     companion object {
-        fun from(o: JSONObject) = WaterEntry(o.getString("id"), o.optString("date"), o.optInt("ml", 0), o.optString("created_at"))
+        fun from(o: JSONObject) = WaterEntry(
+            o.getString("id"), o.optString("date"), o.optInt("ml", 0), o.optString("created_at"),
+            if (!o.has("vessel") || o.isNull("vessel")) null else o.optString("vessel").ifBlank { null },
+        )
     }
 }
 
@@ -316,14 +337,19 @@ data class ProgressPhoto(val id: String, val date: String, val path: String, val
 }
 
 /** A public squad from `bandlog.public_groups()` (v2.3 Discover). */
-data class PublicSquad(val id: String, val name: String, val tagline: String, val coverUrl: String?, val memberCount: Int) {
+data class PublicSquad(
+    val id: String, val name: String, val tagline: String, val coverUrl: String?, val memberCount: Int,
+    val icon: String? = null, val description: String = "", val joinPolicy: String = "open",
+) {
     companion object {
+        private fun JSONObject.s(k: String): String? = if (!has(k) || isNull(k)) null else optString(k).ifBlank { null }
         fun from(o: JSONObject) = PublicSquad(
             id = o.getString("id"),
             name = o.optString("name"),
-            tagline = if (!o.has("tagline") || o.isNull("tagline")) "" else o.optString("tagline"),
-            coverUrl = if (!o.has("cover_url") || o.isNull("cover_url")) null else o.optString("cover_url").ifBlank { null },
+            tagline = o.s("tagline") ?: o.s("description").orEmpty(),
+            coverUrl = o.s("cover_url"),
             memberCount = o.optInt("member_count", 0),
+            icon = o.s("icon"), description = o.s("description").orEmpty(), joinPolicy = o.s("join_policy") ?: "open",
         )
     }
 }
@@ -790,9 +816,98 @@ data class DescribedExercise(
 // ---- v2.0: squads ----
 
 /** A squad the signed-in user belongs to (`bandlog.groups`). */
-data class Squad(val id: String, val name: String, val code: String, val ownerId: String) {
+data class Squad(
+    val id: String, val name: String, val code: String, val ownerId: String,
+    // ---- v2.6 (null / defaults until the columns exist) ----
+    val description: String = "",
+    /** A preset key from SQUAD_ICONS, or "photo:<path in group-photos>" for an uploaded picture. */
+    val icon: String? = null,
+    val coverUrl: String? = null,
+    val tags: List<String> = emptyList(),
+    /** open | request */
+    val joinPolicy: String = "open",
+) {
+    val isPrivate: Boolean get() = joinPolicy == "request"
     companion object {
-        fun from(o: JSONObject) = Squad(o.getString("id"), o.optString("name"), o.optString("code"), o.optString("owner_id"))
+        private fun JSONObject.s(k: String): String? = if (!has(k) || isNull(k)) null else optString(k).ifBlank { null }
+        fun from(o: JSONObject) = Squad(
+            o.getString("id"), o.optString("name"), o.optString("code"), o.optString("owner_id"),
+            description = o.s("description").orEmpty(),
+            icon = o.s("icon"),
+            coverUrl = o.s("cover_url"),
+            tags = o.optJSONArray("tags")?.let { a -> (0 until a.length()).mapNotNull { a.optString(it).ifBlank { null } } } ?: emptyList(),
+            joinPolicy = o.s("join_policy") ?: "open",
+        )
+    }
+}
+
+// ---- v2.6: squads v2 (group_posts, leaderboard, members, join requests) ----
+
+/** One row of `bandlog.group_feed(g, before, n)`: a chat message or a feed post, with its author. */
+data class GroupPost(
+    val id: String,
+    val groupId: String,
+    val userId: String,
+    /** message | meal | workout | pr | photo */
+    val kind: String,
+    val body: String,
+    val refId: String?,
+    val photoPath: String?,
+    val createdAt: String,
+    val authorName: String,
+    val authorUsername: String?,
+    val authorAvatar: String?,
+) {
+    companion object {
+        private fun JSONObject.s(k: String): String? = if (!has(k) || isNull(k)) null else optString(k).ifBlank { null }
+        fun from(o: JSONObject) = GroupPost(
+            id = o.optString("id"), groupId = o.optString("group_id"), userId = o.optString("user_id"),
+            kind = o.s("kind") ?: "message", body = o.s("body").orEmpty(), refId = o.s("ref_id"), photoPath = o.s("photo_path"),
+            createdAt = o.optString("created_at"),
+            authorName = o.s("name") ?: o.s("author_name") ?: "Member",
+            authorUsername = o.s("username") ?: o.s("author_username"),
+            authorAvatar = o.s("avatar_path") ?: o.s("author_avatar_path"),
+        )
+    }
+}
+
+/** One row of `bandlog.group_leaderboard(g)`. */
+data class LeaderRow(
+    val userId: String, val name: String, val username: String?, val avatarPath: String?, val flames: Int, val points: Int,
+    val rank: Int = 0, val isOwner: Boolean = false,
+) {
+    companion object {
+        private fun JSONObject.s(k: String): String? = if (!has(k) || isNull(k)) null else optString(k).ifBlank { null }
+        fun from(o: JSONObject) = LeaderRow(
+            o.optString("user_id"), o.s("name") ?: "Member", o.s("username"), o.s("avatar_path"), o.optInt("flames", 0),
+            if (o.has("week_points")) o.optInt("week_points", 0) else o.optInt("points", 0),
+            rank = o.optInt("rank", 0), isOwner = o.optBoolean("is_owner", false),
+        )
+    }
+}
+
+/** One row of `bandlog.group_members_detail(g)`. */
+data class MemberDetail(
+    val userId: String, val name: String, val username: String?, val avatarPath: String?,
+    val isOwner: Boolean, val flames: Int, val joinedAt: String,
+) {
+    companion object {
+        private fun JSONObject.s(k: String): String? = if (!has(k) || isNull(k)) null else optString(k).ifBlank { null }
+        fun from(o: JSONObject) = MemberDetail(
+            o.s("user_id") ?: o.optString("id"), o.s("name") ?: "Member", o.s("username"), o.s("avatar_path"),
+            o.optBoolean("is_owner", false), o.optInt("flames", 0), o.optString("joined_at"),
+        )
+    }
+}
+
+/** A pending row of `bandlog.group_join_requests` (owner view). */
+data class JoinRequest(val id: String, val groupId: String, val userId: String, val name: String, val username: String?, val avatarPath: String?, val createdAt: String) {
+    companion object {
+        private fun JSONObject.s(k: String): String? = if (!has(k) || isNull(k)) null else optString(k).ifBlank { null }
+        fun from(o: JSONObject) = JoinRequest(
+            o.optString("id"), o.optString("group_id"), o.optString("user_id"),
+            o.s("name") ?: o.s("display_name") ?: "Someone", o.s("username"), o.s("avatar_path"), o.optString("created_at"),
+        )
     }
 }
 

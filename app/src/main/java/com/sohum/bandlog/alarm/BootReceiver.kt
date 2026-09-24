@@ -11,5 +11,7 @@ import android.content.Intent
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         MealAlarms.rescheduleAll(context.applicationContext)
+        // v2.6: the water reminder's next slot.
+        WaterAlarms.reschedule(context.applicationContext)
     }
 }

@@ -144,16 +144,119 @@ class AppViewModel : ViewModel() {
     var water by mutableStateOf<List<com.sohum.bandlog.data.WaterEntry>>(emptyList()); private set
     val waterToday: Int get() = water.filter { it.date == today }.sumOf { it.ml }
 
-    suspend fun logWater(ml: Int, date: String = today): Boolean {
+    /** v2.6: today's rows, newest first (the − button undoes the first). */
+    val waterTodayRows: List<com.sohum.bandlog.data.WaterEntry> get() = water.filter { it.date == today }.sortedByDescending { it.createdAt }
+
+    /** Bumped when an add takes today's total across the goal; the shell decides whether to celebrate (once a day). */
+    var waterGoalTick by mutableStateOf(0); private set
+
+    /**
+     * v2.6: one water_log row per add, tagged with its [vessel]. The bottle fills at once (the row
+     * is added locally first) and the list is re-read after the insert.
+     */
+    suspend fun logWater(ml: Int, date: String = today, vessel: String? = null, quiet: Boolean = false): Boolean {
         if (ml <= 0) return false
+        val goal = profile.waterGoalMl
+        val before = waterToday
+        val temp = com.sohum.bandlog.data.WaterEntry("local-${System.nanoTime()}", date, ml, java.time.OffsetDateTime.now().toString(), vessel)
+        water = listOf(temp) + water
         return try {
-            Api.logWater(date, ml)
+            Api.logWater(date, ml, vessel)
             runCatching { water = Api.water(Dates.addDays(today, -30), today) }
-            notice = "Logged $ml mL water"
+            if (!quiet) notice = "Logged $ml mL water"
+            if (date == today && before < goal && waterToday >= goal) waterGoalTick++
             true
-        } catch (e: AuthException) { onAuthLost(e.message); false }
+        } catch (e: AuthException) { water = water - temp; onAuthLost(e.message); false }
+        catch (e: kotlinx.coroutines.CancellationException) { water = water - temp; throw e }
+        catch (e: Exception) { water = water - temp; error = e.message ?: "Couldn't log water"; false }
+    }
+
+    /** v2.6: the − button: deletes today's most recent row. */
+    suspend fun undoWater(): Boolean {
+        val last = waterTodayRows.firstOrNull() ?: return false
+        water = water - last
+        return try {
+            if (!last.id.startsWith("local-")) Api.deleteWater(last.id)
+            runCatching { water = Api.water(Dates.addDays(today, -30), today) }
+            true
+        } catch (e: AuthException) { water = water + last; onAuthLost(e.message); false }
         catch (e: kotlinx.coroutines.CancellationException) { throw e }
-        catch (e: Exception) { error = e.message ?: "Couldn't log water"; false }
+        catch (e: Exception) { water = water + last; error = e.message ?: "Couldn't undo"; false }
+    }
+
+    /** v2.6: goal edits from the Water page (glasses × glass size). */
+    fun setWaterGoal(ml: Int) {
+        val v = ml.coerceIn(250, 10_000)
+        profile = profile.copy(waterGoalMl = v)
+        viewModelScope.launch { runCatching { Api.patchProfile(org.json.JSONObject().put("water_goal_ml", v)) } }
+    }
+
+    /** v2.6: the reminder window and frequency, saved on the profile (the alarm reads the local mirror). */
+    fun setWaterReminder(from: String, to: String, every: Int) {
+        profile = profile.copy(waterReminderFrom = from, waterReminderTo = to, waterReminderEveryMin = every)
+        viewModelScope.launch {
+            runCatching { Api.patchProfile(org.json.JSONObject().put("water_reminder_from", from).put("water_reminder_to", to).put("water_reminder_every_min", every)) }
+        }
+    }
+
+    // ---- v2.6: username ----
+
+    suspend fun setUsername(u: String): Boolean {
+        val ok = try { Api.patchProfile(org.json.JSONObject().put("username", u)) } catch (e: Exception) { false }
+        if (ok) profile = profile.copy(username = u) else error = "Couldn't save that username"
+        return ok
+    }
+
+    /** v2.6: after the preset / photo is uploaded in the squad profile flow. */
+    fun setAvatarPathLocal(path: String) { profile = profile.copy(avatarPath = path) }
+
+    // ---- v2.6: squad feed posts from the save paths ----
+
+    /**
+     * Posts to every squad I'm in, in the background; a failure (no group_posts table yet, no
+     * squads) is silent. Meals are only shared when "share with squads" is on.
+     */
+    private fun shareToSquads(kind: String, body: String, refId: String? = null, mealPhotoPath: String? = null) {
+        viewModelScope.launch {
+            runCatching {
+                // A meal photo lives in the owner-only meal-photos bucket: copy it to group-photos/<uid>/ first.
+                val path = mealPhotoPath?.let { mp ->
+                    runCatching {
+                        val bmp = Api.fetchStorageBitmap("meal-photos", mp) ?: return@runCatching null
+                        val bytes = withContext(Dispatchers.Default) { com.sohum.bandlog.util.Images.jpeg(com.sohum.bandlog.util.Images.fitWithin(bmp, 720), 82) }
+                        Api.uploadGroupPhoto(bytes)
+                    }.getOrNull()
+                }
+                // post_to_my_groups fans out server-side; fall back to direct inserts on an older database.
+                runCatching { Api.postToMyGroups(kind, body, refId, path) }.getOrElse {
+                    val groups = Api.mySquadIds()
+                    if (groups.isNotEmpty()) Api.postToGroups(groups, kind, body, refId, path)
+                }
+            }.onFailure { android.util.Log.w("LockedIn", "Squad post skipped: ${it.message}") }
+        }
+    }
+
+    private fun shareMeal(date: String, raw: String, items: List<MealItem>, photoPath: String?, mealId: String? = null) {
+        if (date != today || !profile.shareStats || items.isEmpty()) return
+        val names = items.map { it.name.trim() }.filter { it.isNotBlank() }
+        val what = (names.take(3).joinToString(" + ") + if (names.size > 3) " + ${names.size - 3} more" else "").ifBlank { raw.take(60) }
+        val kcal = items.sumOf { it.calories }.toInt()
+        shareToSquads("meal", "logged $what · $kcal kcal", mealId, photoPath)
+    }
+
+    private fun fmtKg(kg: Double): String = if (kg % 1.0 == 0.0) kg.toInt().toString() else String.format(java.util.Locale.US, "%.1f", kg)
+
+    /** A new workout's feed line, and a PR post for every lift whose top weight beats its best in the loaded history. */
+    private fun shareWorkout(w: Workout, previous: List<Workout>) {
+        if (w.date != today) return
+        val body = if (w.isBands) listOfNotNull(w.summary, w.minutes?.let { "$it min" }).joinToString(" · ") else w.summary
+        shareToSquads("workout", body, w.id)
+        w.lifts.forEach { lift ->
+            val top = lift.sets.filter { it.kg != null && (it.reps ?: 0) > 0 }.maxWithOrNull(compareBy({ it.kg }, { it.reps })) ?: return@forEach
+            val prev = previous.asSequence().flatMap { it.lifts.asSequence() }.filter { it.name.equals(lift.name, ignoreCase = true) }
+                .flatMap { it.sets.asSequence() }.mapNotNull { it.kg }.maxOrNull() ?: return@forEach
+            if ((top.kg ?: 0.0) > prev) shareToSquads("pr", "🏆 ${lift.name} ${fmtKg(top.kg ?: 0.0)} kg × ${top.reps}", null)
+        }
     }
 
     // ---- v2.3: progress photos ----
@@ -280,7 +383,11 @@ class AppViewModel : ViewModel() {
             try {
                 val batches = jobs.mapNotNull { runCatching { it.await() }.getOrNull() }
                 val all = items + batches.flatMap { it.items }
-                if (all.isNotEmpty()) Api.saveMeal(date, label, all, photoPath ?: batches.firstNotNullOfOrNull { it.photoPath })
+                if (all.isNotEmpty()) {
+                    val photo = photoPath ?: batches.firstNotNullOfOrNull { it.photoPath }
+                    val mid = Api.saveMeal(date, label, all, photo)
+                    shareMeal(date, label, all, photo, mid)
+                }
                 else error = "Couldn't find any food in “${label.take(40)}”"
                 refresh()
             } catch (e: Exception) { error = e.message ?: "Couldn't log that meal" }
@@ -336,6 +443,11 @@ class AppViewModel : ViewModel() {
         this.presets = presets; this.workouts = workouts
     }
 
+    /** Debug builds only: a profile + today's water rows for the v2.6 Water page. */
+    internal fun debugSeedWater(profile: Profile, water: List<com.sohum.bandlog.data.WaterEntry>) {
+        this.profile = profile; this.water = water
+    }
+
     fun onSignedIn() { signedIn = true; authLost = false; signOutReason = null; error = null; refresh() }
 
     fun refresh() {
@@ -389,9 +501,12 @@ class AppViewModel : ViewModel() {
         kind: String = Workout.BANDS, lifts: List<com.sohum.bandlog.data.Lift>? = null, burn: WorkoutBurn? = null,
     ): Boolean {
         val before = thisWeek; val beforeStreak = weekStreak
+        val history = workouts
         var burnError: String? = null
+        var newId: String? = null
         val ok = mutate("Your session expired — sign in again. This workout wasn't saved.") {
             val wid = Api.saveWorkout(id, date, muscles, band, kg, minutes, exercises, notes, kind, lifts)
+            newId = wid
             // Auto-burn: one exercise_log row per workout, tagged with the workout id in `note`.
             // An edit replaces the row so minutes / band changes flow through to the burn.
             // The workout itself is saved at this point, so a failure here is reported, not fatal.
@@ -414,6 +529,8 @@ class AppViewModel : ViewModel() {
             }
         }
         if (ok) notice = burnError?.let { "Workout saved, but its calories burned didn't log ($it)." } ?: if (id == null) "Workout saved" else "Workout updated"
+        // v2.6: a new session goes on the squads' feed (plus a PR post for any lift beating its best).
+        if (ok && id == null) newId?.let { wid -> shareWorkout(Workout(wid, date, muscles, band, kg, minutes, exercises, notes, kind, lifts.orEmpty()), history) }
         // refresh() runs async inside mutate; wait for it so the counts below are fresh.
         if (ok && id == null) {
             kotlinx.coroutines.delay(50)
@@ -436,7 +553,12 @@ class AppViewModel : ViewModel() {
     suspend fun saveDescribed(date: String, items: List<com.sohum.bandlog.data.DescribedExercise>) = mutate {
         items.forEach { Api.saveExercise(date, it.activityCode, it.name, it.minutes, it.intensity, it.kcal, "describe") }
     }
-    suspend fun saveMeal(date: String, raw: String, items: List<MealItem>, photoPath: String? = null) = mutate { Api.saveMeal(date, raw, items, photoPath) }
+    suspend fun saveMeal(date: String, raw: String, items: List<MealItem>, photoPath: String? = null): Boolean {
+        var mid: String? = null
+        val ok = mutate { mid = Api.saveMeal(date, raw, items, photoPath) }
+        if (ok) shareMeal(date, raw, items, photoPath, mid)
+        return ok
+    }
     suspend fun deleteMeal(id: String) = mutate { Api.deleteMeal(id) }
     suspend fun saveTargets(p: Profile) = mutate { Api.saveProfile(p) }
 

@@ -55,6 +55,7 @@ class CaloriesWidget : AppWidgetProvider() {
             )
             rv.setOnClickPendingIntent(R.id.widget_root, open)
             rv.setOnClickPendingIntent(R.id.widget_log, log)
+            rv.setOnClickPendingIntent(R.id.widget_water, com.sohum.bandlog.notify.Notifications.addGlassIntent(context, "widget", 9203))
             return rv
         }
     }
