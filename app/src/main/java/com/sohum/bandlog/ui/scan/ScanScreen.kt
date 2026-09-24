@@ -896,7 +896,13 @@ fun PhotoReview(est: PlateEstimate, photo: Bitmap?, readOnly: Boolean, onSave: (
                         }
                         if (!readOnly) {
                             var g by remember(idx, est) { mutableStateOf(fmt(round1(it.grams))) }
-                            NumberField(g, { v -> g = v.filter { c -> c.isDigit() || c == '.' }; g.toDoubleOrNull()?.let { d -> items = items.toMutableList().also { l -> l[idx] = it.withGrams(d) } } }, "g")
+                            NumberField(g, { v ->
+                                g = v.filter { c -> c.isDigit() || c == '.' }
+                                // Always scale from the ORIGINAL estimate, never the already-scaled item — and
+                                // ignore empty/unparsable/≤0 input so the previous value sticks instead of zeroing.
+                                val d = g.toDoubleOrNull()
+                                if (d != null && d > 0) items = items.toMutableList().also { l -> l[idx] = est.items[idx].withGrams(d) }
+                            }, "g")
                             IconButton(onClick = { items = items.filterIndexed { i, _ -> i != idx } }, Modifier.size(32.dp)) { Icon(Icons.Outlined.Delete, "Remove", tint = p.muted) }
                         } else {
                             Text("${it.grams.roundToInt()} g", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink)

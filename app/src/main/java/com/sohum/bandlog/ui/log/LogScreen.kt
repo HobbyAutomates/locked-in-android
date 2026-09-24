@@ -37,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -73,6 +74,8 @@ import com.sohum.bandlog.ui.theme.palette
 import com.sohum.bandlog.ui.today.fmt
 import com.sohum.bandlog.util.Dates
 import com.sohum.bandlog.util.Muscles
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
@@ -119,7 +122,16 @@ private fun WorkoutForm(vm: AppViewModel, existing: Workout?, initialDate: Strin
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var pickDate by remember { mutableStateOf(false) }
+    var pendingDelete by remember { mutableStateOf(false) }
+    var deleteJob by remember { mutableStateOf<Job?>(null) }
     val ctx = androidx.compose.ui.platform.LocalContext.current
+
+    // If the editor leaves composition (Back, navigation) before the undo window runs out, the local
+    // job is cancelled with the screen — finish the delete on the ViewModel's own scope instead of
+    // silently dropping it.
+    DisposableEffect(existing?.id) {
+        onDispose { if (pendingDelete && !busy) { deleteJob?.cancel(); existing?.let { vm.deleteWorkoutLater(it.id) } } }
+    }
 
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp, 6.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -197,7 +209,21 @@ private fun WorkoutForm(vm: AppViewModel, existing: Workout?, initialDate: Strin
             }
             ErrorNote(error)
             if (existing != null) {
-                TextButton(onClick = { scope.launch { busy = true; if (vm.deleteWorkout(existing.id)) onClose() else { error = vm.error; busy = false } } }, enabled = !busy) { Text("Delete workout", color = p.red) }
+                if (pendingDelete) {
+                    RowSpaceBetween {
+                        Text("Deleted", fontSize = 15.sp, fontWeight = FontWeight(500), color = p.muted)
+                        TextButton(onClick = { deleteJob?.cancel(); deleteJob = null; pendingDelete = false }) { Text("Undo", color = p.btn) }
+                    }
+                } else {
+                    TextButton(onClick = {
+                        pendingDelete = true
+                        deleteJob = scope.launch {
+                            delay(5000)
+                            busy = true
+                            if (vm.deleteWorkout(existing.id)) onClose() else { error = vm.error; busy = false; pendingDelete = false }
+                        }
+                    }, enabled = !busy) { Text("Delete workout", color = p.red) }
+                }
             }
         }
         Box(Modifier.padding(16.dp, 12.dp).navigationBarsPadding().imePadding()) {

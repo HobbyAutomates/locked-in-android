@@ -28,6 +28,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -69,6 +70,7 @@ import com.sohum.bandlog.ui.components.workoutKindIcon
 import com.sohum.bandlog.ui.theme.palette
 import com.sohum.bandlog.ui.today.fmt
 import com.sohum.bandlog.util.Lifts
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -195,6 +197,13 @@ private fun LiftForm(vm: AppViewModel, kind: String, existing: Workout?, initial
     var adding by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var pendingDelete by remember { mutableStateOf(false) }
+    var deleteJob by remember { mutableStateOf<Job?>(null) }
+    // If the screen leaves composition before the undo window runs out, the local job is cancelled
+    // with it — finish the delete on the ViewModel's own scope instead of silently dropping it.
+    DisposableEffect(existing?.id) {
+        onDispose { if (pendingDelete && !busy) { deleteJob?.cancel(); existing?.let { vm.deleteWorkoutLater(it.id) } } }
+    }
     val last = remember(vm.workouts) { vm.lastWorkout(kind, except = existing?.id) }
 
     fun ghost(name: String): Lift? = vm.lastLift(name, except = existing?.id)
@@ -235,7 +244,21 @@ private fun LiftForm(vm: AppViewModel, kind: String, existing: Workout?, initial
             }
             ErrorNote(error)
             if (existing != null) {
-                TextButton(onClick = { scope.launch { busy = true; if (vm.deleteWorkout(existing.id)) onClose() else { error = vm.error; busy = false } } }, enabled = !busy) { Text("Delete workout", color = p.red) }
+                if (pendingDelete) {
+                    RowSpaceBetween {
+                        Text("Deleted", fontSize = 15.sp, fontWeight = FontWeight(500), color = p.muted)
+                        TextButton(onClick = { deleteJob?.cancel(); deleteJob = null; pendingDelete = false }) { Text("Undo", color = p.btn) }
+                    }
+                } else {
+                    TextButton(onClick = {
+                        pendingDelete = true
+                        deleteJob = scope.launch {
+                            delay(5000)
+                            busy = true
+                            if (vm.deleteWorkout(existing.id)) onClose() else { error = vm.error; busy = false; pendingDelete = false }
+                        }
+                    }, enabled = !busy) { Text("Delete workout", color = p.red) }
+                }
             }
         }
         Box(Modifier.padding(16.dp, 12.dp).navigationBarsPadding().imePadding()) {
@@ -412,6 +435,13 @@ private fun KindEditForm(vm: AppViewModel, existing: Workout, onClose: () -> Uni
     var notes by remember { mutableStateOf(existing.notes) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var pendingDelete by remember { mutableStateOf(false) }
+    var deleteJob by remember { mutableStateOf<Job?>(null) }
+    // If the screen leaves composition before the undo window runs out, the local job is cancelled
+    // with it — finish the delete on the ViewModel's own scope instead of silently dropping it.
+    DisposableEffect(existing.id) {
+        onDispose { if (pendingDelete && !busy) { deleteJob?.cancel(); vm.deleteWorkoutLater(existing.id) } }
+    }
     val mins = minutes.toIntOrNull() ?: 0
     val kcal = burn?.let { b -> if (b.minutes > 0) b.kcal / b.minutes * mins else b.kcal } ?: 0.0
     val name = existing.exercises.ifBlank { burn?.name ?: Workout.kindLabel(existing.kind) }
@@ -445,7 +475,21 @@ private fun KindEditForm(vm: AppViewModel, existing: Workout, onClose: () -> Uni
                 }
             }
             ErrorNote(error)
-            TextButton(onClick = { scope.launch { busy = true; if (vm.deleteWorkout(existing.id)) onClose() else { error = vm.error; busy = false } } }, enabled = !busy) { Text("Delete workout", color = p.red) }
+            if (pendingDelete) {
+                RowSpaceBetween {
+                    Text("Deleted", fontSize = 15.sp, fontWeight = FontWeight(500), color = p.muted)
+                    TextButton(onClick = { deleteJob?.cancel(); deleteJob = null; pendingDelete = false }) { Text("Undo", color = p.btn) }
+                }
+            } else {
+                TextButton(onClick = {
+                    pendingDelete = true
+                    deleteJob = scope.launch {
+                        delay(5000)
+                        busy = true
+                        if (vm.deleteWorkout(existing.id)) onClose() else { error = vm.error; busy = false; pendingDelete = false }
+                    }
+                }, enabled = !busy) { Text("Delete workout", color = p.red) }
+            }
         }
         Box(Modifier.padding(16.dp, 12.dp).navigationBarsPadding().imePadding()) {
             PillButton(if (busy) "Saving…" else "Save", enabled = !busy && mins > 0, onClick = {
