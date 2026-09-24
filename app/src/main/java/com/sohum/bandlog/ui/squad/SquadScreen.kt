@@ -103,6 +103,16 @@ class SquadViewModel : ViewModel() {
     var pageLoading by mutableStateOf(false); private set
     var posting by mutableStateOf(false); private set
 
+    // ---- v2.7: Squad Food Battle (docs/food-battle-spec.md) ----
+    /** groups.battle_enabled for the open squad; false until [loadBattle] reads it. */
+    var battleEnabled by mutableStateOf(false); private set
+    /** Today's live board from `battle_board`, in the SQL's own leader-first order. */
+    var battleBoard by mutableStateOf<List<com.sohum.bandlog.data.BattleRepo.BattleRow>>(emptyList()); private set
+    /** Yesterday's winner (pinned crown card), from `battle_close` — null once there's nothing to show. */
+    var battleCrown by mutableStateOf<com.sohum.bandlog.data.BattleRepo.BattleWinner?>(null); private set
+    var battleLoading by mutableStateOf(false); private set
+    var battleBusy by mutableStateOf(false); private set
+
     /** v2.3 Discover: public squads, or null when the `public_groups` RPC isn't there (section hidden). */
     var discover by mutableStateOf<List<com.sohum.bandlog.data.PublicSquad>?>(null); private set
     var joiningId by mutableStateOf<String?>(null); private set
@@ -132,9 +142,10 @@ class SquadViewModel : ViewModel() {
     private suspend fun reloadSquads() { runCatching { squads = Api.mySquads() }; loaded = true }
 
     fun openSquad(id: String, info: Boolean = false) {
-        if (openId != id) { posts = emptyList(); leaders = emptyList(); members = emptyList(); requests = emptyList(); board = emptyList(); challenges = null; challengeOpenId = null; challengeBoard = emptyList() }
+        if (openId != id) { posts = emptyList(); leaders = emptyList(); members = emptyList(); requests = emptyList(); board = emptyList(); challenges = null; challengeOpenId = null; challengeBoard = emptyList(); battleBoard = emptyList(); battleCrown = null }
         openId = id; infoOpen = info
         loadPage(id)
+        loadBattle(id)
     }
 
     fun close() { openId = null; infoOpen = false; challengeOpenId = null }
@@ -161,6 +172,50 @@ class SquadViewModel : ViewModel() {
                 ch.await().onSuccess { if (openId == id) { challenges = it; challengesSupported = true } }.onFailure { if (challengesSupported != true) challengesSupported = false }
             }
             pageLoading = false
+        }
+    }
+
+    /**
+     * v2.7 Squad Food Battle: reads `groups.battle_enabled`, closes yesterday (idempotent — no
+     * cron, the spec's "close on page load" design), then loads today's board. Safe to call every
+     * time the squad opens; a battle-disabled squad just gets `battleEnabled = false`.
+     */
+    fun loadBattle(id: String = openId ?: "") {
+        if (id.isBlank()) return
+        viewModelScope.launch {
+            battleLoading = true
+            try {
+                val enabled = runCatching { com.sohum.bandlog.data.BattleRepo.battleEnabled(id) }.getOrDefault(false)
+                battleEnabled = enabled
+                if (enabled) {
+                    val today = com.sohum.bandlog.util.Dates.today()
+                    val yesterday = com.sohum.bandlog.util.Dates.addDays(today, -1)
+                    battleCrown = runCatching { com.sohum.bandlog.data.BattleRepo.closeDay(id, yesterday) }.getOrNull()
+                    battleBoard = runCatching { com.sohum.bandlog.data.BattleRepo.board(id, today) }.getOrDefault(emptyList())
+                } else { battleBoard = emptyList(); battleCrown = null }
+            } finally { battleLoading = false }
+        }
+    }
+
+    /** Re-reads just today's board (after a Snap, or a pull-to-refresh). */
+    fun refreshBattleBoard() {
+        val id = openId ?: return
+        if (!battleEnabled) return
+        viewModelScope.launch {
+            val today = com.sohum.bandlog.util.Dates.today()
+            runCatching { com.sohum.bandlog.data.BattleRepo.board(id, today) }.onSuccess { if (openId == id) battleBoard = it }
+        }
+    }
+
+    /** Owner-only toggle (Squad info page): flips `groups.battle_enabled`. */
+    fun toggleBattle(id: String, enabled: Boolean) {
+        viewModelScope.launch {
+            battleBusy = true; error = null
+            try {
+                if (!com.sohum.bandlog.data.BattleRepo.setBattleEnabled(id, enabled)) throw IllegalStateException("Only the squad's owner can change this")
+                battleEnabled = enabled
+                if (enabled) loadBattle(id) else { battleBoard = emptyList(); battleCrown = null }
+            } catch (e: Exception) { error = friendly(e.message) } finally { battleBusy = false }
         }
     }
 

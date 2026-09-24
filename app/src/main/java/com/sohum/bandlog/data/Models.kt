@@ -354,7 +354,19 @@ data class PublicSquad(
     }
 }
 
-data class ParseResult(val items: List<MealItem>, val assumptions: List<String>, val unparsed: List<String>)
+/** v2.7: plain water pulled out of the dictated text BEFORE the LLM ever sees it (see the web's src/lib/waterParse.ts). */
+data class ParsedWater(val ml: Int, val glasses: Double, val phrase: String) {
+    companion object {
+        fun from(o: JSONObject?): ParsedWater? {
+            if (o == null) return null
+            val ml = o.optInt("ml", 0)
+            if (ml <= 0) return null
+            return ParsedWater(ml, o.optDouble("glasses", 0.0), o.optString("phrase"))
+        }
+    }
+}
+
+data class ParseResult(val items: List<MealItem>, val assumptions: List<String>, val unparsed: List<String>, val water: ParsedWater? = null)
 
 /** A household serving: "1 katori" = 150 g. */
 data class Serving(val label: String, val grams: Double) {
@@ -542,6 +554,10 @@ data class LabelReport(
     val proteinPerServing: Double?,
     val proteinQuality: String,
     val proteinNote: String,
+    /** Where per100 came from: "label" (parsed off the transcript) | "openfoodfacts" | null when there is none. */
+    val nutritionSource: String?,
+    /** True when the transcript/barcode record had no usable nutrition table — per100 is empty, ask for a label scan. */
+    val needsBackOfPack: Boolean,
     val concerns: List<Triple<String, String, String>>, // ingredient, issue, severity
     val claims: List<Triple<String, String, String>>,   // claim, status, why
     val research: List<String>,
@@ -573,6 +589,8 @@ data class LabelReport(
                 proteinRating = p.optString("rating", "average"),
                 proteinPerServing = if (p.isNull("per_serving_g")) null else p.optDouble("per_serving_g"),
                 proteinQuality = p.optString("quality"), proteinNote = p.optString("note"),
+                nutritionSource = if (o.isNull("nutrition_source")) null else o.optString("nutrition_source").ifBlank { null },
+                needsBackOfPack = o.optBoolean("needs_back_of_pack", false),
                 concerns = triples("concerns", "ingredient", "issue", "severity"),
                 claims = triples("claims", "claim", "status", "why"),
                 research = strings("research"), suggestions = strings("suggestions"), alternatives = strings("alternatives"),

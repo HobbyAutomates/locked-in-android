@@ -19,7 +19,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -110,6 +113,13 @@ fun ProfileScreen(
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val displayName = Names.display(prof.name, Session.email)
 
+    // v2.7 Squad Food Battle: total crowns + last 7 wins (docs/food-battle-spec.md). Quiet (no card)
+    // for anyone who's never won one — matches the web's GraffitiWall.tsx.
+    var graffiti by remember { mutableStateOf<com.sohum.bandlog.data.BattleRepo.Graffiti?>(null) }
+    androidx.compose.runtime.LaunchedEffect(Session.userId) {
+        graffiti = runCatching { com.sohum.bandlog.data.BattleRepo.myGraffiti() }.getOrElse { com.sohum.bandlog.data.BattleRepo.Graffiti(0, emptyList()) }
+    }
+
     // Avatar: center-crop square, <=512 px, JPEG q85 -> avatars/<uid>/avatar.jpg (upsert) ->
     // profiles.avatar_path = "<uid>/avatar.jpg?v=<millis>" (the ?v busts every cache).
     fun uploadAvatar(src: android.graphics.Bitmap?) {
@@ -167,6 +177,9 @@ fun ProfileScreen(
                 }
             }
         }
+
+        // ---- v2.7: graffiti wall (Squad Food Battle crowns) — hidden until the first win ----
+        graffiti?.takeIf { it.total > 0 }?.let { g -> Rise(1) { GraffitiWallCard(g) } }
 
         // ---- you ----
         Rise(1) { GroupLabel("You") }
@@ -358,6 +371,48 @@ internal fun RingColoursSheet(onDismiss: () -> Unit) {
                 Box(Modifier.size(14.dp).background(c, CircleShape))
                 Spacer(Modifier.width(12.dp))
                 Text(label, fontSize = 13.sp, color = p.ink, lineHeight = 18.sp)
+            }
+        }
+    }
+}
+
+/**
+ * v2.7 Squad Food Battle: total crowns + last 7 wins (docs/food-battle-spec.md), matching the
+ * web's GraffitiWall.tsx — a bold spray-paint styled strip of recent wins, quiet (not shown at
+ * all) for anyone who's never won one.
+ */
+@Composable
+private fun GraffitiWallCard(g: com.sohum.bandlog.data.BattleRepo.Graffiti) {
+    val p = palette
+    Card(padding = 0.dp) {
+        Row(Modifier.fillMaxWidth().padding(16.dp, 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("👑", fontSize = 22.sp)
+            Spacer(Modifier.width(12.dp))
+            Column {
+                Text("Graffiti wall", fontSize = 15.sp, fontWeight = FontWeight(800), color = p.ink)
+                Text(
+                    "${g.total} food battle crown${if (g.total == 1) "" else "s"} won",
+                    fontSize = 12.sp, color = p.muted,
+                )
+            }
+        }
+        if (g.recent.isNotEmpty()) {
+            Row(
+                Modifier.fillMaxWidth().padding(bottom = 14.dp).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Spacer(Modifier.width(8.dp))
+                g.recent.forEach { w ->
+                    val gradient = Brush.linearGradient(listOf(Color(0xFFFF5C8A), Color(0xFFFFC53D), Color(0xFF7C5CFF)))
+                    Column(
+                        Modifier.width(140.dp).background(gradient, RoundedCornerShape(16.dp)).padding(12.dp),
+                    ) {
+                        Text(w.date, fontSize = 10.sp, fontWeight = FontWeight(800), color = Color(0xFFFFD23C), letterSpacing = 0.6.sp)
+                        Text(w.groupName, fontSize = 15.sp, fontWeight = FontWeight(900), color = Color.White, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+                        Text("${w.score.toInt()} pts · ${w.goalLabel}", fontSize = 11.sp, fontWeight = FontWeight(700), color = Color.White.copy(alpha = 0.88f), modifier = Modifier.padding(top = 2.dp))
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
             }
         }
     }

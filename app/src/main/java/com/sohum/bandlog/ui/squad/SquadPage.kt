@@ -102,25 +102,34 @@ fun SquadOverlays(vm: AppViewModel) {
         sq.creating -> { BackHandler { sq.creating = false }; CreateSquadFlow(sq, display) { sq.creating = false } }
         open != null && sq.infoOpen -> { BackHandler { sq.infoOpen = false }; SquadInfoPage(sq, open) { sq.infoOpen = false } }
         open != null && sq.challengeOpenId != null -> { BackHandler { sq.closeChallenge() }; ChallengeDetailPage(sq, open) }
-        open != null -> { BackHandler { sq.close() }; SquadPage(sq, open, proteinGoal = vm.profile.proteinTargetG.takeIf { vm.loadedOnce }) }
+        open != null -> { BackHandler { sq.close() }; SquadPage(sq, open, proteinGoal = vm.profile.proteinTargetG.takeIf { vm.loadedOnce }, vm = vm) }
     }
 }
 
-/** v2.7: Challenges sits after the first tab; [weight] keeps the two long labels on one line. */
+/**
+ * v2.7: Challenges sits after the first tab, and Battle (only when the squad has Squad Food Battle
+ * on) after it; [weight] keeps the long labels on one line.
+ */
 private enum class SquadTab(val label: String, val weight: Float) {
-    CHAT("Chat", 0.8f), CHALLENGES("Challenges", 1.3f), FEED("Feed", 0.8f), BOARD("Leaderboard", 1.35f)
+    CHAT("Chat", 0.8f), CHALLENGES("Challenges", 1.3f), BATTLE("Battle", 0.9f), FEED("Feed", 0.8f), BOARD("Leaderboard", 1.35f)
 }
 
-/** Feed kinds (everything but chat messages); v2.7 adds challenge start / finish posts. */
-val FEED_KINDS = listOf("meal", "workout", "pr", "photo", "challenge")
+/** Feed kinds (everything but chat messages); v2.7 adds challenge start / finish posts and battle crowns. */
+val FEED_KINDS = listOf("meal", "workout", "pr", "photo", "challenge", "battle")
 
-/** Cal AI group page: header (icon, name, members button) and the Chat · Challenges · Feed · Leaderboard tabs. */
+/**
+ * Cal AI group page: header (icon, name, members button) and the Chat · Challenges · Battle · Feed ·
+ * Leaderboard tabs. Battle (docs/food-battle-spec.md) only shows when the squad has it on; [vm] is
+ * only used for its Snap flow (existing plate-photo scan + meal save).
+ */
 @Composable
-fun SquadPage(sq: SquadViewModel, squad: Squad, initialTab: Int? = null, proteinGoal: Int? = null) {
+fun SquadPage(sq: SquadViewModel, squad: Squad, initialTab: Int? = null, proteinGoal: Int? = null, vm: AppViewModel? = null) {
     val p = palette
-    val tabs = if (sq.feedSupported == false) listOf(SquadTab.BOARD) else SquadTab.entries.toList()
-    var tab by remember(squad.id) { mutableIntStateOf(initialTab ?: if (sq.feedSupported == false) 0 else tabs.indexOf(SquadTab.FEED)) }
-    val current = tabs.getOrElse(tab) { tabs.last() }
+    val tabs = if (sq.feedSupported == false) listOf(SquadTab.BOARD) else SquadTab.entries.filter { it != SquadTab.BATTLE || sq.battleEnabled }
+    // Remembered by tab, not index: Battle appears once loadBattle has read battle_enabled, which
+    // would otherwise shift every later index and jump the user to a different tab.
+    var tab by remember(squad.id) { mutableStateOf(initialTab?.let { tabs.getOrNull(it) } ?: if (sq.feedSupported == false) SquadTab.BOARD else SquadTab.FEED) }
+    val current = if (tab in tabs) tab else tabs.firstOrNull { it == SquadTab.FEED } ?: tabs.last()
     Column(Modifier.fillMaxSize().background(p.bg).statusBarsPadding()) {
         Column(Modifier.background(p.card)) {
             Row(Modifier.fillMaxWidth().padding(8.dp, 8.dp, 12.dp, 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -137,9 +146,9 @@ fun SquadPage(sq: SquadViewModel, squad: Squad, initialTab: Int? = null, protein
                 }
             }
             Row(Modifier.fillMaxWidth()) {
-                tabs.forEachIndexed { i, t ->
+                tabs.forEach { t ->
                     val sel = t == current
-                    Column(Modifier.weight(t.weight).clickable { tab = i }, horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(Modifier.weight(t.weight).clickable { tab = t }, horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(t.label, fontSize = 15.sp, fontWeight = if (sel) FontWeight(800) else FontWeight(500), color = if (sel) p.ink else p.muted, modifier = Modifier.padding(vertical = 12.dp), maxLines = 1, softWrap = false)
                         Box(Modifier.fillMaxWidth().height(3.dp).background(if (sel) p.ink else Color.Transparent))
                     }
@@ -154,6 +163,7 @@ fun SquadPage(sq: SquadViewModel, squad: Squad, initialTab: Int? = null, protein
                 SquadTab.CHALLENGES -> ChallengesTab(sq, squad, proteinGoal)
                 SquadTab.FEED -> FeedTab(sq)
                 SquadTab.BOARD -> LeaderboardTab(sq)
+                SquadTab.BATTLE -> if (vm != null) BattleBoardTab(sq, vm, squad.id) else LeaderboardTab(sq)
             }
         }
     }
@@ -282,6 +292,7 @@ private fun FeedCard(post: GroupPost, onClick: (() -> Unit)? = null) {
                 "workout" -> "Workout" to p.blue
                 "pr" -> "PR" to p.flame
                 "challenge" -> "Challenge" to p.orange
+                "battle" -> "Battle" to p.flame
                 else -> "Photo" to p.purple
             }
             Box(Modifier.background(tint.copy(alpha = 0.14f), CircleShape).padding(horizontal = 10.dp, vertical = 4.dp)) {
@@ -291,6 +302,8 @@ private fun FeedCard(post: GroupPost, onClick: (() -> Unit)? = null) {
         Spacer(Modifier.height(10.dp))
         when (post.kind) {
             "pr" -> Text(post.body, fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.4).sp, color = p.ink)
+            // v2.7 Food Battle: "<name> won the food battle for Sep 24 👑 (92 pts, Bulk)" (or a snap with its kcal range).
+            "battle" -> Text(post.body, fontSize = 17.sp, fontWeight = FontWeight(800), letterSpacing = (-0.3).sp, color = p.ink, lineHeight = 22.sp)
             "workout" -> Text(
                 buildAnnotatedString { withStyle(SpanStyle(fontWeight = FontWeight(700))) { append("Trained") }; append(" · "); append(post.body) },
                 fontSize = 15.sp, color = p.ink, lineHeight = 20.sp,
@@ -493,6 +506,8 @@ fun SquadInfoPage(sq: SquadViewModel, squad: Squad, onBack: () -> Unit) {
                     fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink, textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().clickable(enabled = !sq.busy) { sq.setPrivate(squad.id, !squad.isPrivate) }.padding(vertical = 14.dp),
                 )
+                Box(Modifier.fillMaxWidth().height(1.dp).background(p.hair))
+                BattleToggleRow(sq, squad.id)
             }
             if (confirmLeave) {
                 Column(Modifier.padding(20.dp).fillMaxWidth().background(p.card, RoundedCornerShape(20.dp)).padding(16.dp)) {
