@@ -107,6 +107,16 @@ class SquadViewModel : ViewModel() {
     var discover by mutableStateOf<List<com.sohum.bandlog.data.PublicSquad>?>(null); private set
     var joiningId by mutableStateOf<String?>(null); private set
 
+    // ---- v2.7: challenges for the open squad ----
+    /** Null until group_challenge_list has answered once. */
+    var challenges by mutableStateOf<List<com.sohum.bandlog.data.Challenge>?>(null); private set
+    /** False once group_challenge_list has failed (the tab explains it isn't live yet). */
+    var challengesSupported by mutableStateOf<Boolean?>(null); private set
+    var challengeOpenId by mutableStateOf<String?>(null)
+    var challengeBoard by mutableStateOf<List<com.sohum.bandlog.data.ChallengeBoardRow>>(emptyList()); private set
+    var challengeBoardLoading by mutableStateOf(false); private set
+    val openChallenge: com.sohum.bandlog.data.Challenge? get() = challenges?.firstOrNull { it.id == challengeOpenId }
+
     fun loadDiscover() { viewModelScope.launch { discover = runCatching { Api.publicGroups() }.getOrNull() } }
 
     fun load() {
@@ -122,12 +132,12 @@ class SquadViewModel : ViewModel() {
     private suspend fun reloadSquads() { runCatching { squads = Api.mySquads() }; loaded = true }
 
     fun openSquad(id: String, info: Boolean = false) {
-        if (openId != id) { posts = emptyList(); leaders = emptyList(); members = emptyList(); requests = emptyList(); board = emptyList() }
+        if (openId != id) { posts = emptyList(); leaders = emptyList(); members = emptyList(); requests = emptyList(); board = emptyList(); challenges = null; challengeOpenId = null; challengeBoard = emptyList() }
         openId = id; infoOpen = info
         loadPage(id)
     }
 
-    fun close() { openId = null; infoOpen = false }
+    fun close() { openId = null; infoOpen = false; challengeOpenId = null }
 
     fun loadPage(id: String = openId ?: "") {
         if (id.isBlank()) return
@@ -139,6 +149,7 @@ class SquadViewModel : ViewModel() {
                 val l = async { runCatching { Api.groupLeaderboard(id) }.getOrNull() }
                 val m = async { runCatching { Api.groupMembersDetail(id) }.getOrNull() }
                 val n = async { runCatching { Api.sentNudges() }.getOrDefault(sent) }
+                val ch = async { runCatching { Api.groupChallenges(id) } }
                 val sq = squads.firstOrNull { it.id == id }
                 val r = async { if (sq != null && sq.ownerId == Session.userId) runCatching { Api.joinRequests(id) }.getOrDefault(emptyList()) else emptyList() }
                 f.await().onSuccess { posts = it; feedSupported = true }.onFailure { if (feedSupported != true) feedSupported = false }
@@ -147,6 +158,7 @@ class SquadViewModel : ViewModel() {
                 leaders = l.await()?.sortedWith(compareBy<LeaderRow> { if (it.rank > 0) it.rank else Int.MAX_VALUE }.thenByDescending { it.flames }.thenByDescending { it.points })
                     ?: board.map { LeaderRow(it.userId, it.name, null, it.avatarPath, it.weekStreak, 0) }.sortedByDescending { it.flames }
                 members = m.await() ?: board.map { MemberDetail(it.userId, it.name, null, it.avatarPath, it.isOwner, it.weekStreak, "") }
+                ch.await().onSuccess { if (openId == id) { challenges = it; challengesSupported = true } }.onFailure { if (challengesSupported != true) challengesSupported = false }
             }
             pageLoading = false
         }
@@ -157,6 +169,57 @@ class SquadViewModel : ViewModel() {
         val id = openId ?: return
         if (feedSupported == false) return
         viewModelScope.launch { runCatching { Api.groupFeed(id) }.onSuccess { if (openId == id) { posts = it; feedSupported = true } } }
+    }
+
+    /**
+     * The Challenges tab: reload the list, then post 🏆 for any active challenge I've just finished
+     * (idempotent through ref_id) and refresh the feed when one went up.
+     */
+    fun loadChallenges() {
+        val id = openId ?: return
+        viewModelScope.launch {
+            runCatching { Api.groupChallenges(id) }
+                .onSuccess { list ->
+                    if (openId == id) { challenges = list; challengesSupported = true }
+                    val posted = runCatching { Api.postChallengeCompletions(id, list) }.getOrDefault(0)
+                    if (posted > 0) refreshFeed()
+                }
+                .onFailure { if (challengesSupported != true) { challengesSupported = false; if (challenges == null) challenges = emptyList() } }
+        }
+    }
+
+    fun openChallenge(challengeId: String) {
+        challengeOpenId = challengeId
+        challengeBoard = emptyList()
+        viewModelScope.launch {
+            challengeBoardLoading = true
+            runCatching { Api.challengeBoard(challengeId) }
+                .onSuccess { if (challengeOpenId == challengeId) challengeBoard = it }
+                .onFailure { error = friendly(it.message) }
+            challengeBoardLoading = false
+        }
+    }
+
+    fun closeChallenge() { challengeOpenId = null; challengeBoard = emptyList() }
+
+    /** create_challenge, then reload the list and the feed (the server posts "🏁 started"). Calls [onDone] on success. */
+    fun startChallenge(kind: String, title: String, targetDays: Int, proteinTarget: Int?, startsOn: String, endsOn: String, onDone: () -> Unit) {
+        val id = openId ?: return
+        viewModelScope.launch {
+            busy = true; error = null
+            try {
+                Api.createChallenge(id, kind, title, targetDays, if (kind == com.sohum.bandlog.util.ChallengeMath.PROTEIN) proteinTarget else null, startsOn, endsOn)
+                runCatching { challenges = Api.groupChallenges(id); challengesSupported = true }
+                refreshFeed()
+                onDone()
+            } catch (e: Exception) { error = friendly(e.message) } finally { busy = false }
+        }
+    }
+
+    fun deleteChallenge(challengeId: String) = act {
+        if (!Api.deleteChallenge(challengeId)) throw IllegalStateException("Only whoever started it (or the squad owner) can delete this one")
+        closeChallenge()
+        openId?.let { g -> runCatching { challenges = Api.groupChallenges(g) } }
     }
 
     fun send(text: String) {
@@ -302,6 +365,11 @@ class SquadViewModel : ViewModel() {
         this.squads = squads; this.posts = posts; this.leaders = leaders; this.members = members; feedSupported = true; loaded = true
         openId = squads.firstOrNull()?.id
     }
+
+    /** Debug builds only: canned challenges (and one board) for layout screenshots. */
+    internal fun debugSeedChallenges(list: List<com.sohum.bandlog.data.Challenge>, board: List<com.sohum.bandlog.data.ChallengeBoardRow> = emptyList(), openId: String? = null) {
+        challenges = list; challengesSupported = true; challengeBoard = board; challengeOpenId = openId
+    }
 }
 
 /**
@@ -443,6 +511,7 @@ private fun HowSquadsWorkSheet(onDismiss: () -> Unit) {
             "Public squads show up under Discover. Private ones need the owner to approve a request (invite links still let friends straight in).",
             "Chat with the squad; meals, workouts and PRs you log land in its Feed automatically.",
             "The Leaderboard ranks everyone by their streak flames.",
+            "Challenges: anyone can start one (train days, protein days or logging streaks) and the whole squad's in automatically.",
             "Meals show only when you share stats (Profile → Share with squads).",
         ).forEach { line ->
             Row(Modifier.padding(bottom = 10.dp)) {

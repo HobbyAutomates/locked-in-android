@@ -832,6 +832,72 @@ object Api {
         return (0 until arr.length()).map { MemberDetail.from(arr.getJSONObject(it)) }
     }
 
+    // ---- v2.7: squad challenges ----
+
+    /** `create_challenge(g, kind, title, target_days, protein_target, starts_on, ends_on)` → the new id; the server posts "🏁 started". */
+    suspend fun createChallenge(
+        groupId: String, kind: String, title: String, targetDays: Int, proteinTarget: Int?, startsOn: String, endsOn: String,
+    ): String {
+        val payload = JSONObject().put("g", groupId).put("kind", kind).put("title", title.trim().take(60))
+            .put("target_days", targetDays).put("protein_target", proteinTarget ?: JSONObject.NULL)
+            .put("starts_on", startsOn).put("ends_on", endsOn)
+        return rpc("create_challenge", payload, "Start challenge").trim().trim('"')
+    }
+
+    /** `group_challenge_list(g)`: newest first, open ones plus those that ended in the last 30 days. */
+    suspend fun groupChallenges(groupId: String): List<Challenge> {
+        val arr = JSONArray(rpc("group_challenge_list", JSONObject().put("g", groupId), "Load challenges"))
+        return (0 until arr.length()).map { Challenge.from(arr.getJSONObject(it)) }
+    }
+
+    /** `challenge_board(c)`: every member, ranked. */
+    suspend fun challengeBoard(challengeId: String): List<ChallengeBoardRow> {
+        val arr = JSONArray(rpc("challenge_board", JSONObject().put("c", challengeId), "Load challenge"))
+        return (0 until arr.length()).map { ChallengeBoardRow.from(arr.getJSONObject(it)) }
+    }
+
+    /** Plain delete through RLS (creator or squad owner); false when the policy let nothing go. */
+    suspend fun deleteChallenge(id: String): Boolean = withContext(Dispatchers.IO) {
+        JSONArray(run(rest("group_challenges?id=eq.$id").header("Prefer", "return=representation").delete().build(), "Delete challenge")).length() > 0
+    }
+
+    /** Challenges this app session has already posted (or found) a completion for: "<group>/<challenge>/<user>". */
+    private val challengeDone: MutableSet<String> = java.util.Collections.synchronizedSet(mutableSetOf())
+
+    /**
+     * For each active challenge in [list] where I've reached the target, inserts
+     * `🏆 completed "<title>"` (kind challenge, ref_id = challenge id) unless it's already there.
+     * The (group, user, kind, ref_id) unique index makes a racing duplicate a 409, which counts as done.
+     * Returns how many new posts went up.
+     */
+    suspend fun postChallengeCompletions(groupId: String, list: List<Challenge>): Int {
+        val uid = Session.userId ?: return 0
+        var posted = 0
+        for (c in list) {
+            if (c.status != "active" || c.myProgress < c.targetDays) continue
+            val key = "$groupId/${c.id}/$uid"
+            if (key in challengeDone) continue
+            val trophy = java.net.URLEncoder.encode("🏆*", "UTF-8")
+            val exists = withContext(Dispatchers.IO) {
+                JSONArray(
+                    run(rest("group_posts?select=id&group_id=eq.$groupId&user_id=eq.$uid&kind=eq.challenge&ref_id=eq.${c.id}&body=like.$trophy&limit=1").get().build(), "Check challenge post"),
+                ).length() > 0
+            }
+            if (!exists) {
+                try { postToGroups(listOf(groupId), "challenge", com.sohum.bandlog.util.ChallengeMath.completedBody(c.title), c.id); posted++ }
+                catch (e: ApiException) { if (e.message?.contains("(409)") != true) throw e }
+            }
+            challengeDone += key
+        }
+        return posted
+    }
+
+    /** After a daily_stats save: check every squad's active challenges. Silent when v2.7 isn't live. */
+    suspend fun checkChallengeCompletions(): Int =
+        runCatching { mySquadIds() }.getOrDefault(emptyList()).sumOf { g ->
+            runCatching { postChallengeCompletions(g, groupChallenges(g)) }.getOrDefault(0)
+        }
+
     /** Uploads a JPEG to group-photos/<uid>/<name>.jpg (readable by squad-mates); returns the path. */
     suspend fun uploadGroupPhoto(jpeg: ByteArray, name: String = java.util.UUID.randomUUID().toString()): String = withContext(Dispatchers.IO) {
         SupabaseAuth.ensureFresh()

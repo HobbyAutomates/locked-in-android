@@ -66,14 +66,15 @@ class DebugPreviewActivity : ComponentActivity() {
                             com.sohum.bandlog.ui.squad.CreateSquadFlow(sq, "Sohum", initialStep = when (screen) { "squadicon" -> 1; "squadpolicy" -> 2; else -> 0 }) { finish() }
                         }
                         "username", "userphoto" -> com.sohum.bandlog.ui.squad.UsernameFlow(vm, initialStep = if (screen == "userphoto") 1 else 0) { finish() }
-                        "squadboard", "squadinfo", "squadfeed", "squadchat" -> {
+                        "squadboard", "squadinfo", "squadfeed", "squadchat", "squadchallenges", "squadchallenge" -> {
                             val sq: com.sohum.bandlog.ui.squad.SquadViewModel = viewModel()
                             var ready by remember { mutableStateOf(false) }
-                            LaunchedEffect(Unit) { seedSquad(sq); ready = true }
+                            LaunchedEffect(Unit) { seedSquad(sq); seedChallenges(sq, detail = screen == "squadchallenge"); ready = true }
                             val s = sq.open
                             if (ready && s != null) {
                                 if (screen == "squadinfo") com.sohum.bandlog.ui.squad.SquadInfoPage(sq, s) { finish() }
-                                else com.sohum.bandlog.ui.squad.SquadPage(sq, s, initialTab = when (screen) { "squadchat" -> 0; "squadfeed" -> 1; else -> 2 })
+                                else if (screen == "squadchallenge") com.sohum.bandlog.ui.squad.ChallengeDetailPage(sq, s)
+                                else com.sohum.bandlog.ui.squad.SquadPage(sq, s, initialTab = when (screen) { "squadchat" -> 0; "squadchallenges" -> 1; "squadfeed" -> 2; else -> 3 })
                             }
                         }
                         "workout" -> LogScreen(vm, null, today, startOnMeal = false, onClose = { finish() })
@@ -87,6 +88,23 @@ class DebugPreviewActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun seedChallenges(sq: com.sohum.bandlog.ui.squad.SquadViewModel, detail: Boolean) {
+        val t = Dates.today()
+        fun ch(id: String, kind: String, title: String, target: Int, start: Long, len: Int, status: String, mine: Int, leader: String?, lp: Int, done: Int, protein: Int? = null) =
+            com.sohum.bandlog.data.Challenge(id, kind, title, target, protein, Dates.addDays(t, start), Dates.addDays(t, start + len - 1), "me", "Sohum", status, mine, leader, lp, 3, done)
+        val list = listOf(
+            ch("c1", "train_days", "Train 10 of 14 days", 10, -9, 14, "active", 7, "Ayaan Khan", 8, 0),
+            ch("c2", "protein_days", "Hit 120 g protein 5 of 7 days", 5, 1, 7, "upcoming", 0, null, 0, 0, 120),
+            ch("c3", "log_days", "Log food every day for 7 days", 7, -12, 7, "ended", 7, "Hobby H", 7, 2),
+        )
+        val board = listOf(
+            com.sohum.bandlog.data.ChallengeBoardRow("u2", "Ayaan Khan", "ayaan24", null, 8, false, null, 1),
+            com.sohum.bandlog.data.ChallengeBoardRow("me", "Sohum", "sohum", null, 7, false, null, 2),
+            com.sohum.bandlog.data.ChallengeBoardRow("u3", "Hobby H", "hobby24", null, 3, false, null, 3),
+        )
+        sq.debugSeedChallenges(list, board, if (detail) "c1" else null)
     }
 
     private fun seedSquad(sq: com.sohum.bandlog.ui.squad.SquadViewModel) {

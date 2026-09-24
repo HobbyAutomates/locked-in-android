@@ -101,18 +101,25 @@ fun SquadOverlays(vm: AppViewModel) {
         sq.profileFlow -> { BackHandler { sq.profileFlow = false; sq.profileFlowDismissed = true }; UsernameFlow(vm) { sq.profileFlow = false; sq.profileFlowDismissed = true } }
         sq.creating -> { BackHandler { sq.creating = false }; CreateSquadFlow(sq, display) { sq.creating = false } }
         open != null && sq.infoOpen -> { BackHandler { sq.infoOpen = false }; SquadInfoPage(sq, open) { sq.infoOpen = false } }
-        open != null -> { BackHandler { sq.close() }; SquadPage(sq, open) }
+        open != null && sq.challengeOpenId != null -> { BackHandler { sq.closeChallenge() }; ChallengeDetailPage(sq, open) }
+        open != null -> { BackHandler { sq.close() }; SquadPage(sq, open, proteinGoal = vm.profile.proteinTargetG.takeIf { vm.loadedOnce }) }
     }
 }
 
-private enum class SquadTab(val label: String) { CHAT("Chat"), FEED("Feed"), BOARD("Leaderboard") }
+/** v2.7: Challenges sits after the first tab; [weight] keeps the two long labels on one line. */
+private enum class SquadTab(val label: String, val weight: Float) {
+    CHAT("Chat", 0.8f), CHALLENGES("Challenges", 1.3f), FEED("Feed", 0.8f), BOARD("Leaderboard", 1.35f)
+}
 
-/** Cal AI group page: header (icon, name, members button) and the Chat · Feed · Leaderboard tabs. */
+/** Feed kinds (everything but chat messages); v2.7 adds challenge start / finish posts. */
+val FEED_KINDS = listOf("meal", "workout", "pr", "photo", "challenge")
+
+/** Cal AI group page: header (icon, name, members button) and the Chat · Challenges · Feed · Leaderboard tabs. */
 @Composable
-fun SquadPage(sq: SquadViewModel, squad: Squad, initialTab: Int? = null) {
+fun SquadPage(sq: SquadViewModel, squad: Squad, initialTab: Int? = null, proteinGoal: Int? = null) {
     val p = palette
     val tabs = if (sq.feedSupported == false) listOf(SquadTab.BOARD) else SquadTab.entries.toList()
-    var tab by remember(squad.id) { mutableIntStateOf(initialTab ?: if (sq.feedSupported == false) 0 else 1) }
+    var tab by remember(squad.id) { mutableIntStateOf(initialTab ?: if (sq.feedSupported == false) 0 else tabs.indexOf(SquadTab.FEED)) }
     val current = tabs.getOrElse(tab) { tabs.last() }
     Column(Modifier.fillMaxSize().background(p.bg).statusBarsPadding()) {
         Column(Modifier.background(p.card)) {
@@ -132,8 +139,8 @@ fun SquadPage(sq: SquadViewModel, squad: Squad, initialTab: Int? = null) {
             Row(Modifier.fillMaxWidth()) {
                 tabs.forEachIndexed { i, t ->
                     val sel = t == current
-                    Column(Modifier.weight(if (t == SquadTab.BOARD) 1.35f else 1f).clickable { tab = i }, horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(t.label, fontSize = 15.sp, fontWeight = if (sel) FontWeight(800) else FontWeight(500), color = if (sel) p.ink else p.muted, modifier = Modifier.padding(vertical = 12.dp), maxLines = 1)
+                    Column(Modifier.weight(t.weight).clickable { tab = i }, horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(t.label, fontSize = 15.sp, fontWeight = if (sel) FontWeight(800) else FontWeight(500), color = if (sel) p.ink else p.muted, modifier = Modifier.padding(vertical = 12.dp), maxLines = 1, softWrap = false)
                         Box(Modifier.fillMaxWidth().height(3.dp).background(if (sel) p.ink else Color.Transparent))
                     }
                 }
@@ -144,6 +151,7 @@ fun SquadPage(sq: SquadViewModel, squad: Squad, initialTab: Int? = null) {
         Box(Modifier.weight(1f)) {
             when (current) {
                 SquadTab.CHAT -> ChatTab(sq)
+                SquadTab.CHALLENGES -> ChallengesTab(sq, squad, proteinGoal)
                 SquadTab.FEED -> FeedTab(sq)
                 SquadTab.BOARD -> LeaderboardTab(sq)
             }
@@ -152,7 +160,7 @@ fun SquadPage(sq: SquadViewModel, squad: Squad, initialTab: Int? = null) {
 }
 
 @Composable
-private fun EmptyState(title: String, sub: String) {
+internal fun EmptyState(title: String, sub: String) {
     val p = palette
     Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
         Text(title, fontSize = 24.sp, fontWeight = FontWeight(800), color = p.ink, textAlign = TextAlign.Center)
@@ -226,7 +234,7 @@ private fun FeedTab(sq: SquadViewModel) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     LaunchedEffect(sq.openId) { sq.refreshFeed() }
-    val items = sq.posts.filter { it.kind != "message" }
+    val items = sq.posts.filter { it.kind in FEED_KINDS }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) scope.launch {
             val bmp = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { com.sohum.bandlog.ui.scan.decodeScaled(ctx, uri, 1600) }.getOrNull() }
@@ -236,7 +244,11 @@ private fun FeedTab(sq: SquadViewModel) {
     Box(Modifier.fillMaxSize()) {
         if (items.isEmpty() && !sq.pageLoading) EmptyState("No Posts Yet", "Be the first to share what you're eating with your squad! Meals, workouts and PRs you log show up here.")
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 110.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(items, key = { it.id }) { post -> FeedCard(post) }
+            items(items, key = { it.id }) { post ->
+                // A challenge post opens its challenge while it's still listed (open, or ended in the last 30 days).
+                val target = post.refId?.takeIf { post.kind == "challenge" }?.let { ref -> sq.challenges?.firstOrNull { it.id == ref } }
+                FeedCard(post, onClick = target?.let { c -> { sq.openChallenge(c.id) } })
+            }
         }
         Box(
             Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(20.dp).height(52.dp).pressable()
@@ -255,9 +267,9 @@ private fun FeedTab(sq: SquadViewModel) {
 }
 
 @Composable
-private fun FeedCard(post: GroupPost) {
+private fun FeedCard(post: GroupPost, onClick: (() -> Unit)? = null) {
     val p = palette
-    Column(Modifier.fillMaxWidth().background(p.card, RoundedCornerShape(22.dp)).padding(14.dp)) {
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(p.card).then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier).padding(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Avatar(Api.avatarUrl(post.authorAvatar), Names.initials(post.authorName), 40.dp)
             Spacer(Modifier.width(10.dp))
@@ -269,6 +281,7 @@ private fun FeedCard(post: GroupPost) {
                 "meal" -> "Meal" to p.green
                 "workout" -> "Workout" to p.blue
                 "pr" -> "PR" to p.flame
+                "challenge" -> "Challenge" to p.orange
                 else -> "Photo" to p.purple
             }
             Box(Modifier.background(tint.copy(alpha = 0.14f), CircleShape).padding(horizontal = 10.dp, vertical = 4.dp)) {
@@ -283,6 +296,23 @@ private fun FeedCard(post: GroupPost) {
                 fontSize = 15.sp, color = p.ink, lineHeight = 20.sp,
             )
             "photo" -> if (post.body.isNotBlank() && post.body != "shared a photo") Text(post.body, fontSize = 15.sp, color = p.ink)
+            // 🏁 started "Title" / 🏆 completed "Title": the emoji in a disc, the verb as a kicker, the title as the headline.
+            "challenge" -> {
+                val lead = post.body.substringBefore(' ')
+                val verb = post.body.substringAfter(' ', "").substringBefore(' ')
+                val title = post.body.substringAfter('"', "").substringBeforeLast('"').ifBlank { post.body.substringAfter(' ', post.body) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(44.dp).background(p.orange.copy(alpha = 0.14f), CircleShape), contentAlignment = Alignment.Center) { Text(lead, fontSize = 22.sp) }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            when (verb.lowercase()) { "started" -> "Started a challenge"; "completed" -> "Finished a challenge 🔥"; else -> "Challenge" },
+                            fontSize = 13.sp, fontWeight = FontWeight(700), color = p.muted,
+                        )
+                        Text(title, fontSize = 18.sp, fontWeight = FontWeight(800), letterSpacing = (-0.3).sp, color = p.ink, lineHeight = 22.sp)
+                    }
+                }
+            }
             else -> Text(
                 buildAnnotatedString {
                     val verb = post.body.substringBefore(' ')
@@ -312,23 +342,40 @@ private fun LeaderboardTab(sq: SquadViewModel) {
     }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 14.dp, 16.dp, 40.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         items(sq.leaders.withIndex().toList(), key = { it.value.userId }) { (i, r) ->
-            val gold = Color(0xFFFFC53D)
-            Row(
-                Modifier.fillMaxWidth().shadow(6.dp, RoundedCornerShape(22.dp), ambientColor = p.shadow, spotColor = p.shadow).background(p.card, RoundedCornerShape(22.dp))
-                    .then(if (r.userId == me) Modifier.border(1.5.dp, p.ink.copy(alpha = 0.25f), RoundedCornerShape(22.dp)) else Modifier).padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("#${i + 1}", fontSize = 17.sp, fontWeight = FontWeight(800), color = if (i == 0) gold else p.muted, modifier = Modifier.width(40.dp))
-                Avatar(Api.avatarUrl(r.avatarPath), Names.initials(r.name), 52.dp)
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(r.name + if (r.userId == me) " (you)" else "", fontSize = 16.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    r.username?.let { Text("@$it", fontSize = 14.sp, color = p.muted, maxLines = 1) }
-                }
+            RankRow(i + 1, r.name, r.username, r.avatarPath, isMe = r.userId == me) {
                 Flame(if (r.flames > 0) p.flame else p.muted, 20.dp)
                 Text(" ${r.flames}", fontSize = 17.sp, fontWeight = FontWeight(800), color = p.ink)
             }
         }
+    }
+}
+
+/**
+ * One leaderboard row: #rank (gold for #1), avatar, name (+ "(you)"), @username, an optional
+ * line under the name ([below]) and the trailing score. Shared by the Leaderboard and challenge boards.
+ */
+@Composable
+internal fun RankRow(
+    rank: Int, name: String, username: String?, avatarPath: String?, isMe: Boolean,
+    below: (@Composable () -> Unit)? = null,
+    trailing: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit,
+) {
+    val p = palette
+    val gold = Color(0xFFFFC53D)
+    Row(
+        Modifier.fillMaxWidth().shadow(6.dp, RoundedCornerShape(22.dp), ambientColor = p.shadow, spotColor = p.shadow).background(p.card, RoundedCornerShape(22.dp))
+            .then(if (isMe) Modifier.border(1.5.dp, p.ink.copy(alpha = 0.25f), RoundedCornerShape(22.dp)) else Modifier).padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("#$rank", fontSize = 17.sp, fontWeight = FontWeight(800), color = if (rank == 1) gold else p.muted, modifier = Modifier.width(40.dp))
+        Avatar(Api.avatarUrl(avatarPath), Names.initials(name), 52.dp)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(name + if (isMe) " (you)" else "", fontSize = 16.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            username?.let { Text("@$it", fontSize = 14.sp, color = p.muted, maxLines = 1) }
+            below?.invoke()
+        }
+        trailing()
     }
 }
 
@@ -468,7 +515,7 @@ fun SquadInfoPage(sq: SquadViewModel, squad: Squad, onBack: () -> Unit) {
 }
 
 @Composable
-private fun SectionTitle(text: String) {
+internal fun SectionTitle(text: String) {
     Text(text, fontSize = 22.sp, fontWeight = FontWeight(800), color = palette.ink, modifier = Modifier.fillMaxWidth().padding(20.dp, 20.dp, 20.dp, 8.dp))
 }
 

@@ -335,7 +335,11 @@ class AppViewModel : ViewModel() {
             val tot = com.sohum.bandlog.data.totalsFor(meals, d)
             Api.DailyStat(d, d in trainedDates, tot.protein, tot.calories, burnedOn(d), meals.count { it.date == d }, streak)
         }
-        viewModelScope.launch { runCatching { Api.upsertDailyStats(rows); rolledYesterday = true } }
+        viewModelScope.launch {
+            runCatching { Api.upsertDailyStats(rows); rolledYesterday = true }
+                // v2.7: a save that bumps daily_stats can finish a squad challenge — post the 🏆 once (idempotent via ref_id).
+                .onSuccess { runCatching { Api.checkChallengeCompletions() } }
+        }
     }
 
     /** Tonight's wrap (or last night's, after midnight), from the same data as Home. */

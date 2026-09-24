@@ -970,3 +970,64 @@ data class Nudge(val id: String, val groupName: String, val fromName: String, va
         fun from(o: JSONObject) = Nudge(o.getString("id"), o.optString("group_name"), o.optString("from_name").ifBlank { "A squad-mate" }, o.optString("created_at"))
     }
 }
+
+// ---- v2.7: squad challenges ----
+
+/** One row of `bandlog.group_challenge_list(g)`: a challenge with my progress and the current leader. */
+data class Challenge(
+    val id: String,
+    /** train_days | protein_days | log_days */
+    val kind: String,
+    val title: String,
+    val targetDays: Int,
+    val proteinTarget: Int?,
+    val startsOn: String,
+    val endsOn: String,
+    val createdBy: String,
+    val creatorName: String,
+    /** upcoming | active | ended (derived server-side) */
+    val status: String,
+    val myProgress: Int,
+    val leaderName: String?,
+    val leaderProgress: Int,
+    val participants: Int,
+    val completedCount: Int,
+) {
+    val isOpen: Boolean get() = status != "ended"
+    val lengthDays: Int get() = com.sohum.bandlog.util.ChallengeMath.lengthDays(startsOn, endsOn)
+
+    companion object {
+        private fun JSONObject.s(k: String): String? = if (!has(k) || isNull(k)) null else optString(k).ifBlank { null }
+        fun from(o: JSONObject) = Challenge(
+            id = o.optString("id"),
+            kind = o.s("kind") ?: "train_days",
+            title = o.s("title") ?: "Challenge",
+            targetDays = o.optInt("target_days", 1),
+            proteinTarget = if (!o.has("protein_target") || o.isNull("protein_target")) null else o.optInt("protein_target"),
+            startsOn = o.optString("starts_on").take(10),
+            endsOn = o.optString("ends_on").take(10),
+            createdBy = o.optString("created_by"),
+            creatorName = o.s("creator_name") ?: "Member",
+            status = o.s("status") ?: "active",
+            myProgress = o.optInt("my_progress", 0),
+            leaderName = o.s("leader_name"),
+            leaderProgress = o.optInt("leader_progress", 0),
+            participants = o.optInt("participants", 0),
+            completedCount = o.optInt("completed_count", 0),
+        )
+    }
+}
+
+/** One row of `bandlog.challenge_board(c)`. */
+data class ChallengeBoardRow(
+    val userId: String, val name: String, val username: String?, val avatarPath: String?,
+    val progress: Int, val completed: Boolean, val completedOn: String?, val rank: Int,
+) {
+    companion object {
+        private fun JSONObject.s(k: String): String? = if (!has(k) || isNull(k)) null else optString(k).ifBlank { null }
+        fun from(o: JSONObject) = ChallengeBoardRow(
+            o.optString("user_id"), o.s("name") ?: "Member", o.s("username"), o.s("avatar_path"),
+            o.optInt("progress", 0), o.optBoolean("completed", false), o.s("completed_on")?.take(10), o.optInt("rank", 0),
+        )
+    }
+}
