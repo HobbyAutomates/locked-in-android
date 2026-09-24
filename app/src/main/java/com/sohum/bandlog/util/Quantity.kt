@@ -175,3 +175,89 @@ object Restaurant {
         )
     }
 }
+
+/**
+ * v2.5: how the Quantity sheet counts a food — "1 roti = 40 g" in whole steps, "1 katori = 150 g"
+ * in ½ steps. [label] is set when the serving could not be split into single pieces ("5-6 pieces"),
+ * in which case the stepper counts that serving as a whole.
+ */
+data class CountUnit(val noun: String, val grams: Double, val step: Double, val defaultCount: Double = 1.0, val label: String? = null) {
+    /** "roti", or "× 5-6 pieces" for a serving that isn't a single piece. */
+    val display: String get() = label?.let { "× $it" } ?: noun
+    fun serving(): Serving = Serving(label ?: "1 $noun", grams)
+    /** Rounds [n] to this unit's step, never below one step. */
+    fun snap(n: Double): Double = (kotlin.math.round(n / step) * step).coerceAtLeast(step)
+}
+
+object Counting {
+    /** "2 roti", "1-egg omelette", "½ katori", "1 katori (2 pcs)" → count + noun. The noun must start with a letter ("5-6 pieces" doesn't parse). */
+    private val LEAD = Regex("^\\s*(\\d+(?:\\.\\d+)?|½|¼|¾)\\s*-?\\s*(\\p{L}.*?)\\s*$")
+    private val WEIGHT = setOf("g", "gm", "gms", "gram", "grams", "kg", "ml", "l", "litre", "liter", "oz", "mg")
+    /** Household measures you'd eat half of — everything else (roti, egg, idli, scoop, piece, slice …) counts in whole numbers. */
+    private val HALVES = setOf(
+        "katori", "katoris", "bowl", "bowls", "glass", "glasses", "cup", "cups", "plate", "plates", "tumbler", "ladle",
+        "handful", "handfuls", "tub", "tbsp", "tsp", "serving", "servings", "pack", "packs", "bar", "coconut",
+    )
+
+    private fun num(s: String): Double? = when (s) { "½" -> 0.5; "¼" -> 0.25; "¾" -> 0.75; else -> s.toDoubleOrNull() }
+
+    /** "slices" → "slice", "egg whites" → "egg white", "sandwiches" → "sandwich". Only the last word. */
+    internal fun singular(noun: String): String {
+        val words = noun.split(' ').toMutableList()
+        val w = words.last()
+        words[words.size - 1] = when {
+            w.length > 4 && (w.endsWith("ches") || w.endsWith("shes") || w.endsWith("sses")) -> w.dropLast(2)
+            w.length > 4 && w.endsWith("ies") -> w.dropLast(3) + "y"
+            w.length > 3 && w.endsWith("s") && !w.endsWith("ss") -> w.dropLast(1)
+            else -> w
+        }
+        return words.joinToString(" ")
+    }
+
+    private data class Parsed(val count: Double, val noun: String, val grams: Double, val label: String)
+
+    private fun parse(s: Serving): Parsed? {
+        val m = LEAD.find(s.label) ?: return null
+        val n = num(m.groupValues[1]) ?: return null
+        // "1 katori (2 pcs)" → "katori"; "1 pack (50 g)" → "pack".
+        val noun = m.groupValues[2].replace(Regex("\\s*\\(.*?\\)"), "").trim().lowercase()
+        if (noun.isEmpty() || n <= 0) return null
+        if (noun.split(' ').first() in WEIGHT) return null
+        return Parsed(n, if (n > 1) singular(noun) else noun, s.grams, s.label)
+    }
+
+    private fun stepFor(noun: String): Double = if (noun.split(' ').any { it in HALVES }) 0.5 else 1.0
+
+    /**
+     * The count unit for a food's servings, or null for a loose food (no servings, or only gram
+     * weights like "100 g" / "200 g pack"). Prefers a single piece of the default serving's noun
+     * ("1 roti" over "2 roti"), then the default split per piece ("2 idli = 80 g" → 40 g), then any
+     * single piece. The default count is 1 — the preset's "2 roti" never decides it — except for
+     * small things you count in handfuls ("10 almonds", "6 momos").
+     */
+    fun unitFor(servings: List<Serving>, defaultLabel: String? = null): CountUnit? {
+        if (servings.isEmpty()) return null
+        val def = servings.firstOrNull { it.label == defaultLabel } ?: servings.first()
+        val parsed = servings.mapNotNull { parse(it) }
+        val pd = parse(def)
+        val one = parsed.firstOrNull { it.count == 1.0 && (pd == null || it.noun == pd.noun) }
+        val base = when {
+            one != null -> CountUnit(one.noun, one.grams, stepFor(one.noun))
+            pd != null && pd.count >= 1 -> CountUnit(pd.noun, pd.grams / pd.count, stepFor(pd.noun))
+            else -> parsed.firstOrNull { it.count == 1.0 }?.let { CountUnit(it.noun, it.grams, stepFor(it.noun)) }
+        }
+        if (base == null) {
+            // Nothing splits into pieces: "5-6 pieces" counts as a whole serving, unless every label is a weight.
+            if (parsed.isEmpty() && servings.all { s -> s.label.trim().split(Regex("\\s+")).getOrNull(1)?.lowercase() in WEIGHT }) return null
+            return CountUnit(def.label.lowercase(), def.grams, 0.5, label = def.label)
+        }
+        val dc = if (pd != null && pd.noun == base.noun && pd.count >= 5) pd.count else 1.0
+        return base.copy(grams = (base.grams * 10).roundToInt() / 10.0, defaultCount = dc)
+    }
+
+    fun unitFor(food: QuantityFood): CountUnit? = unitFor(food.servings, food.defaultServing)
+
+    /** Whey and other supplements: counted in scoops, stepper only (no chips, no restaurant portion). */
+    fun isSupplement(food: QuantityFood, unit: CountUnit?): Boolean =
+        unit != null && unit.noun.startsWith("scoop") && (food.category == "protein" || food.category == null || Regex("whey|protein powder|creatine|mass gainer", RegexOption.IGNORE_CASE).containsMatchIn(food.name))
+}

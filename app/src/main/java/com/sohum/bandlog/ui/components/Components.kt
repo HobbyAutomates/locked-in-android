@@ -78,6 +78,8 @@ fun Modifier.pressable(): Modifier {
 /** Fade + slide-up on first composition, staggered by [index]. */
 @Composable
 fun Rise(index: Int = 0, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    // Previews / layout screenshots render one frame: show the content as it settles.
+    if (androidx.compose.ui.platform.LocalInspectionMode.current) { Box(modifier) { content() }; return }
     var shown by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(40L * index); shown = true }
     val a by animateFloatAsState(if (shown) 1f else 0f, Motion.spatialSlow(), label = "rise")
@@ -159,7 +161,7 @@ fun Flame(color: Color, size: Dp, modifier: Modifier = Modifier) {
 fun MacroDot(value: String, color: Color) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(6.dp).background(color, CircleShape))
-        Text("  $value", color = color, fontSize = 12.sp, fontWeight = FontWeight(600))
+        Text("  $value", color = color, fontSize = 12.sp, fontWeight = FontWeight(600), maxLines = 1, softWrap = false)
     }
 }
 

@@ -140,30 +140,54 @@ object Api {
 
     suspend fun workouts(from: String, to: String): List<Workout> = withContext(Dispatchers.IO) {
         val body = run(
-            rest("workouts?select=id,date,muscles,band_level,resistance_kg,minutes,exercises,notes&date=gte.$from&date=lte.$to&order=date.desc,created_at.desc").get().build(),
+            // select=* so the v2.5 kind / exercises_json columns come through when they exist (and nothing breaks when they don't).
+            rest("workouts?select=*&date=gte.$from&date=lte.$to&order=date.desc,created_at.desc").get().build(),
             "Load workouts",
         )
         val arr = JSONArray(body)
         (0 until arr.length()).map { Workout.from(arr.getJSONObject(it)) }
     }
 
-    /** Inserts or updates a workout and returns its id. */
+    /**
+     * Inserts or updates a workout and returns its id. v2.5: [kind] (bands | gym | bodyweight |
+     * cardio | sport | yoga) and, for gym / bodyweight, [lifts] -> exercises_json
+     * [{"name": "Bench press", "sets": [{"kg": 40, "reps": 8}]}]. Non-band kinds leave the band
+     * columns alone (band_level keeps its column default, resistance_kg null). If the new columns
+     * aren't there yet the row is saved without them, the lifts written out in `exercises`.
+     */
     suspend fun saveWorkout(
         id: String?, date: String, muscles: List<String>, bandLevel: String,
         resistanceKg: Double?, minutes: Int?, exercises: String, notes: String,
+        kind: String = Workout.BANDS, lifts: List<Lift>? = null,
     ): String = withContext(Dispatchers.IO) {
         val uid = Session.userId ?: throw AuthException("Not signed in")
-        val payload = JSONObject()
-            .put("user_id", uid).put("date", date)
-            .put("muscles", JSONArray(muscles)).put("band_level", bandLevel)
-            .put("resistance_kg", resistanceKg ?: JSONObject.NULL).put("minutes", minutes ?: JSONObject.NULL)
-            .put("exercises", exercises).put("notes", notes)
-        if (id == null) {
-            val created = run(rest("workouts").header("Prefer", "return=representation").post(json(payload.toString())).build(), "Save workout")
+        val bands = kind == Workout.BANDS
+        fun payload(withNew: Boolean): JSONObject {
+            val o = JSONObject()
+                .put("user_id", uid).put("date", date)
+                .put("muscles", JSONArray(muscles))
+                .put("minutes", minutes ?: JSONObject.NULL)
+                .put("exercises", if (!withNew && !lifts.isNullOrEmpty() && exercises.isBlank()) Lift.summaryText(lifts) else exercises)
+                .put("notes", notes)
+            if (bands) o.put("band_level", bandLevel).put("resistance_kg", resistanceKg ?: JSONObject.NULL)
+            else o.put("resistance_kg", JSONObject.NULL)
+            if (withNew) {
+                o.put("kind", kind)
+                o.put("exercises_json", lifts?.let { Lift.toJson(it) } ?: JSONObject.NULL)
+            }
+            return o
+        }
+        suspend fun send(p: JSONObject): String = if (id == null) {
+            val created = run(rest("workouts").header("Prefer", "return=representation").post(json(p.toString())).build(), "Save workout")
             JSONArray(created).getJSONObject(0).getString("id")
         } else {
-            run(rest("workouts?id=eq.$id").patch(json(payload.toString())).build(), "Update workout")
+            run(rest("workouts?id=eq.$id").patch(json(p.toString())).build(), "Update workout")
             id
+        }
+        try { send(payload(withNew = true)) }
+        catch (e: ApiException) {
+            val m = e.message.orEmpty()
+            if ("column" in m || "kind" in m || "exercises_json" in m || "PGRST204" in m) send(payload(withNew = false)) else throw e
         }
     }
 

@@ -10,6 +10,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -43,121 +45,148 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sohum.bandlog.data.MealItem
 import com.sohum.bandlog.ui.theme.palette
 import com.sohum.bandlog.ui.today.fmt
+import com.sohum.bandlog.util.Counting
 import com.sohum.bandlog.util.QUnit
 import com.sohum.bandlog.util.Quantity
 import com.sohum.bandlog.util.QuantityFood
 import kotlin.math.roundToInt
 
 /**
- * The shared Quantity sheet (on the one [BottomSheet] chassis): g · ml · kg · serving, a number, a 0.5-step servings stepper when a
- * serving size is known, quick chips, and a live kcal / P / C / F preview. Used by Presets
- * ("Custom…"), Search results, the scan report's "Log 1 serving" and the review rows.
+ * v2.5 the shared Quantity sheet, radically simpler. Two modes, decided by the food's servings:
+ *  - Count foods (roti, egg, idli, scoop, katori, glass …): one big `[−] 1 roti [+]` stepper,
+ *    default 1 (never the preset's "2 roti"), whole steps for pieces and ½ steps for katori / bowl /
+ *    glass / cup, a live "≈ 40 g · 120 kcal" line, and one "Enter grams instead" link.
+ *  - Loose foods (no serving size): a grams field and three chips (50 / 100 / 200 g) that wrap.
+ * Whey and other scoop supplements get the stepper only. The restaurant portion hides under "More".
+ * Built to hold at fontScale 1.3 on a 360 dp screen: nothing fixed-width beside a weighted field,
+ * chips in a FlowRow, one-line labels ellipsize, touch targets ≥ 44 dp. Used by Add food (presets,
+ * search results, plate rows) and the scan report's "Log 1 serving".
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun QuantitySheet(
     food: QuantityFood,
     initial: Quantity? = null,
     title: String = "How much?",
     cta: String = "Add",
+    restaurantDefault: Boolean = false,
+    /** v2.5: a parsed row's `default_count` from the server — where the stepper starts when there's no [initial]. */
+    startCount: Double? = null,
     onDone: (MealItem, Quantity) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val p = palette
     val focus = LocalFocusManager.current
-    val sg = food.servingGrams
-    val start = initial ?: if (sg != null) Quantity(QUnit.SERVING, 1.0) else Quantity(QUnit.G, 100.0)
-    var unit by remember(food) { mutableStateOf(start.unit) }
-    var text by remember(food) { mutableStateOf(fmt(start.value)) }
-    val value = text.toDoubleOrNull() ?: 0.0
-    val q = Quantity(unit, value)
-    val grams = food.grams(q)
-    // v2.0 "Restaurant portion": x1.4 the amount and, for dal / sabzi / protein dishes, a hidden tsp of oil.
-    val allowRestaurant = com.sohum.bandlog.util.Restaurant.allowed(food)
-    var restaurant by remember(food) { mutableStateOf(false) }
-    val oily = com.sohum.bandlog.util.Restaurant.oily(food.name, food.category)
-    val item = food.item(q).let { if (restaurant) com.sohum.bandlog.util.Restaurant.apply(it, oily) else it }
-    val servingLabel = food.serving?.label
-
-    fun pick(next: Quantity) { unit = next.unit; text = fmt(next.value) }
-    fun step(d: Double) {
-        val cur = if (unit == QUnit.SERVING) value else if (sg != null) grams / sg else 1.0
-        pick(Quantity(QUnit.SERVING, ((cur + d) * 2).roundToInt() / 2.0).let { if (it.value < 0.5) it.copy(value = 0.5) else it })
+    val cu = remember(food) { Counting.unitFor(food) }
+    val supplement = remember(food, cu) { Counting.isSupplement(food, cu) }
+    // Where the sheet opens: the row's current amount when editing, else 1 piece (or 100 g loose).
+    val startGrams = initial?.let { food.grams(it) }
+    val openCount: Double? = when {
+        cu == null -> null
+        startGrams == null -> startCount?.takeIf { it > 0 }?.let { cu.snap(it) } ?: cu.defaultCount
+        else -> (startGrams / cu.grams).let { n -> cu.snap(n).takeIf { kotlin.math.abs(it - n) <= 0.02 * n + 0.01 } }
     }
+    var byGrams by remember(food) { mutableStateOf(cu == null || openCount == null) }
+    var count by remember(food) { mutableStateOf(openCount ?: cu?.defaultCount ?: 1.0) }
+    var gramsText by remember(food) { mutableStateOf(fmt((((startGrams ?: if (cu != null) cu.grams * count else 100.0)) * 10).roundToInt() / 10.0)) }
+    val allowRestaurant = com.sohum.bandlog.util.Restaurant.allowed(food) && !supplement
+    var restaurant by remember(food) { mutableStateOf(restaurantDefault && allowRestaurant) }
+    var more by remember(food) { mutableStateOf(restaurantDefault && allowRestaurant) }
+    val oily = com.sohum.bandlog.util.Restaurant.oily(food.name, food.category)
+
+    // Count mode prices through a one-piece serving ("1 roti" = 40 g) so the row stores unit=serving, servings=count.
+    val counted = remember(food, cu) { cu?.let { food.copy(servings = listOf(it.serving()), defaultServing = it.serving().label) } }
+    val q = if (!byGrams && counted != null) Quantity(QUnit.SERVING, count) else Quantity(QUnit.G, gramsText.toDoubleOrNull() ?: 0.0)
+    val base = (if (!byGrams && counted != null) counted else food).item(q)
+    val item = if (restaurant) com.sohum.bandlog.util.Restaurant.apply(base, oily) else base
+
+    fun switchToGrams() { gramsText = fmt((base.grams * 10).roundToInt() / 10.0); byGrams = true }
+    fun switchToCount() { if (cu != null) { count = cu.snap((gramsText.toDoubleOrNull() ?: cu.grams) / cu.grams); byGrams = false; focus.clearFocus() } }
 
     BottomSheet(
         title = food.name + (food.nameHi?.let { "  $it" } ?: ""),
-        subtitle = title + (if (sg != null) " · ${servingLabel?.let { if (it.first().isDigit()) it else "1 $it" }} = ${fmt(sg)} g" else ""),
+        subtitle = title + (cu?.let { if (it.label != null) " · ${it.label} = ${fmt(it.grams)} g" else " · 1 ${it.noun} = ${fmt(it.grams)} g" } ?: ""),
         onDismiss = onDismiss,
         primary = "$cta · ${item.calories.roundToInt()} kcal",
-        primaryEnabled = grams > 0,
+        primaryEnabled = item.grams > 0,
         onPrimary = { onDone(item, q) },
     ) {
-        // Unit: g · ml · kg · serving (serving disabled when the food has no serving size).
-        Row(Modifier.fillMaxWidth().background(p.card2, CircleShape).padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            QUnit.entries.forEach { u ->
-                val sel = u == unit
-                val enabled = u != QUnit.SERVING || sg != null
-                Box(
-                    Modifier.weight(1f).height(36.dp).alpha(if (enabled) 1f else 0.4f)
-                        .background(if (sel) p.card else Color.Transparent, CircleShape)
-                        .clickable(enabled = enabled) {
-                            pick(
-                                when (u) {
-                                    QUnit.SERVING -> Quantity(u, (((if (sg != null) grams / sg else 1.0).takeIf { it > 0 } ?: 1.0) * 2).roundToInt() / 2.0)
-                                    QUnit.KG -> Quantity(u, (grams / 10).roundToInt() / 100.0)
-                                    else -> Quantity(u, grams.roundToInt().toDouble())
-                                },
-                            )
-                        },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(if (u == QUnit.SERVING) (servingLabel?.removePrefix("1 ") ?: "serving") else u.label, fontSize = 13.sp, fontWeight = FontWeight(600), color = if (sel) p.ink else p.muted, maxLines = 1)
+        if (!byGrams && cu != null) {
+            // The one big stepper: [−]  2 roti  [+]
+            Row(Modifier.fillMaxWidth().background(p.card2, RoundedCornerShape(20.dp)).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                StepButton("−", "One less", enabled = count > cu.step) { count = cu.snap(count - cu.step) }
+                Row(Modifier.weight(1f).padding(horizontal = 6.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                    Text(fmt(count), fontSize = 36.sp, fontWeight = FontWeight(800), letterSpacing = (-1).sp, color = p.ink, maxLines = 1, softWrap = false)
+                    Text(
+                        " " + cu.display, fontSize = 17.sp, fontWeight = FontWeight(600), color = p.muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
                 }
+                StepButton("+", "One more") { count = cu.snap(count + cu.step) }
             }
-        }
-        Spacer(Modifier.height(12.dp))
-
-        // Number + servings stepper.
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (unit == QUnit.SERVING && sg != null) StepButton("−") { step(-0.5) }
-            Box(Modifier.weight(1f).height(48.dp).background(p.card2, RoundedCornerShape(12.dp)).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterEnd) {
+        } else {
+            // Grams: one big field with "g" inside it.
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 56.dp).background(p.card2, RoundedCornerShape(16.dp)).padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 BasicTextField(
-                    text, { text = it.filter { c -> c.isDigit() || c == '.' }.take(7) }, singleLine = true,
+                    gramsText, { gramsText = it.filter { c -> c.isDigit() || c == '.' }.take(6) }, Modifier.weight(1f), singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
-                    textStyle = TextStyle(fontSize = 22.sp, fontWeight = FontWeight(800), color = p.ink, textAlign = TextAlign.End), cursorBrush = SolidColor(p.ink),
+                    textStyle = TextStyle(fontSize = 26.sp, fontWeight = FontWeight(800), color = p.ink), cursorBrush = SolidColor(p.ink),
                 )
+                Text("g", fontSize = 17.sp, fontWeight = FontWeight(600), color = p.muted, maxLines = 1)
             }
-            Text(if (unit == QUnit.SERVING) (servingLabel?.removePrefix("1 ") ?: if (value == 1.0) "serving" else "servings") else unit.label, fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted, modifier = Modifier.width(56.dp))
-            if (unit == QUnit.SERVING && sg != null) StepButton("+") { step(0.5) }
-        }
-        Spacer(Modifier.height(6.dp))
-
-        // Quick chips.
-        val chips = remember(food) { food.quickChips() }
-        chips.chunked(4).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                row.forEach { (label, cq) ->
-                    val sel = cq.unit == unit && kotlin.math.abs(cq.value - value) < 1e-6
-                    SmallChip(label, { pick(cq) }, filled = sel)
+            if (cu == null) {
+                Spacer(Modifier.height(6.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(50.0, 100.0, 200.0).forEach { g -> SmallChip("${fmt(g)} g", { gramsText = fmt(g); focus.clearFocus() }, filled = gramsText.toDoubleOrNull() == g) }
                 }
             }
         }
-        if (allowRestaurant) {
-            Spacer(Modifier.height(6.dp))
+
+        // Live line: ≈ 80 g · 240 kcal, then the macros; wraps instead of colliding.
+        Spacer(Modifier.height(10.dp))
+        FlowRow(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                "≈ ${fmt((item.grams * 10).roundToInt() / 10.0)} g · ${item.calories.roundToInt()} kcal" + (if (restaurant) " · restaurant" else ""),
+                fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1,
+            )
+            Row(Modifier.heightIn(min = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                MacroDot("${fmt(item.proteinG)}g", p.red); MacroDot("${fmt(item.carbsG)}g", p.orange); MacroDot("${fmt(item.fatG)}g", p.blue)
+            }
+        }
+
+        // Small text links: grams ⇄ count, and "More" (restaurant portion). Whey gets neither.
+        if (!supplement && (cu != null || allowRestaurant)) {
+            Spacer(Modifier.height(2.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (cu != null) {
+                    if (byGrams) SheetLink("Count in ${if (cu.label == null) cu.noun else "servings"} instead") { switchToCount() }
+                    else SheetLink("Enter grams instead") { switchToGrams() }
+                }
+                if (allowRestaurant) SheetLink(if (more) "Less" else "More") { more = !more }
+            }
+        }
+        if (more && allowRestaurant) {
             Row(
-                Modifier.fillMaxWidth().border(1.5.dp, p.hair, RoundedCornerShape(16.dp)).clickable { restaurant = !restaurant }.padding(start = 14.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+                Modifier.fillMaxWidth().heightIn(min = 52.dp).border(1.5.dp, p.hair, RoundedCornerShape(16.dp)).clickable { restaurant = !restaurant }.padding(start = 14.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("Restaurant portion", fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink)
-                    Text("×${com.sohum.bandlog.util.Restaurant.MULTIPLIER} the amount" + (if (oily) " + 1 tsp hidden oil" else "") + " — outside kitchens serve bigger", fontSize = 11.sp, color = p.muted, lineHeight = 14.sp)
+                    Text("Restaurant portion", fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("×${com.sohum.bandlog.util.Restaurant.MULTIPLIER} the amount" + (if (oily) " + 1 tsp oil" else ""), fontSize = 11.sp, color = p.muted, lineHeight = 14.sp)
                 }
                 androidx.compose.material3.Switch(
                     restaurant, { restaurant = it },
@@ -165,26 +194,25 @@ fun QuantitySheet(
                 )
             }
         }
-        Spacer(Modifier.height(10.dp))
-
-        // Live preview.
-        Row(Modifier.fillMaxWidth().background(p.card2, RoundedCornerShape(16.dp)).padding(14.dp, 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("${item.calories.roundToInt()} kcal", fontSize = 22.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink, lineHeight = 24.sp)
-                Text("${fmt((item.grams * 10).roundToInt() / 10.0)} g total" + (if (restaurant) " · restaurant" else ""), fontSize = 12.sp, color = p.muted)
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                MacroDot("${fmt(item.proteinG)}g", p.red); MacroDot("${fmt(item.carbsG)}g", p.orange); MacroDot("${fmt(item.fatG)}g", p.blue)
-            }
-        }
     }
 }
 
 @Composable
-private fun StepButton(label: String, onClick: () -> Unit) {
+private fun SheetLink(label: String, onClick: () -> Unit) {
+    Box(Modifier.heightIn(min = 44.dp).clickable(onClick = onClick).padding(horizontal = 6.dp), contentAlignment = Alignment.CenterStart) {
+        Text(label, fontSize = 13.sp, fontWeight = FontWeight(700), color = palette.ink, textDecoration = TextDecoration.Underline, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun StepButton(label: String, description: String, enabled: Boolean = true, onClick: () -> Unit) {
     val p = palette
-    Box(Modifier.size(48.dp).pressable().background(p.card2, CircleShape).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
-        Text(label, fontSize = 20.sp, fontWeight = FontWeight(700), color = p.ink)
+    Box(
+        Modifier.size(56.dp).alpha(if (enabled) 1f else 0.35f).pressable().background(p.card, CircleShape).clickable(enabled = enabled, onClick = onClick)
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, fontSize = 26.sp, fontWeight = FontWeight(700), color = p.ink)
     }
 }
 

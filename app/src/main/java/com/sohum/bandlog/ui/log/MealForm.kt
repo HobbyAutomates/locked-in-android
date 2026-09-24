@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.sohum.bandlog.ui.log
 
 import androidx.compose.runtime.getValue
@@ -18,6 +20,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -27,6 +30,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -111,8 +115,14 @@ internal fun looksLikeSentence(s: String): Boolean {
     return t.split(Regex("\\s+")).size >= 3 || ',' in t || UNIT_WORD.containsMatchIn(t) || t.any { it in 'ऀ'..'ॿ' }
 }
 
-/** A plate row whose amount is being changed through the Quantity sheet. */
-private data class SheetReq(val food: QuantityFood, val initial: Quantity, val replace: Int)
+/**
+ * The Quantity sheet request: a plate row whose amount is being changed ([replace] = its index), or
+ * (v2.5) a preset / search result being added ([replace] = -1) — you pick the number, it isn't guessed.
+ */
+private data class SheetReq(
+    val food: QuantityFood, val initial: Quantity?, val replace: Int,
+    val raw: String = food.name, val restaurant: Boolean = false, val startCount: Double? = null,
+)
 
 /** A parse or plate photo still working; its items land on the plate when it finishes. */
 private class Pending(val label: String, val job: Deferred<AppViewModel.MealBatch>)
@@ -167,12 +177,6 @@ fun MealForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
         say("Added · $amount · ${item.calories.roundToInt()} kcal")
     }
 
-    /** One tap = on the plate at the default serving (100 g when there is none). */
-    fun addFood(food: QuantityFood, raw: String, restaurant: Boolean = false) {
-        val base = if (food.servingGrams != null) food.item(Quantity(QUnit.SERVING, 1.0)) else food.item(Quantity(QUnit.G, 100.0))
-        val item = if (restaurant) Restaurant.apply(base, Restaurant.oily(food.name, food.category)) else base
-        add(item, raw, (food.serving?.label ?: "100 g") + if (restaurant) " (restaurant)" else "")
-    }
 
     fun addSaved(sm: SavedMeal) {
         items = items + sm.items; rawParts += sm.name; error = null
@@ -241,14 +245,14 @@ fun MealForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
                 if (q.length >= 2 || looksLikeSentence(q)) {
                     SearchResults(q, looksLikeSentence(q), onWorkItOut = { workItOut() }) { h ->
                         focus.clearFocus()
-                        addFood(QuantityFood.from(h), h.name)
+                        sheet = SheetReq(QuantityFood.from(h), null, -1, raw = h.name)
                         text = ""
                     }
                 } else {
                     PresetGrid(
                         vm = vm, use = use, selected = cat, onSelect = { cat = it },
                         onPlate = items.mapNotNull { it.foodId }.groupingBy { it }.eachCount(),
-                        onPreset = { pr -> addFood(QuantityFood.from(pr), pr.label, restaurant = pr.category == RESTAURANT) },
+                        onPreset = { pr -> sheet = SheetReq(QuantityFood.from(pr), null, -1, raw = pr.label, restaurant = pr.category == RESTAURANT) },
                         onSaved = { addSaved(it) },
                     )
                 }
@@ -266,12 +270,17 @@ fun MealForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
                     val byServing = it.unit == "serving" && it.servings != null && it.servings > 0
                     // Re-offer the preset's household servings when the row came from one.
                     val preset = vm.presets.firstOrNull { pr -> pr.foodId == it.foodId && pr.category != "fat" } ?: vm.presets.firstOrNull { pr -> pr.foodId == it.foodId }
+                    // v2.5: a parsed row with the server's default_count counts in pieces of grams / count.
+                    val dc = it.defaultCount?.takeIf { n -> n > 0 && !byServing }
                     val servings = preset?.servings.orEmpty().ifEmpty {
-                        if (byServing) listOf(com.sohum.bandlog.data.Serving("1 serving", it.grams / it.servings!!)) else emptyList()
+                        when {
+                            byServing -> listOf(com.sohum.bandlog.data.Serving("1 serving", it.grams / it.servings!!))
+                            dc != null && it.grams > 0 -> listOf(com.sohum.bandlog.data.Serving("1 serving", it.grams / dc))
+                            else -> emptyList()
+                        }
                     }
-                    val food = QuantityFood.from(it, servings).copy(defaultServing = preset?.defaultServing)
-                    val sg = food.servingGrams
-                    sheet = SheetReq(food, if (byServing && sg != null) Quantity(QUnit.SERVING, (it.grams / sg * 2).roundToInt() / 2.0) else Quantity(QUnit.G, it.grams.roundToInt().toDouble()), idx)
+                    val food = QuantityFood.from(it, servings).copy(defaultServing = preset?.defaultServing, category = preset?.category)
+                    sheet = SheetReq(food, Quantity(QUnit.G, it.grams), idx)
                 },
                 onRemove = { idx -> items = items.filterIndexed { i, _ -> i != idx } },
                 onCookedIn = { idx -> cookedFor = idx },
@@ -281,11 +290,14 @@ fun MealForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
     }
 
     sheet?.let { req ->
+        val adding = req.replace < 0
         QuantitySheet(
-            food = req.food, initial = req.initial, title = "Change the amount", cta = "Update",
+            food = req.food, initial = req.initial, title = if (adding) "How much?" else "Change the amount", cta = if (adding) "Add" else "Update",
+            restaurantDefault = req.restaurant, startCount = req.startCount,
             onDismiss = { sheet = null },
             onDone = { item, _ ->
                 sheet = null
+                if (adding) { add(item, req.raw, amountLabel(item, vm.presets)); return@QuantitySheet }
                 items = items.toMutableList().also { l ->
                     if (req.replace in l.indices) { val old = l[req.replace]; l[req.replace] = item.copy(cookedIn = item.cookedIn ?: old.cookedIn, source = old.source, foodId = old.foodId) }
                 }
@@ -517,9 +529,9 @@ private fun PresetGrid(
     }
     if (cat == YOURS) {
         vm.savedMeals.chunked(2).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 row.forEach { sm ->
-                    FoodCard(Modifier.weight(1f), sm.name, "Saved meal · ${sm.calories.roundToInt()} kcal · ${fmt(sm.proteinG)} g P", 0, image = {
+                    FoodCard(Modifier.weight(1f).fillMaxHeight(), sm.name, "Saved meal · ${sm.calories.roundToInt()} kcal · ${fmt(sm.proteinG)} g P", 0, image = {
                         val big = sm.items.maxByOrNull { it.calories }
                         FoodImage(sm.pictureName, sm.imageUrl ?: big?.imageUrl, kind = "generic", size = 44.dp, foodId = big?.foodId)
                     }) { onSaved(sm) }
@@ -537,14 +549,19 @@ private fun PresetGrid(
 @Composable
 private fun PresetRows(list: List<FoodPreset>, onPlate: Map<String, Int>, onPreset: (FoodPreset) -> Unit) {
     list.chunked(2).forEach { row ->
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             row.forEach { pr ->
-                val def = pr.default
+                // v2.5: the tile shows what one tap starts at — "1 roti · 119 kcal", not the preset's "2 roti".
+                val cu = remember(pr) { com.sohum.bandlog.util.Counting.unitFor(pr.servings, pr.defaultServing) }
                 FoodCard(
-                    Modifier.weight(1f), pr.label,
-                    (pr.labelHi?.let { "$it · " } ?: "") + (def?.let { "${it.label} · ${(pr.calories * it.grams / 100).roundToInt()} kcal" } ?: "100 g · ${pr.calories.roundToInt()} kcal"),
+                    Modifier.weight(1f).fillMaxHeight(), pr.label,
+                    (cu?.let {
+                        val g = it.grams * it.defaultCount
+                        (if (it.label != null) it.label else "${fmt(it.defaultCount)} ${it.noun}") + " · ${(pr.calories * g / 100).roundToInt()} kcal"
+                    } ?: "100 g · ${pr.calories.roundToInt()} kcal"),
                     onPlate[pr.foodId] ?: 0,
                     image = { FoodImage(pr.label, pr.imageUrl, kind = "preset", size = 44.dp, foodId = pr.foodId, emoji = pr.icon?.takeIf { i -> i.any { c -> c.code > 0x2000 } }, fallback = presetIcon(pr.category)) },
+                    hint = pr.labelHi,
                 ) { onPreset(pr) }
             }
             if (row.size == 1) Spacer(Modifier.weight(1f))
@@ -552,18 +569,24 @@ private fun PresetRows(list: List<FoodPreset>, onPlate: Map<String, Int>, onPres
     }
 }
 
+/**
+ * v2.5: a stacked tile (picture + add dot on top, then the name, the Hindi name and "1 roti · 106
+ * kcal" each on their own line) so two columns hold at fontScale 1.3 on a 360 dp phone instead of
+ * squeezing the text between the picture and the dot.
+ */
 @Composable
-private fun FoodCard(modifier: Modifier, title: String, sub: String, count: Int, image: (@Composable () -> Unit)? = null, onClick: () -> Unit) {
+private fun FoodCard(modifier: Modifier, title: String, sub: String, count: Int, image: (@Composable () -> Unit)? = null, hint: String? = null, onClick: () -> Unit) {
     val p = palette
     Card(modifier, padding = 12.dp, onClick = onClick) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (image != null) { image(); Spacer(Modifier.width(10.dp)) }
-            Column(Modifier.weight(1f)) {
-                Text(title, fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1)
-                Text(sub, fontSize = 12.sp, color = p.muted, maxLines = 2, lineHeight = 15.sp)
-            }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+            if (image != null) image()
+            Spacer(Modifier.weight(1f))
             AddDot(count)
         }
+        Spacer(Modifier.height(8.dp))
+        Text(title, fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+        if (hint != null) Text(hint, fontSize = 12.sp, color = p.muted, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+        Text(sub, fontSize = 12.sp, fontWeight = FontWeight(600), color = p.ink.copy(alpha = 0.75f), maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
     }
 }
 
@@ -664,48 +687,58 @@ private fun PlateRow(item: MealItem, amount: String, cookedInLabel: String?, sho
         val d = (item.calories - last).toInt(); last = item.calories
         if (d != 0) { delta = d; showDelta = true; delay(1400); showDelta = false }
     }
-    Row(Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        FoodImage(item.name, item.imageUrl, kind = FoodImages.kindFor(item.source), size = 38.dp, foodId = item.foodId)
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(item.name + if (item.source == "estimated") " ~" else "", fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("${item.calories.roundToInt()} kcal", fontSize = 12.sp, color = p.muted)
+    // v2.5: two lines so nothing collides at fontScale 1.3 — [pic] name … [2 roti] [×], then kcal + macros (wrapping as whole chips).
+    Column(Modifier.padding(vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            FoodImage(item.name, item.imageUrl, kind = FoodImages.kindFor(item.source), size = 38.dp, foodId = item.foodId)
+            Spacer(Modifier.width(10.dp))
+            Text(
+                item.name + if (item.source == "estimated") " ~" else "", fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink,
+                maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+            )
+            // The amount opens the Quantity sheet.
+            Box(Modifier.heightIn(min = 44.dp).padding(start = 6.dp).clickable(onClick = onQuantity), contentAlignment = Alignment.Center) {
+                Box(Modifier.heightIn(min = 34.dp).widthIn(max = 120.dp).background(p.card2, RoundedCornerShape(10.dp)).padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
+                    Text(amount, fontSize = 13.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                }
+            }
+            Box(Modifier.size(44.dp).clickable(onClick = onRemove), contentAlignment = Alignment.Center) {
+                Icon(CrossIcon, "Remove ${item.name}", tint = p.muted, modifier = Modifier.size(13.dp))
+            }
+        }
+        Column(Modifier.padding(start = 48.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.Center) {
+                Text("${item.calories.roundToInt()} kcal", fontSize = 12.sp, color = p.muted, maxLines = 1)
                 MacroDot("${fmt(item.proteinG)}g", p.red); MacroDot("${fmt(item.carbsG)}g", p.orange); MacroDot("${fmt(item.fatG)}g", p.blue)
+                AnimatedVisibility(showDelta, enter = scaleIn() + fadeIn(), exit = fadeOut() + scaleOut()) {
+                    Box(Modifier.background(if (delta > 0) p.btn else p.card2, CircleShape).padding(8.dp, 1.dp)) {
+                        Text((if (delta > 0) "+" else "") + "$delta kcal", fontSize = 11.sp, fontWeight = FontWeight(700), color = if (delta > 0) p.btnInk else p.ink, maxLines = 1)
+                    }
+                }
             }
             if (cookedInLabel != null) Text(cookedInLabel, fontSize = 11.sp, color = p.muted)
             else if (showCookedIn) Row(
-                Modifier.heightIn(min = 32.dp).clickable(onClick = onCookedIn),
+                Modifier.heightIn(min = 44.dp).clickable(onClick = onCookedIn),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(DropIcon, null, tint = p.orange, modifier = Modifier.size(12.dp))
                 Text(" Cooked in…", fontSize = 12.sp, fontWeight = FontWeight(700), color = p.ink)
             }
         }
-        AnimatedVisibility(showDelta, enter = scaleIn() + fadeIn(), exit = fadeOut() + scaleOut()) {
-            Box(Modifier.padding(end = 6.dp).background(if (delta > 0) p.btn else p.card2, CircleShape).padding(8.dp, 3.dp)) {
-                Text((if (delta > 0) "+" else "") + "$delta kcal", fontSize = 11.sp, fontWeight = FontWeight(700), color = if (delta > 0) p.btnInk else p.ink)
-            }
-        }
-        // The amount opens the Quantity sheet.
-        Box(Modifier.heightIn(min = 44.dp).clickable(onClick = onQuantity), contentAlignment = Alignment.Center) {
-            Box(Modifier.height(34.dp).background(p.card2, RoundedCornerShape(10.dp)).padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
-                Text(amount, fontSize = 13.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1)
-            }
-        }
-        Box(Modifier.size(44.dp).clickable(onClick = onRemove), contentAlignment = Alignment.Center) {
-            Icon(CrossIcon, "Remove ${item.name}", tint = p.muted, modifier = Modifier.size(13.dp))
-        }
     }
 }
 
-/** "1 katori", "2 roti", "1.5 cup" when the row is counted in a preset's household serving; else the grams. */
+/**
+ * "1 katori", "2 roti", "1.5 cup" when the row is counted in a preset's household serving; else the
+ * grams. v2.5: counts in single pieces ("2 roti", not "1 2 roti").
+ */
 private fun amountLabel(item: MealItem, presets: List<FoodPreset>): String {
     val n = item.servings
     if (item.unit != "serving" || n == null || n <= 0) return item.quantityLabel
-    val pr = presets.firstOrNull { it.foodId == item.foodId } ?: return item.quantityLabel
-    val unit = pr.default?.label?.removePrefix("1 ")?.trim() ?: return item.quantityLabel
-    return "${fmt(n)} $unit"
+    val pr = presets.firstOrNull { it.foodId == item.foodId && it.category != "fat" } ?: presets.firstOrNull { it.foodId == item.foodId } ?: return item.quantityLabel
+    val cu = com.sohum.bandlog.util.Counting.unitFor(pr.servings, pr.defaultServing) ?: return item.quantityLabel
+    val count = (item.grams / cu.grams * 2).roundToInt() / 2.0
+    return if (cu.label != null) "${fmt(count)} × ${cu.label}" else "${fmt(count)} ${cu.noun}"
 }
 
 /** A one-line text field on the grey fill, for the plate's sheets. */

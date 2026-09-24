@@ -473,3 +473,23 @@ fun activityIcon(name: String, code: String? = null): ImageVector {
         else -> FlameIcon
     }
 }
+
+/** v2.5: a push-up figure, for bodyweight sessions. */
+val BodyweightIcon: ImageVector by lazy {
+    stroke("Bodyweight") {
+        moveTo(20.5f, 9f); arcTo(1.5f, 1.5f, 0f, true, true, 17.5f, 9f); arcTo(1.5f, 1.5f, 0f, true, true, 20.5f, 9f)
+        moveTo(17f, 11f); lineTo(4f, 15f)
+        moveTo(15f, 11.6f); verticalLineTo(18f)
+        moveTo(3f, 18f); horizontalLineTo(21f)
+    }
+}
+
+/** v2.5: the Workout type picker's icon for each kind. */
+fun workoutKindIcon(kind: String, name: String = ""): ImageVector = when (kind) {
+    "gym" -> DumbbellIcon
+    "bodyweight" -> BodyweightIcon
+    "cardio" -> if (name.isNotBlank()) activityIcon(name).takeIf { it != FlameIcon } ?: RunIcon else RunIcon
+    "sport" -> if (name.isNotBlank()) activityIcon(name).takeIf { it != FlameIcon } ?: FootballIcon else FootballIcon
+    "yoga" -> YogaIcon
+    else -> BandIcon
+}

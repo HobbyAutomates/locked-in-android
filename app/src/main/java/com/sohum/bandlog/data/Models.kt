@@ -12,8 +12,32 @@ data class Workout(
     val minutes: Int?,
     val exercises: String,
     val notes: String,
+    /** v2.5: bands | gym | bodyweight | cardio | sport | yoga (null column = bands, every pre-2.5 row). */
+    val kind: String = BANDS,
+    /** v2.5: gym / bodyweight lifts from exercises_json. */
+    val lifts: List<Lift> = emptyList(),
 ) {
+    val isBands: Boolean get() = kind == BANDS
+
+    /** "Gym · 5 exercises · 42 min", "Bands · Chest · Back", "Yoga / Stretch · 30 min". */
+    val summary: String
+        get() = when {
+            isBands -> (listOf("Bands") + muscles).joinToString(" · ")
+            lifts.isEmpty() && exercises.isNotBlank() -> listOfNotNull(exercises.replaceFirstChar { it.uppercase() }, minutes?.let { "$it min" }).joinToString(" · ")
+            else -> listOfNotNull(
+                kindLabel(kind),
+                lifts.size.takeIf { it > 0 }?.let { "$it exercise${if (it == 1) "" else "s"}" },
+                minutes?.let { "$it min" },
+            ).joinToString(" · ")
+        }
+
     companion object {
+        const val BANDS = "bands"
+        val KINDS = listOf("gym", "bodyweight", BANDS, "cardio", "sport", "yoga")
+        fun kindLabel(k: String): String = when (k) {
+            "gym" -> "Gym"; "bodyweight" -> "Bodyweight"; "cardio" -> "Cardio"; "sport" -> "Sport"; "yoga" -> "Yoga / Stretch"; else -> "Bands"
+        }
+
         fun from(o: JSONObject) = Workout(
             id = o.getString("id"),
             date = o.getString("date"),
@@ -23,7 +47,52 @@ data class Workout(
             minutes = if (o.isNull("minutes")) null else o.optInt("minutes"),
             exercises = o.optString("exercises", ""),
             notes = o.optString("notes", ""),
+            kind = if (!o.has("kind") || o.isNull("kind")) BANDS else o.optString("kind").ifBlank { BANDS },
+            lifts = Lift.list(if (!o.has("exercises_json") || o.isNull("exercises_json")) null else o.opt("exercises_json")),
         )
+    }
+}
+
+/** v2.5 one set of a lift: kg (null for bodyweight) x reps. */
+data class LiftSet(val kg: Double?, val reps: Int?)
+
+/** v2.5 one gym / bodyweight exercise and its sets: an element of workouts.exercises_json. */
+data class Lift(val name: String, val sets: List<LiftSet>) {
+    companion object {
+        /** [{"name": "Bench press", "sets": [{"kg": 40, "reps": 8}, ...]}, ...] */
+        fun toJson(lifts: List<Lift>): JSONArray = JSONArray().apply {
+            lifts.forEach { l ->
+                put(JSONObject().put("name", l.name).put("sets", JSONArray().apply {
+                    l.sets.forEach { s -> put(JSONObject().put("kg", s.kg ?: JSONObject.NULL).put("reps", s.reps ?: JSONObject.NULL)) }
+                }))
+            }
+        }
+
+        /** Reads the column whether PostgREST hands back a JSON array or a string. */
+        fun list(v: Any?): List<Lift> {
+            val arr = when (v) { is JSONArray -> v; is String -> runCatching { JSONArray(v) }.getOrNull(); else -> null } ?: return emptyList()
+            return (0 until arr.length()).mapNotNull { i ->
+                val o = arr.optJSONObject(i) ?: return@mapNotNull null
+                val name = o.optString("name").trim().ifBlank { return@mapNotNull null }
+                val sets = o.optJSONArray("sets")?.let { sa ->
+                    (0 until sa.length()).mapNotNull { j ->
+                        val so = sa.optJSONObject(j) ?: return@mapNotNull null
+                        LiftSet(
+                            kg = if (!so.has("kg") || so.isNull("kg")) null else so.optDouble("kg").takeIf { !it.isNaN() },
+                            reps = if (!so.has("reps") || so.isNull("reps")) null else so.optInt("reps").takeIf { it > 0 },
+                        )
+                    }
+                } ?: emptyList()
+                Lift(name, sets)
+            }
+        }
+
+        private fun num(d: Double): String = if (d % 1.0 == 0.0) d.toLong().toString() else d.toString()
+
+        /** "Bench press 40x8, 40x8; Push-up 15, 12": the plain-text fallback for the exercises column. */
+        fun summaryText(lifts: List<Lift>): String = lifts.joinToString("; ") { l ->
+            l.name + " " + l.sets.filter { it.reps != null || it.kg != null }.joinToString(", ") { s -> listOfNotNull(s.kg?.let { num(it) }, s.reps?.toString()).joinToString("×") }
+        }
     }
 }
 
@@ -49,6 +118,8 @@ data class MealItem(
     val cookedIn: String? = null,
     /** v2.4: a picture of the food when the parser / food row has one (never saved on meal_items). */
     val imageUrl: String? = null,
+    /** v2.5: parse-meal's `default_count` ("2 roti" → 2) — where the Quantity sheet's stepper starts (never saved). */
+    val defaultCount: Double? = null,
 ) {
     fun toJson(mealId: String, userId: String): JSONObject = JSONObject()
         .put("meal_id", mealId).put("user_id", userId)
@@ -87,6 +158,7 @@ data class MealItem(
             servings = if (o.isNull("servings")) null else o.optDouble("servings").takeIf { !it.isNaN() },
             cookedIn = if (o.isNull("cooked_in")) null else o.optString("cooked_in").ifBlank { null },
             imageUrl = urlOf(o),
+            defaultCount = if (!o.has("default_count") || o.isNull("default_count")) null else o.optDouble("default_count").takeIf { !it.isNaN() && it > 0 },
         )
 
         /** `image_url` when present and non-blank, else null. */

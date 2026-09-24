@@ -242,9 +242,9 @@ class AppViewModel : ViewModel() {
     }
 
     /** Called after a workout save; mirrors it into Health Connect when connected. */
-    fun pushSessionToHealth(context: android.content.Context, muscles: List<String>, minutes: Int?, date: String) {
+    fun pushSessionToHealth(context: android.content.Context, muscles: List<String>, minutes: Int?, date: String, title: String? = null) {
         if (!healthConnected) return
-        viewModelScope.launch { com.sohum.bandlog.util.Health.writeSession(context.applicationContext, "Bands: " + muscles.joinToString(", "), minutes ?: 30, date) }
+        viewModelScope.launch { com.sohum.bandlog.util.Health.writeSession(context.applicationContext, title ?: ("Bands: " + muscles.joinToString(", ")), minutes ?: 30, date) }
     }
 
     // ---- v2.1: the one Add-food screen ----
@@ -294,8 +294,21 @@ class AppViewModel : ViewModel() {
         return meals.asSequence().filter { it.date >= from }.flatMap { it.items.asSequence() }.mapNotNull { it.foodId }.groupingBy { it }.eachCount()
     }
 
-    /** The most recent band workout, for the Workout form's "Same as last time" pill. */
-    val lastWorkout: Workout? get() = workouts.maxWithOrNull(compareBy<Workout>({ it.date }, { it.id }))
+    /** The most recent band workout, for the band form's "Same as last time" pill. */
+    val lastWorkout: Workout? get() = lastWorkout(Workout.BANDS)
+
+    /** v2.5: the most recent workout of [kind] ("Same as last time" per kind). */
+    fun lastWorkout(kind: String, except: String? = null): Workout? =
+        workouts.filter { it.kind == kind && it.id != except }.maxWithOrNull(compareBy<Workout>({ it.date }, { it.id }))
+
+    /** v2.5: the last time [name] was lifted (any gym / bodyweight session) — the ghost hints in its set grid. */
+    fun lastLift(name: String, except: String? = null): com.sohum.bandlog.data.Lift? =
+        workouts.asSequence().filter { it.id != except && it.lifts.isNotEmpty() }
+            .sortedWith(compareByDescending<Workout> { it.date }.thenByDescending { it.id })
+            .firstNotNullOfOrNull { w -> w.lifts.firstOrNull { it.name.equals(name, ignoreCase = true) } }
+
+    /** The burn row a workout wrote (its note holds the workout id). */
+    fun burnOf(workoutId: String): ExerciseEntry? = exercises.firstOrNull { it.source == "workout" && it.note == workoutId }
 
     /** v2.4: items a scan's "Log 1 serving" hands to Add food; the Meal form takes them once. */
     var addFoodPrefill by mutableStateOf<List<MealItem>?>(null); private set
@@ -316,6 +329,11 @@ class AppViewModel : ViewModel() {
             runCatching { presets = Api.presets() }
             presetsLoading = false
         }
+    }
+
+    /** Debug builds only (DebugPreviewActivity): seed presets / workouts so screens render without a session. */
+    internal fun debugSeed(presets: List<com.sohum.bandlog.data.FoodPreset>, workouts: List<Workout> = emptyList()) {
+        this.presets = presets; this.workouts = workouts
     }
 
     fun onSignedIn() { signedIn = true; authLost = false; signOutReason = null; error = null; refresh() }
@@ -359,21 +377,36 @@ class AppViewModel : ViewModel() {
     catch (e: kotlinx.coroutines.CancellationException) { throw e }
     catch (e: Exception) { android.util.Log.w("LockedIn", "Save failed", e); error = e.message ?: "Something went wrong"; false }
 
+    /**
+     * The burn a workout writes. Bands: the band level's MET; gym: weight lifting (MET 5.0);
+     * bodyweight: calisthenics (MET 3.8); cardio / sport / yoga: whatever the Exercise form priced.
+     */
+    data class WorkoutBurn(val code: String?, val name: String, val intensity: String, val kcal: Double, val extras: Api.ExerciseExtras = Api.ExerciseExtras())
+
     suspend fun saveWorkout(
         id: String?, date: String, muscles: List<String>, band: String,
         kg: Double?, minutes: Int?, exercises: String, notes: String,
+        kind: String = Workout.BANDS, lifts: List<com.sohum.bandlog.data.Lift>? = null, burn: WorkoutBurn? = null,
     ): Boolean {
         val before = thisWeek; val beforeStreak = weekStreak
         var burnError: String? = null
         val ok = mutate("Your session expired — sign in again. This workout wasn't saved.") {
-            val wid = Api.saveWorkout(id, date, muscles, band, kg, minutes, exercises, notes)
+            val wid = Api.saveWorkout(id, date, muscles, band, kg, minutes, exercises, notes, kind, lifts)
             // Auto-burn: one exercise_log row per workout, tagged with the workout id in `note`.
             // An edit replaces the row so minutes / band changes flow through to the burn.
             // The workout itself is saved at this point, so a failure here is reported, not fatal.
             runCatching {
                 if (id != null) Api.deleteWorkoutBurn(wid)
                 val mins = (minutes ?: 30).coerceAtLeast(1)
-                Api.saveExercise(date, Burn.bandCode(band), "Bands: " + muscles.joinToString(", "), mins, Burn.bandIntensity(band), Burn.bandKcal(band, profile.weightKg, mins), "workout", wid)
+                val b = burn ?: when (kind) {
+                    Workout.BANDS -> WorkoutBurn(Burn.bandCode(band), "Bands: " + muscles.joinToString(", "), Burn.bandIntensity(band), Burn.bandKcal(band, profile.weightKg, mins))
+                    "bodyweight" -> WorkoutBurn(null, "Bodyweight: " + (lifts.orEmpty().joinToString(", ") { it.name }.ifBlank { "workout" }), "medium", Burn.kcal(Burn.BODYWEIGHT_MET, profile.weightKg, mins))
+                    "cardio" -> WorkoutBurn(null, exercises.ifBlank { "Cardio" }, "medium", Burn.kcal(7.0, profile.weightKg, mins))
+                    "sport" -> WorkoutBurn(null, exercises.ifBlank { "Sport" }, "medium", Burn.kcal(6.0, profile.weightKg, mins))
+                    "yoga" -> WorkoutBurn(null, exercises.ifBlank { "Yoga" }, "medium", Burn.kcal(2.5, profile.weightKg, mins))
+                    else -> WorkoutBurn(null, "Gym: " + (lifts.orEmpty().joinToString(", ") { it.name }.ifBlank { "workout" }), "medium", Burn.kcal(Burn.GYM_MET, profile.weightKg, mins))
+                }
+                Api.saveExercise(date, b.code, b.name.take(120), mins, b.intensity, b.kcal, "workout", wid, b.extras)
             }.onFailure { e ->
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 android.util.Log.w("LockedIn", "Workout burn row failed", e)

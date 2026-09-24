@@ -84,7 +84,7 @@ enum class ProfilePage { PERSONAL, GOALS, GOAL_WEIGHT, REMINDERS, WEIGHT_HISTORY
 
 private const val INVITE_TEXT =
     "Locked In — workouts, meals by voice, label scanner. " +
-        "Android: https://evizkfvltacrfngsgbuu.supabase.co/storage/v1/object/public/app/LockedIn-16.apk · " +
+        "Android: https://evizkfvltacrfngsgbuu.supabase.co/storage/v1/object/public/app/LockedIn-17.apk · " +
         "iPhone: https://web-production-ff1cf.up.railway.app (Safari → Add to Home Screen)"
 
 /**

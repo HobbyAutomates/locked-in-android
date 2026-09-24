@@ -96,7 +96,8 @@ fun LogScreen(vm: AppViewModel, existing: Workout?, initialDate: String, startOn
             Box(Modifier.padding(16.dp, 8.dp)) { Segmented(listOf("Workout", "Meal", "Exercise"), seg, { seg = it }) }
         }
         when {
-            existing != null || seg == 0 -> WorkoutForm(vm, existing, initialDate, onClose)
+            // v2.5: the Workout segment is a type picker first; Bands keeps the band form below.
+            existing != null || seg == 0 -> WorkoutTab(vm, existing, initialDate, onClose) { WorkoutForm(vm, existing, initialDate, onClose) }
             seg == 1 -> MealForm(vm, initialDate, onClose)
             else -> ExerciseForm(vm, initialDate, onClose)
         }
@@ -146,10 +147,10 @@ private fun WorkoutForm(vm: AppViewModel, existing: Workout?, initialDate: Strin
                 Card {
                     Text("Muscles", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted)
                     Spacer(Modifier.height(10.dp))
-                    Muscles.ALL.chunked(3).forEach { row ->
-                        Row(Modifier.padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            row.forEach { m -> Chip(m, m in muscles, { muscles = if (m in muscles) muscles - m else muscles + m }) }
-                        }
+                    // v2.5: wraps instead of clipping "Forearms" / "Other" at large font sizes.
+                    @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Muscles.ALL.forEach { m -> Chip(m, m in muscles, { muscles = if (m in muscles) muscles - m else muscles + m }) }
                     }
                 }
             }
@@ -260,7 +261,7 @@ fun NumberField(value: String, onChange: (String) -> Unit, unit: String, imeActi
 
 /** A borderless text line; Done closes the keyboard. */
 @Composable
-private fun PlainField(value: String, onChange: (String) -> Unit, placeholder: String) {
+internal fun PlainField(value: String, onChange: (String) -> Unit, placeholder: String) {
     val p = palette
     val focus = LocalFocusManager.current
     BasicTextField(

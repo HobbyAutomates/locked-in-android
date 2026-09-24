@@ -28,6 +28,10 @@ object Burn {
     fun bandLevel(intensity: String): String = when (intensity) { "low" -> "Light"; "high" -> "Heavy"; else -> "Medium" }
     fun bandKcal(level: String, weightKg: Double?, minutes: Int): Double = round1(bandMet(level) * (weightKg ?: DEFAULT_WEIGHT_KG) * minutes / 60.0)
 
+    /** v2.5: Compendium 02050-ish weight lifting (moderate, with rests) and calisthenics. */
+    const val GYM_MET = 5.0
+    const val BODYWEIGHT_MET = 3.8
+
     fun intensityLabel(intensity: String): String = when (intensity) { "low" -> "Low"; "high" -> "High"; else -> "Medium" }
 
     // ---- v2.3: the Low → High intensity slider (0–100) ----

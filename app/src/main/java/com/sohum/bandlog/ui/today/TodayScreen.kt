@@ -481,13 +481,16 @@ private fun SmallTile(icon: androidx.compose.ui.graphics.vector.ImageVector, tin
     Box(Modifier.size(40.dp).background(bg, androidx.compose.foundation.shape.RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) { Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp)) }
 }
 
-/** A band session: muscles on one line, minutes / burn on the right; tapping opens the editor. */
+/**
+ * A workout: its kind's icon and summary ("Gym · 5 exercises · 42 min", "Bands · Chest · Back"),
+ * burn / minutes on the right; tapping opens the editor.
+ */
 @Composable
 fun WorkoutRow(w: Workout, burnKcal: Double? = null, onClick: () -> Unit) {
     val p = palette
     CompactRow(
-        tile = { SmallTile(DumbbellIcon, p.ink, p.card2) },
-        title = w.muscles.joinToString(" · ").ifBlank { "Workout" },
+        tile = { SmallTile(com.sohum.bandlog.ui.components.workoutKindIcon(w.kind, w.exercises), p.ink, p.card2) },
+        title = w.summary.ifBlank { "Workout" },
         value = when {
             burnKcal != null && burnKcal > 0 -> "${burnKcal.toInt()} kcal"
             w.minutes != null -> "${w.minutes} min"

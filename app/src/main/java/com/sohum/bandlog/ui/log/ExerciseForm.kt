@@ -97,6 +97,28 @@ private val QUICK = listOf(
     "Stairs" to Picked("LI-17133", "LI-17133", "Stair climbing", 8.8),
 )
 
+/**
+ * v2.5: the Workout tab's Cardio / Sport / Yoga open this form filtered to their own chips (no
+ * Bands / Gym here — those have their own forms now).
+ */
+private val KIND_QUICK: Map<String, List<Pair<String, Picked>>> = mapOf(
+    "cardio" to listOf(
+        "Run" to QUICK[1].second, "Walk" to QUICK[2].second, "Cycle" to QUICK[3].second, "Swim" to Picked("swim", null, "Swimming", 6.0),
+        "Skipping" to QUICK[10].second, "Stairs" to QUICK[11].second, "Elliptical" to Picked("elliptical", null, "Elliptical trainer", 5.0),
+        "Rowing" to Picked("rowing", null, "Rowing machine", 7.0), "HIIT" to Picked("hiit", null, "HIIT / circuit", 8.0), "Dance" to Picked("dance", null, "Dancing", 5.0),
+    ),
+    "sport" to listOf(
+        "Cricket" to QUICK[4].second, "Badminton" to QUICK[5].second, "Football" to QUICK[6].second,
+        "Tennis" to Picked("tennis", null, "Tennis", 7.3), "Basketball" to Picked("basketball", null, "Basketball", 6.5),
+        "Table tennis" to Picked("table-tennis", null, "Table tennis", 4.0), "Volleyball" to Picked("volleyball", null, "Volleyball", 4.0),
+        "Kabaddi" to Picked("kabaddi", null, "Kabaddi", 6.0), "Squash" to Picked("squash", null, "Squash", 7.3),
+    ),
+    "yoga" to listOf(
+        "Yoga" to QUICK[8].second, "Stretching" to Picked("stretch", null, "Stretching", 2.3),
+        "Pilates" to Picked("pilates", null, "Pilates", 3.0), "Surya namaskar" to Picked("surya", null, "Surya namaskar", 3.8),
+    ),
+)
+
 /** Distance only makes sense for things you cover ground in. */
 private fun hasDistance(x: Picked): Boolean {
     val n = x.name.lowercase()
@@ -112,13 +134,15 @@ private fun hasDistance(x: Picked): Boolean {
  * "Enter calories instead".
  */
 @Composable
-fun ExerciseForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
+fun ExerciseForm(vm: AppViewModel, date: String, onClose: () -> Unit, kind: String? = null) {
     val p = palette
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val focus = LocalFocusManager.current
     var query by rememberSaveable { mutableStateOf("") }
-    var picked by remember { mutableStateOf<Picked?>(null) }
+    // Bands is one option among many now, so it goes last in the plain Exercise segment.
+    val quick = KIND_QUICK[kind] ?: QUICK.sortedBy { it.first == "Bands" }
+    var picked by remember { mutableStateOf<Picked?>(if (kind == "yoga") quick.first().second else null) }
     var pct by rememberSaveable { mutableIntStateOf(Burn.DEFAULT_PCT) }
     var more by rememberSaveable { mutableStateOf(false) }
     var minutes by rememberSaveable { mutableStateOf("30") }
@@ -241,7 +265,24 @@ fun ExerciseForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
                     }
                 }
             } else if (!sentence) {
-                if (recent.isNotEmpty()) {
+                val lastKind = kind?.let { vm.lastWorkout(it) }
+                val lastBurn = lastKind?.let { vm.burnOf(it.id) }
+                if (lastKind != null && lastBurn != null) {
+                    val met = Burn.metOf(lastBurn.kcal, weight, lastBurn.minutes, lastBurn.intensity, lastBurn.intensityPct).takeIf { it in 1.0..25.0 } ?: 4.0
+                    val x = Picked("last:" + lastBurn.name.lowercase(), lastBurn.activityCode, lastBurn.name, met)
+                    val applied = picked?.key == x.key
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = 48.dp).pressable().background(if (applied) p.card2 else p.btn, CircleShape)
+                            .clickable(enabled = !applied) { pick(x, lastBurn.minutes); lastBurn.intensityPct?.let { pct = it } }.padding(horizontal = 18.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(HistoryIcon, null, tint = if (applied) p.muted else p.btnInk, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (applied) "Filled in from last time" else "Same as last time", fontSize = 14.sp, fontWeight = FontWeight(700), color = if (applied) p.muted else p.btnInk, maxLines = 1)
+                        Text("  ${lastBurn.name} · ${lastBurn.minutes} min", fontSize = 13.sp, color = (if (applied) p.muted else p.btnInk).copy(alpha = 0.7f), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    }
+                }
+                if (recent.isNotEmpty() && kind == null) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(HistoryIcon, null, tint = p.muted, modifier = Modifier.size(13.dp))
                         Text("  Recent", fontSize = 12.sp, fontWeight = FontWeight(700), color = p.muted)
@@ -253,7 +294,7 @@ fun ExerciseForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
                     }
                 }
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    QUICK.forEach { (label, x) -> ActivityChip(label, activityIcon(x.name, x.code), picked?.key == x.key) { pick(x) } }
+                    quick.forEach { (label, x) -> ActivityChip(label, activityIcon(x.name, x.code), picked?.key == x.key) { pick(x) } }
                 }
             }
 
@@ -297,7 +338,7 @@ fun ExerciseForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
                     Box(
                         Modifier.fillMaxWidth().heightIn(min = 44.dp).pressable().background(p.card2, CircleShape).clickable { more = !more },
                         contentAlignment = Alignment.Center,
-                    ) { Text(if (more) "Less" else "More · time, intensity, distance, notes", fontSize = 13.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1) }
+                    ) { Text(if (more) "Less" else "More · time, intensity, notes", fontSize = 13.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 12.dp)) }
                     if (more) {
                         Spacer(Modifier.height(6.dp))
                         RowSpaceBetween {
@@ -411,7 +452,9 @@ fun ExerciseForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
         when {
             described.isNotEmpty() -> SaveBar("Save · ${described.sumOf { it.kcal }.roundToInt()} kcal", !busy, busy) { save { vm.saveDescribed(date, described) } }
             manual -> SaveBar("Save · ${manualK.roundToInt()} kcal", !busy && manualK > 0, busy) {
-                save { vm.saveExercise(date, null, manualName.trim().ifBlank { "Exercise" }, mins.coerceAtLeast(1), "medium", manualK, "manual") }
+                val name = manualName.trim().ifBlank { "Exercise" }
+                if (kind != null) save { vm.saveWorkout(null, date, emptyList(), "Medium", null, mins.coerceAtLeast(1), name, "", kind = kind, burn = AppViewModel.WorkoutBurn(null, name, "medium", manualK)) }
+                else save { vm.saveExercise(date, null, name, mins.coerceAtLeast(1), "medium", manualK, "manual") }
             }
             picked != null -> SaveBar("Save · ${kcal.roundToInt()} kcal", !busy && mins > 0 && kcal > 0, busy) {
                 val x = picked!!
@@ -422,7 +465,9 @@ fun ExerciseForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
                     distanceKm = if (hasDistance(x)) distance.toDoubleOrNull()?.takeIf { it > 0 } else null,
                     steps = steps.toIntOrNull()?.takeIf { it > 0 },
                 )
-                save { vm.saveExercise(date, code, x.name, mins, Burn.intensityFromPct(pct), kcal, "manual", notes.trim(), extras) }
+                // v2.5: from the Workout tab it's a workout of that kind (counts for streaks), its burn riding on it.
+                if (kind != null) save { vm.saveWorkout(null, date, emptyList(), "Medium", null, mins, x.name, notes.trim(), kind = kind, burn = AppViewModel.WorkoutBurn(code, x.name, Burn.intensityFromPct(pct), kcal, extras)) }
+                else save { vm.saveExercise(date, code, x.name, mins, Burn.intensityFromPct(pct), kcal, "manual", notes.trim(), extras) }
             }
             else -> Spacer(Modifier.navigationBarsPadding())
         }
