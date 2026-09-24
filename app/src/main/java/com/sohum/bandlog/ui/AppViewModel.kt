@@ -543,6 +543,10 @@ class AppViewModel : ViewModel() {
 
     suspend fun deleteWorkout(id: String) = mutate { runCatching { Api.deleteWorkoutBurn(id) }; Api.deleteWorkout(id) }
 
+    /** Same delete, but launched on [viewModelScope] so it outlives a screen the user has already
+     * left — for an undoable delete whose local timer was cancelled by leaving the screen early. */
+    fun deleteWorkoutLater(id: String) { viewModelScope.launch { deleteWorkout(id) } }
+
     /** A burn logged from the Exercise tab (run, bands, an activity, a description, or a manual number). */
     suspend fun saveExercise(
         date: String, activityCode: String?, name: String, minutes: Int, intensity: String, kcal: Double, source: String,

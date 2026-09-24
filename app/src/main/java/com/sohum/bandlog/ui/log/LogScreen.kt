@@ -37,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -125,6 +126,13 @@ private fun WorkoutForm(vm: AppViewModel, existing: Workout?, initialDate: Strin
     var deleteJob by remember { mutableStateOf<Job?>(null) }
     val ctx = androidx.compose.ui.platform.LocalContext.current
 
+    // If the editor leaves composition (Back, navigation) before the undo window runs out, the local
+    // job is cancelled with the screen — finish the delete on the ViewModel's own scope instead of
+    // silently dropping it.
+    DisposableEffect(existing?.id) {
+        onDispose { if (pendingDelete && !busy) { deleteJob?.cancel(); existing?.let { vm.deleteWorkoutLater(it.id) } } }
+    }
+
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp, 6.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             // v2.1: one tap repeats the last session; everything stays editable.
@@ -203,7 +211,7 @@ private fun WorkoutForm(vm: AppViewModel, existing: Workout?, initialDate: Strin
             if (existing != null) {
                 if (pendingDelete) {
                     RowSpaceBetween {
-                        Text("Deleted · Undo", fontSize = 15.sp, fontWeight = FontWeight(500), color = p.muted)
+                        Text("Deleted", fontSize = 15.sp, fontWeight = FontWeight(500), color = p.muted)
                         TextButton(onClick = { deleteJob?.cancel(); deleteJob = null; pendingDelete = false }) { Text("Undo", color = p.btn) }
                     }
                 } else {

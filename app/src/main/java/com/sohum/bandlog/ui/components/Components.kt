@@ -34,6 +34,7 @@ import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -99,21 +100,24 @@ fun PillButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier,
 
 /**
  * Optimistic-delete placeholder: shown in place of a row right after Delete is tapped. Reads
- * "Deleted · Undo" for ~5s, then calls [onExpire] (the real delete); tapping Undo calls [onUndo]
- * instead and restores the row.
+ * "Deleted" for ~5s, then calls [onExpire] (the real delete); tapping Undo calls [onUndo]
+ * instead and restores the row. If the row leaves composition first (scrolled away, screen
+ * closed), the delete still goes through so it never silently comes back.
  */
 @Composable
 fun UndoRow(onUndo: () -> Unit, onExpire: () -> Unit) {
     val p = palette
-    LaunchedEffect(Unit) { delay(5000); onExpire() }
+    var settled by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { delay(5000); if (!settled) { settled = true; onExpire() } }
+    DisposableEffect(Unit) { onDispose { if (!settled) { settled = true; onExpire() } } }
     Card(padding = 0.dp) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text("Deleted · Undo", fontSize = 14.sp, fontWeight = FontWeight(600), color = p.muted)
-            Text("Undo", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.btn, modifier = Modifier.clickable(onClick = onUndo))
+            Text("Deleted", fontSize = 14.sp, fontWeight = FontWeight(600), color = p.muted)
+            Text("Undo", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.btn, modifier = Modifier.clickable { settled = true; onUndo() })
         }
     }
 }
