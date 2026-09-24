@@ -97,6 +97,27 @@ fun PillButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier,
     ) { Text(text, color = fg ?: p.btnInk, fontSize = 15.sp, fontWeight = FontWeight(700)) }
 }
 
+/**
+ * Optimistic-delete placeholder: shown in place of a row right after Delete is tapped. Reads
+ * "Deleted · Undo" for ~5s, then calls [onExpire] (the real delete); tapping Undo calls [onUndo]
+ * instead and restores the row.
+ */
+@Composable
+fun UndoRow(onUndo: () -> Unit, onExpire: () -> Unit) {
+    val p = palette
+    LaunchedEffect(Unit) { delay(5000); onExpire() }
+    Card(padding = 0.dp) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text("Deleted · Undo", fontSize = 14.sp, fontWeight = FontWeight(600), color = p.muted)
+            Text("Undo", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.btn, modifier = Modifier.clickable(onClick = onUndo))
+        }
+    }
+}
+
 /** Selectable chip: black when selected, soft grey otherwise (or a tint when [color] is given). */
 @Composable
 fun Chip(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, color: Color? = null, colorBg: Color? = null) {

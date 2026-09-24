@@ -505,6 +505,8 @@ fun WorkoutRow(w: Workout, burnKcal: Double? = null, onClick: () -> Unit) {
 fun ExerciseRow(e: com.sohum.bandlog.data.ExerciseEntry, onDelete: () -> Unit) {
     val p = palette
     var open by androidx.compose.runtime.remember(e.id) { androidx.compose.runtime.mutableStateOf(false) }
+    var pendingDelete by androidx.compose.runtime.remember(e.id) { androidx.compose.runtime.mutableStateOf(false) }
+    if (pendingDelete) { com.sohum.bandlog.ui.components.UndoRow(onUndo = { pendingDelete = false }, onExpire = onDelete); return }
     val isBands = e.activityCode?.startsWith("LI-BAND") == true || e.name.contains("lifting", ignoreCase = true) || e.name.contains("band", ignoreCase = true)
     CompactRow(
         tile = { SmallTile(if (isBands) DumbbellIcon else com.sohum.bandlog.ui.components.activityIcon(e.name, e.activityCode), p.green, p.greenBg) },
@@ -520,7 +522,7 @@ fun ExerciseRow(e: com.sohum.bandlog.data.ExerciseEntry, onDelete: () -> Unit) {
                     " · ${timeOf(e.startedAt ?: e.createdAt)}" + (if (e.note.isNotBlank() && e.source != "workout") "\n${e.note}" else ""),
                 fontSize = 12.sp, color = p.muted, modifier = Modifier.weight(1f),
             )
-            DeleteButton(onDelete)
+            DeleteButton { pendingDelete = true }
         }
     }
 }
@@ -531,6 +533,8 @@ fun MealRow(m: Meal, onDelete: () -> Unit, onFeedback: ((String) -> Unit)? = nul
     val p = palette
     var open by androidx.compose.runtime.remember(m.id) { androidx.compose.runtime.mutableStateOf(false) }
     var voted by androidx.compose.runtime.remember(m.id) { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    var pendingDelete by androidx.compose.runtime.remember(m.id) { androidx.compose.runtime.mutableStateOf(false) }
+    if (pendingDelete) { com.sohum.bandlog.ui.components.UndoRow(onUndo = { pendingDelete = false }, onExpire = onDelete); return }
     CompactRow(
         tile = {
             // Plate photo when the meal has one; else a picture of its biggest item (v2.4).
@@ -574,7 +578,7 @@ fun MealRow(m: Meal, onDelete: () -> Unit, onFeedback: ((String) -> Unit)? = nul
                         }
                     }
                 } else Spacer(Modifier.width(1.dp))
-                DeleteButton(onDelete)
+                DeleteButton { pendingDelete = true }
             }
         }
     }
