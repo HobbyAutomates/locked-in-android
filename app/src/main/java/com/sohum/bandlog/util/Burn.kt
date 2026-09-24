@@ -30,5 +30,39 @@ object Burn {
 
     fun intensityLabel(intensity: String): String = when (intensity) { "low" -> "Low"; "high" -> "High"; else -> "Medium" }
 
+    // ---- v2.3: the Low → High intensity slider (0–100) ----
+
+    /** Where the slider sits by default: exactly ×1.0, i.e. the plain MET-table number. */
+    const val DEFAULT_PCT = 40
+
+    /** 0 → ×0.8, 40 → ×1.0, 100 → ×1.3 (linear). */
+    fun pctMultiplier(pct: Int): Double = 0.8 + 0.5 * pct.coerceIn(0, 100) / 100.0
+
+    fun kcalPct(met: Double, weightKg: Double?, minutes: Int, pct: Int): Double =
+        round1(met * pctMultiplier(pct) * (weightKg ?: DEFAULT_WEIGHT_KG) * minutes / 60.0)
+
+    /** The legacy low / medium / high column, derived from the slider. */
+    fun intensityFromPct(pct: Int): String = when { pct < 25 -> "low"; pct <= 75 -> "medium"; else -> "high" }
+
+    /** Plain-English band for the slider. */
+    fun pctLabel(pct: Int): String = when {
+        pct < 25 -> "Easy: could sing"
+        pct < 50 -> "Moderate: can talk in sentences"
+        pct <= 75 -> "Hard: heavy breathing, short sentences"
+        else -> "All out: can't talk"
+    }
+
+    fun pctShort(pct: Int): String = when { pct < 25 -> "Easy"; pct < 50 -> "Moderate"; pct <= 75 -> "Hard"; else -> "All out" }
+
+    /** Band level for the slider when the activity is a band workout. */
+    fun bandLevelFromPct(pct: Int): String = when { pct < 25 -> "Light"; pct <= 75 -> "Medium"; else -> "Heavy" }
+
+    /** Backs the MET out of a logged row (for the Recent row): kcal / (kg × h) / intensity multiplier. */
+    fun metOf(kcal: Double, weightKg: Double?, minutes: Int, intensity: String, pct: Int?): Double {
+        if (minutes <= 0) return 0.0
+        val mult = pct?.let { pctMultiplier(it) } ?: multiplier(intensity)
+        return kcal / ((weightKg ?: DEFAULT_WEIGHT_KG) * minutes / 60.0) / mult
+    }
+
     private fun round1(v: Double): Double = (v * 10).roundToInt() / 10.0
 }

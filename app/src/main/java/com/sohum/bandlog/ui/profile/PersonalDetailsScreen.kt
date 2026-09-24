@@ -68,6 +68,7 @@ fun PersonalDetailsScreen(vm: AppViewModel, onBack: () -> Unit, onChangeGoal: ()
     var dob by remember(prof) { mutableStateOf(prof.dob) }
     var gender by remember(prof) { mutableStateOf(prof.gender) }
     var steps by remember(prof) { mutableStateOf(prof.stepGoal.toString()) }
+    var waterGoal by remember(prof) { mutableStateOf(prof.waterGoalMl.toString()) }
     var busy by remember { mutableStateOf(false) }
     var saved by remember { mutableStateOf(false) }
 
@@ -78,6 +79,7 @@ fun PersonalDetailsScreen(vm: AppViewModel, onBack: () -> Unit, onChangeGoal: ()
         dob = dob,
         gender = gender,
         stepGoal = steps.toIntOrNull()?.coerceIn(500, 100_000) ?: 8000,
+        waterGoalMl = waterGoal.toIntOrNull()?.coerceIn(250, 10_000) ?: 2500,
     )
     val dirty = edited() != prof
 
@@ -166,7 +168,9 @@ fun PersonalDetailsScreen(vm: AppViewModel, onBack: () -> Unit, onChangeGoal: ()
                         if (gender == null) Text("Used only for the BMR formula.", fontSize = 11.sp, color = p.muted, modifier = Modifier.padding(top = 6.dp))
                     }
                     Hair()
-                    SettingRow(StepsIcon, p.green, "Daily step goal") { NumberField(steps, { steps = it.filter(Char::isDigit).take(6) }, "steps") }
+                    SettingRow(StepsIcon, p.green, "Daily step goal") { NumberField(steps, { steps = it.filter(Char::isDigit).take(6) }, "steps", imeAction = androidx.compose.ui.text.input.ImeAction.Next) }
+                    Hair()
+                    SettingRow(com.sohum.bandlog.ui.components.GlassIcon, com.sohum.bandlog.ui.today.WaterBlue, "Daily water goal") { NumberField(waterGoal, { waterGoal = it.filter(Char::isDigit).take(5) }, "mL") }
                 }
             }
         }

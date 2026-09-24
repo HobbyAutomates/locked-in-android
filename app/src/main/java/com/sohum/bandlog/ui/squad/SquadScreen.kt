@@ -82,7 +82,7 @@ import kotlinx.coroutines.launch
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private const val APK_URL = "https://evizkfvltacrfngsgbuu.supabase.co/storage/v1/object/public/app/LockedIn-14.apk"
+private const val APK_URL = "https://evizkfvltacrfngsgbuu.supabase.co/storage/v1/object/public/app/LockedIn-15.apk"
 private const val WEB_URL = "https://web-production-ff1cf.up.railway.app"
 
 fun squadInviteText(code: String) = "Join my Locked In squad: code $code — Android $APK_URL · iPhone $WEB_URL"
@@ -101,6 +101,23 @@ class SquadViewModel : ViewModel() {
     var created by mutableStateOf<Pair<String, String>?>(null)
 
     val selected: Squad? get() = squads.firstOrNull { it.id == selectedId }
+
+    /** v2.3 Discover: public squads, or null when the `public_groups` RPC isn't there (section hidden). */
+    var discover by mutableStateOf<List<com.sohum.bandlog.data.PublicSquad>?>(null); private set
+    var joiningId by mutableStateOf<String?>(null); private set
+
+    fun loadDiscover() {
+        viewModelScope.launch { discover = runCatching { Api.publicGroups() }.getOrNull() }
+    }
+
+    fun joinPublic(id: String, display: String) {
+        viewModelScope.launch {
+            joiningId = id; error = null
+            try { Api.joinPublicSquad(id, display); load(id); loadDiscover() }
+            catch (e: Exception) { error = friendly(e.message) }
+            finally { joiningId = null }
+        }
+    }
 
     fun load(prefer: String? = selectedId) {
         viewModelScope.launch {
@@ -179,7 +196,9 @@ fun SquadScreen(vm: AppViewModel, onOpenProfile: () -> Unit) {
     val p = palette
     val sq: SquadViewModel = viewModel()
     var adding by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { sq.load() }
+    var menu by remember { mutableStateOf(false) }
+    var howItWorks by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { sq.load(); sq.loadDiscover() }
     val display = com.sohum.bandlog.util.Names.display(vm.profile.name, Session.email, "Member")
 
     Column(
@@ -190,13 +209,24 @@ fun SquadScreen(vm: AppViewModel, onOpenProfile: () -> Unit) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 ScreenTitle("Squad")
                 if (sq.loading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = p.muted)
-                else if (sq.squads.isNotEmpty()) Box(
-                    Modifier.size(44.dp).pressable().shadow(8.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow)
-                        .background(if (adding) p.card else p.btn, CircleShape).clickable { adding = !adding },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (adding) Icon(CrossIcon, "Close", tint = p.ink, modifier = Modifier.size(14.dp))
-                    else Text("+", fontSize = 24.sp, fontWeight = FontWeight(600), color = p.btnInk, modifier = Modifier.padding(bottom = 2.dp))
+                else Box {
+                    Box(
+                        Modifier.size(44.dp).pressable().shadow(8.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow)
+                            .background(if (adding) p.card else p.btn, CircleShape).clickable { if (adding) adding = false else menu = true },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (adding) Icon(CrossIcon, "Close", tint = p.ink, modifier = Modifier.size(14.dp))
+                        else Text("+", fontSize = 24.sp, fontWeight = FontWeight(600), color = p.btnInk, modifier = Modifier.padding(bottom = 2.dp))
+                    }
+                    // v2.3: the + is a small menu.
+                    androidx.compose.material3.DropdownMenu(menu, { menu = false }, Modifier.background(p.card)) {
+                        listOf("Create private squad", "Join with code", "How squads work").forEachIndexed { i, label ->
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text(label, fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink) },
+                                onClick = { menu = false; if (i < 2) adding = true else howItWorks = true },
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -209,6 +239,12 @@ fun SquadScreen(vm: AppViewModel, onOpenProfile: () -> Unit) {
             StartCards(sq.busy, onCreate = { sq.create(it, display) }, onJoin = { sq.join(it, display); adding = false })
         }
 
+        // v2.3 Discover: public squads above my own; hidden when the RPC isn't live yet or there are none.
+        val publicSquads = sq.discover?.filter { d -> sq.squads.none { it.id == d.id } }.orEmpty()
+        if (publicSquads.isNotEmpty() && sq.created == null) {
+            Rise(1) { DiscoverSection(publicSquads, sq.joiningId) { sq.joinPublic(it, display) } }
+        }
+
         if (sq.squads.size > 1) {
             Rise(1) {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -218,6 +254,59 @@ fun SquadScreen(vm: AppViewModel, onOpenProfile: () -> Unit) {
         }
 
         sq.selected?.let { squad -> Board(sq, squad, Session.userId.orEmpty(), vm.profile.shareStats, onOpenProfile) }
+    }
+    if (howItWorks) HowSquadsWorkSheet { howItWorks = false }
+}
+
+@Composable
+private fun DiscoverSection(squads: List<com.sohum.bandlog.data.PublicSquad>, joiningId: String?, onJoin: (String) -> Unit) {
+    val p = palette
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Discover squads", fontSize = 17.sp, fontWeight = FontWeight(800), letterSpacing = (-0.4).sp, color = p.ink, modifier = Modifier.padding(start = 2.dp))
+        squads.take(8).forEach { s ->
+            Card(padding = 12.dp) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    com.sohum.bandlog.ui.components.RemoteImage(url = s.coverUrl, size = 56.dp, radius = 14.dp, fallback = PeopleIcon)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(s.name, fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1)
+                        Text("${s.memberCount} member${if (s.memberCount == 1) "" else "s"}", fontSize = 12.sp, fontWeight = FontWeight(600), color = p.muted)
+                        if (s.tagline.isNotBlank()) Text(s.tagline, fontSize = 12.sp, color = p.muted, maxLines = 2)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    val busy = joiningId == s.id
+                    Box(
+                        Modifier.heightIn(min = 44.dp).pressable().clickable(enabled = joiningId == null) { onJoin(s.id) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Box(Modifier.height(34.dp).background(p.btn, CircleShape).padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
+                            Text(if (busy) "Joining…" else "+ Join", fontSize = 13.sp, fontWeight = FontWeight(700), color = p.btnInk, maxLines = 1)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A short explainer behind the + menu. */
+@Composable
+private fun HowSquadsWorkSheet(onDismiss: () -> Unit) {
+    val p = palette
+    com.sohum.bandlog.ui.components.BottomSheet(title = "How squads work", onDismiss = onDismiss, primary = "Got it", onPrimary = onDismiss) {
+        listOf(
+            "Create a private squad and share its 6-letter code, or join a friend's with theirs.",
+            "Public squads show up under Discover — tap + Join, no code needed.",
+            "The board shows who's locked in today, this week's training dots and streaks.",
+            "Protein and calories show only for members who share them (Profile → Share with squads).",
+            "Nudge anyone who hasn't trained yet — once a day.",
+        ).forEach { line ->
+            Row(Modifier.padding(bottom = 10.dp)) {
+                Box(Modifier.padding(top = 6.dp).size(6.dp).background(p.ink, CircleShape))
+                Spacer(Modifier.width(10.dp))
+                Text(line, fontSize = 13.sp, color = p.ink, lineHeight = 18.sp)
+            }
+        }
     }
 }
 

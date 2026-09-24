@@ -51,7 +51,9 @@ object Api {
             "goal_weight_kg,goal_type,goal_speed_kg_wk,step_goal,carb_target_g,fat_target_g,reminders,lens_default,share_stats,avatar_path"
 
     suspend fun profile(): Profile = withContext(Dispatchers.IO) {
-        val body = run(rest("profiles?select=$PROFILE_COLS&limit=1").get().build(), "Load profile")
+        // v2.3: select=* so a column the web agent hasn't added yet can never break the read.
+        val body = runCatching { run(rest("profiles?select=*&limit=1").get().build(), "Load profile") }
+            .getOrElse { run(rest("profiles?select=$PROFILE_COLS&limit=1").get().build(), "Load profile") }
         val arr = JSONArray(body)
         if (arr.length() == 0) Profile() else Profile.from(arr.getJSONObject(0))
     }
@@ -80,13 +82,25 @@ object Api {
             .put("avatar_path", p.avatarPath ?: JSONObject.NULL)
             .toString()
         run(rest("profiles").header("Prefer", "resolution=merge-duplicates").post(json(payload)).build(), "Save profile")
+        // v2.3 columns go in a separate PATCH so an older database (columns missing) still saves the rest.
+        val extras = JSONObject()
+            .put("fiber_target", p.fiberTarget).put("sugar_target", p.sugarTarget).put("water_goal_ml", p.waterGoalMl)
+        p.addBurnedToGoal?.let { extras.put("add_burned_to_goal", it) }
+        p.rolloverCalories?.let { extras.put("rollover_calories", it) }
+        runCatching { run(rest("profiles?id=eq.$uid").header("Prefer", "return=minimal").patch(json(extras.toString())).build(), "Save goals") }
         Unit
+    }
+
+    /** Patches v2.3 profile columns; false when the database doesn't have them yet. */
+    suspend fun patchProfile(fields: JSONObject): Boolean = withContext(Dispatchers.IO) {
+        val uid = Session.userId ?: throw AuthException("Not signed in")
+        runCatching { run(rest("profiles?id=eq.$uid").header("Prefer", "return=minimal").patch(json(fields.toString())).build(), "Save preference") }.isSuccess
     }
 
     // ---- weight log ----
 
     suspend fun weights(): List<WeightEntry> = withContext(Dispatchers.IO) {
-        val body = run(rest("weight_log?select=id,date,weight_kg,note&order=date.desc,created_at.desc&limit=400").get().build(), "Load weight history")
+        val body = run(rest("weight_log?select=*&order=date.desc,created_at.desc&limit=400").get().build(), "Load weight history")
         val arr = JSONArray(body)
         (0 until arr.length()).map { WeightEntry.from(arr.getJSONObject(it)) }
     }
@@ -159,23 +173,83 @@ object Api {
 
     // ---- exercise log (calories burned) ----
 
-    private const val EXERCISE_COLS = "id,date,activity_code,name,minutes,intensity,kcal,source,note,created_at"
-
     suspend fun exercises(from: String, to: String): List<ExerciseEntry> = withContext(Dispatchers.IO) {
-        val body = run(rest("exercise_log?select=$EXERCISE_COLS&date=gte.$from&date=lte.$to&order=date.desc,created_at.desc").get().build(), "Load exercise")
+        // select=* keeps the v2.3 columns (started_at, intensity_pct, distance_km, steps) optional.
+        val body = run(rest("exercise_log?select=*&date=gte.$from&date=lte.$to&order=date.desc,created_at.desc").get().build(), "Load exercise")
         val arr = JSONArray(body)
         (0 until arr.length()).map { ExerciseEntry.from(arr.getJSONObject(it)) }
     }
 
+    /** v2.3 Google-Fit-style extras; every field optional. */
+    data class ExerciseExtras(val startedAt: String? = null, val intensityPct: Int? = null, val distanceKm: Double? = null, val steps: Int? = null) {
+        val empty: Boolean get() = startedAt == null && intensityPct == null && distanceKm == null && steps == null
+    }
+
     suspend fun saveExercise(
         date: String, activityCode: String?, name: String, minutes: Int, intensity: String, kcal: Double, source: String, note: String = "",
+        extras: ExerciseExtras = ExerciseExtras(),
     ) = withContext(Dispatchers.IO) {
         val uid = Session.userId ?: throw AuthException("Not signed in")
-        val payload = JSONObject().put("user_id", uid).put("date", date)
+        val base = JSONObject().put("user_id", uid).put("date", date)
             .put("activity_code", activityCode ?: JSONObject.NULL).put("name", name)
             .put("minutes", minutes.coerceAtLeast(1)).put("intensity", intensity).put("kcal", kcal)
-            .put("source", source).put("note", note).toString()
-        run(rest("exercise_log").post(json(payload)).build(), "Log exercise"); Unit
+            .put("source", source).put("note", note)
+        if (extras.empty) {
+            run(rest("exercise_log").post(json(base.toString())).build(), "Log exercise")
+        } else {
+            val full = JSONObject(base.toString())
+            extras.startedAt?.let { full.put("started_at", it) }
+            extras.intensityPct?.let { full.put("intensity_pct", it) }
+            extras.distanceKm?.let { full.put("distance_km", it) }
+            extras.steps?.let { full.put("steps", it) }
+            try {
+                run(rest("exercise_log").post(json(full.toString())).build(), "Log exercise")
+            } catch (e: ApiException) {
+                // Columns not there yet (older database): save the burn without the extras.
+                android.util.Log.w("LockedIn", "Exercise extras rejected, saving without: ${e.message}")
+                run(rest("exercise_log").post(json(base.toString())).build(), "Log exercise")
+            }
+        }
+        Unit
+    }
+
+    // ---- v2.3: water ----
+
+    suspend fun water(from: String, to: String): List<WaterEntry> = withContext(Dispatchers.IO) {
+        val body = run(rest("water_log?select=*&date=gte.$from&date=lte.$to&order=created_at.desc").get().build(), "Load water")
+        val arr = JSONArray(body)
+        (0 until arr.length()).map { WaterEntry.from(arr.getJSONObject(it)) }
+    }
+
+    suspend fun logWater(date: String, ml: Int) = withContext(Dispatchers.IO) {
+        val uid = Session.userId ?: throw AuthException("Not signed in")
+        val payload = JSONObject().put("user_id", uid).put("date", date).put("ml", ml).toString()
+        run(rest("water_log").header("Prefer", "return=minimal").post(json(payload)).build(), "Log water"); Unit
+    }
+
+    suspend fun deleteWater(id: String) = withContext(Dispatchers.IO) { run(rest("water_log?id=eq.$id").delete().build(), "Delete water"); Unit }
+
+    // ---- v2.3: progress photos (private bucket progress-photos/<uid>/<date>-<ts>.jpg) ----
+
+    suspend fun progressPhotos(): List<ProgressPhoto> = withContext(Dispatchers.IO) {
+        val body = run(rest("progress_photos?select=*&order=date.desc&limit=60").get().build(), "Load progress photos")
+        val arr = JSONArray(body)
+        (0 until arr.length()).map { ProgressPhoto.from(arr.getJSONObject(it)) }
+    }
+
+    /** Uploads a ≤1024 px JPEG with the user's token and records the row; returns the storage path. */
+    suspend fun uploadProgressPhoto(jpeg: ByteArray, date: String, note: String = ""): String = withContext(Dispatchers.IO) {
+        SupabaseAuth.ensureFresh()
+        val token = Session.accessToken ?: throw AuthException("Not signed in")
+        val uid = Session.userId ?: throw AuthException("Not signed in")
+        val path = "$uid/$date-${System.currentTimeMillis()}.jpg"
+        val req = Request.Builder().url("$base/storage/v1/object/progress-photos/$path")
+            .header("apikey", key).header("Authorization", "Bearer $token").header("x-upsert", "true")
+            .post(jpeg.toRequestBody("image/jpeg".toMediaType())).build()
+        run(req, "Upload photo")
+        val row = JSONObject().put("user_id", uid).put("date", date).put("path", path).put("note", if (note.isBlank()) JSONObject.NULL else note).toString()
+        run(rest("progress_photos").header("Prefer", "return=minimal").post(json(row)).build(), "Save progress photo")
+        path
     }
 
     suspend fun deleteExercise(id: String) = withContext(Dispatchers.IO) {
@@ -520,6 +594,36 @@ object Api {
     suspend fun joinSquad(code: String, displayName: String): String {
         val body = rpc("join_group", JSONObject().put("p_code", code.uppercase().trim()).put("p_name", displayName), "Join squad")
         return body.trim().trim('"')
+    }
+
+    /** Public squads for Discover; throws when the RPC doesn't exist yet (the UI then hides the section). */
+    suspend fun publicGroups(): List<PublicSquad> {
+        val arr = JSONArray(rpc("public_groups", JSONObject(), "Load public squads"))
+        return (0 until arr.length()).map { PublicSquad.from(arr.getJSONObject(it)) }
+    }
+
+    /**
+     * Joins a public squad: the web agent's `join_public_group` RPC under the argument names this
+     * schema uses elsewhere, else the squad's code (when RLS lets us read it) through `join_group`.
+     */
+    suspend fun joinPublicSquad(groupId: String, displayName: String): String {
+        val attempts = listOf(
+            JSONObject().put("g", groupId).put("p_name", displayName),
+            JSONObject().put("g", groupId),
+            JSONObject().put("p_group", groupId).put("p_name", displayName),
+            JSONObject().put("p_id", groupId),
+            JSONObject().put("group_id", groupId),
+        )
+        var last: Exception? = null
+        for (a in attempts) {
+            try { rpc("join_public_group", a, "Join squad"); return groupId } catch (e: ApiException) { last = e }
+        }
+        val code = runCatching {
+            val arr = JSONArray(withContext(Dispatchers.IO) { run(rest("groups?select=code&id=eq.$groupId").get().build(), "Load squad") })
+            arr.optJSONObject(0)?.optString("code")?.ifBlank { null }
+        }.getOrNull()
+        if (code != null) return joinSquad(code, displayName)
+        throw last ?: ApiException("Couldn't join that squad")
     }
 
     suspend fun leaveSquad(groupId: String) { rpc("leave_group", JSONObject().put("g", groupId), "Leave squad") }

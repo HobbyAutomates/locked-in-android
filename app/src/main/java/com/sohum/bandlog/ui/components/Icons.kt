@@ -326,3 +326,125 @@ val TagIcon: ImageVector by lazy {
         moveTo(8f, 7.5f); arcTo(0.5f, 0.5f, 0f, true, true, 8f, 8.5f); arcTo(0.5f, 0.5f, 0f, true, true, 8f, 7.5f)
     }
 }
+
+// ---- v2.3: activity icons for the Exercise picker ----
+
+/** Walking figure. */
+val WalkIcon: ImageVector by lazy {
+    stroke("Walk") {
+        moveTo(13f, 4f); arcTo(1.5f, 1.5f, 0f, true, true, 12.9f, 4f); close()
+        moveTo(12f, 8f); lineTo(11f, 14f); lineTo(13f, 17f); lineTo(14f, 21f)
+        moveTo(11f, 14f); lineTo(9f, 21f)
+        moveTo(12f, 8f); lineTo(9f, 10f); lineTo(8f, 13f)
+        moveTo(12f, 8f); lineTo(14f, 11f); lineTo(16f, 12f)
+    }
+}
+
+/** Bicycle. */
+val CycleIcon: ImageVector by lazy {
+    stroke("Cycle") {
+        moveTo(9f, 16f); arcTo(3.5f, 3.5f, 0f, true, true, 2f, 16f); arcTo(3.5f, 3.5f, 0f, true, true, 9f, 16f)
+        moveTo(22f, 16f); arcTo(3.5f, 3.5f, 0f, true, true, 15f, 16f); arcTo(3.5f, 3.5f, 0f, true, true, 22f, 16f)
+        moveTo(5.5f, 16f); lineTo(9f, 9f); horizontalLineTo(15f); lineTo(18.5f, 16f)
+        moveTo(9f, 9f); lineTo(12f, 16f); lineTo(15f, 9f); moveTo(8f, 6f); horizontalLineTo(11f)
+    }
+}
+
+/** Cricket bat and ball. */
+val CricketIcon: ImageVector by lazy {
+    stroke("Cricket") {
+        moveTo(18f, 3f); lineTo(21f, 6f); lineTo(10f, 17f); lineTo(7f, 14f); close()
+        moveTo(8.5f, 15.5f); lineTo(4f, 20f)
+        moveTo(7f, 6.5f); arcTo(2f, 2f, 0f, true, true, 3f, 6.5f); arcTo(2f, 2f, 0f, true, true, 7f, 6.5f)
+    }
+}
+
+/** Shuttlecock. */
+val BadmintonIcon: ImageVector by lazy {
+    stroke("Badminton") {
+        moveTo(12f, 21f); arcTo(2.5f, 2.5f, 0f, true, true, 12f, 16f); arcTo(2.5f, 2.5f, 0f, true, true, 12f, 21f)
+        moveTo(10f, 16.5f); lineTo(6f, 4f); horizontalLineTo(18f); lineTo(14f, 16.5f)
+        moveTo(10f, 4f); lineTo(11f, 16f); moveTo(14f, 4f); lineTo(13f, 16f)
+    }
+}
+
+/** Football. */
+val FootballIcon: ImageVector by lazy {
+    stroke("Football") {
+        moveTo(21f, 12f); arcTo(9f, 9f, 0f, true, true, 3f, 12f); arcTo(9f, 9f, 0f, true, true, 21f, 12f)
+        moveTo(12f, 8f); lineTo(15.5f, 10.5f); lineTo(14f, 14.5f); horizontalLineTo(10f); lineTo(8.5f, 10.5f); close()
+        moveTo(12f, 8f); verticalLineTo(3f); moveTo(15.5f, 10.5f); lineTo(20.5f, 9f); moveTo(14f, 14.5f); lineTo(17f, 19f)
+        moveTo(10f, 14.5f); lineTo(7f, 19f); moveTo(8.5f, 10.5f); lineTo(3.5f, 9f)
+    }
+}
+
+/** Swimmer over waves. */
+val SwimIcon: ImageVector by lazy {
+    stroke("Swim") {
+        moveTo(17f, 7f); arcTo(1.5f, 1.5f, 0f, true, true, 16.9f, 7f); close()
+        moveTo(6f, 12f); lineTo(10f, 8f); lineTo(13f, 11f); lineTo(10f, 13f)
+        moveTo(3f, 17f); curveTo(5f, 15.5f, 7f, 15.5f, 9f, 17f); curveTo(11f, 18.5f, 13f, 18.5f, 15f, 17f); curveTo(17f, 15.5f, 19f, 15.5f, 21f, 17f)
+        moveTo(3f, 21f); curveTo(5f, 19.5f, 7f, 19.5f, 9f, 21f); curveTo(11f, 22.5f, 13f, 22.5f, 15f, 21f); curveTo(17f, 19.5f, 19f, 19.5f, 21f, 21f)
+    }
+}
+
+/** Seated yoga figure. */
+val YogaIcon: ImageVector by lazy {
+    stroke("Yoga") {
+        moveTo(13.5f, 4.5f); arcTo(1.5f, 1.5f, 0f, true, true, 10.5f, 4.5f); arcTo(1.5f, 1.5f, 0f, true, true, 13.5f, 4.5f)
+        moveTo(12f, 8f); verticalLineTo(14f)
+        moveTo(4f, 10f); lineTo(12f, 9f); lineTo(20f, 10f)
+        moveTo(12f, 14f); lineTo(6f, 18f); horizontalLineTo(18f); lineTo(12f, 14f)
+    }
+}
+
+/** A resistance band loop between two handles. */
+val BandIcon: ImageVector by lazy {
+    stroke("Band") {
+        moveTo(4f, 6f); verticalLineTo(10f); moveTo(20f, 6f); verticalLineTo(10f)
+        moveTo(4f, 8f); curveTo(8f, 20f, 16f, 20f, 20f, 8f)
+        moveTo(4f, 8f); curveTo(8f, 14f, 16f, 14f, 20f, 8f)
+    }
+}
+
+/** A glass of water. */
+val GlassIcon: ImageVector by lazy {
+    stroke("Glass") {
+        moveTo(6f, 3f); horizontalLineTo(18f); lineTo(16.5f, 20f); arcTo(1.5f, 1.5f, 0f, false, true, 15f, 21f)
+        horizontalLineTo(9f); arcTo(1.5f, 1.5f, 0f, false, true, 7.5f, 20f); close()
+        moveTo(6.8f, 11f); horizontalLineTo(17.2f)
+    }
+}
+
+/** A water bottle. */
+val BottleIcon: ImageVector by lazy {
+    stroke("Bottle") {
+        moveTo(10f, 2f); horizontalLineTo(14f); verticalLineTo(5f); moveTo(10f, 2f); verticalLineTo(5f)
+        moveTo(10f, 5f); lineTo(8f, 8f); verticalLineTo(20f); arcTo(2f, 2f, 0f, false, false, 10f, 22f)
+        horizontalLineTo(14f); arcTo(2f, 2f, 0f, false, false, 16f, 20f); verticalLineTo(8f); lineTo(14f, 5f); close()
+        moveTo(8f, 12f); horizontalLineTo(16f)
+    }
+}
+
+/** Arrows for the Progress change tables. */
+val ArrowUpIcon: ImageVector by lazy { stroke("ArrowUp") { moveTo(12f, 19f); verticalLineTo(5f); moveTo(6f, 11f); lineTo(12f, 5f); lineTo(18f, 11f) } }
+val ArrowDownIcon: ImageVector by lazy { stroke("ArrowDown") { moveTo(12f, 5f); verticalLineTo(19f); moveTo(6f, 13f); lineTo(12f, 19f); lineTo(18f, 13f) } }
+val ArrowFlatIcon: ImageVector by lazy { stroke("ArrowFlat") { moveTo(5f, 12f); horizontalLineTo(19f); moveTo(13f, 6f); lineTo(19f, 12f); lineTo(13f, 18f) } }
+
+/** Picks an icon for an activity by name; flame when nothing matches. */
+fun activityIcon(name: String, code: String? = null): ImageVector {
+    val n = name.lowercase()
+    return when {
+        code?.startsWith("LI-BAND") == true || "band" in n -> BandIcon
+        "run" in n || "jog" in n || "sprint" in n -> RunIcon
+        "walk" in n || "hike" in n || "stair" in n -> WalkIcon
+        "cycl" in n || "bicycl" in n || "bike" in n || "spin" in n -> CycleIcon
+        "cricket" in n -> CricketIcon
+        "badminton" in n || "tennis" in n || "squash" in n -> BadmintonIcon
+        "football" in n || "soccer" in n || "futsal" in n || "basketball" in n -> FootballIcon
+        "swim" in n -> SwimIcon
+        "yoga" in n || "stretch" in n || "pilates" in n -> YogaIcon
+        "gym" in n || "weight" in n || "lift" in n || "strength" in n -> DumbbellIcon
+        else -> FlameIcon
+    }
+}

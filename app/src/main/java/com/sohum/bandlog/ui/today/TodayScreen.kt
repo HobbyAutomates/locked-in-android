@@ -61,7 +61,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 @Composable
-fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit, onLogExercise: () -> Unit = {}, onOpenCalendar: () -> Unit = {}, onLog: (String) -> Unit = {}, wrapTick: Int = 0) {
+fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit, onLogExercise: () -> Unit = {}, onOpenCalendar: () -> Unit = {}, onLog: (String) -> Unit = {}, wrapTick: Int = 0, onLogWater: () -> Unit = {}) {
     val p = palette
     val today = vm.today
     var selected by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(today) }
@@ -99,6 +99,11 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit, onLogExerci
         owner.lifecycle.addObserver(observer)
         onDispose { owner.lifecycle.removeObserver(observer) }
     }
+
+    // v2.3: today's budget honours "Add burned calories" and "Rollover calories" (both from Preferences).
+    val budget = if (isToday) vm.budgetToday else prof.calorieTarget.toDouble()
+    val caloriesLeft = (budget - totals.calories).toInt().coerceAtLeast(0)
+    if (isToday && vm.loadedOnce) androidx.compose.runtime.LaunchedEffect(caloriesLeft) { com.sohum.bandlog.widget.CaloriesWidget.publish(ctx, caloriesLeft) }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 110.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
@@ -158,13 +163,14 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit, onLogExerci
                 Card(padding = 20.dp) {
                     RowSpaceBetween {
                         Column {
-                            Text("${(prof.calorieTarget + (if (isToday) vm.burnedKcal else 0.0) - totals.calories).toInt().coerceAtLeast(0)}", fontSize = 40.sp, fontWeight = FontWeight(800), letterSpacing = (-1.5).sp, color = p.ink, lineHeight = 40.sp)
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(if (isToday) "Calories left" else "Calories left · ${Dates.short(selected)}", fontSize = 14.sp, fontWeight = FontWeight(500), color = p.muted)
-                                if (isToday && vm.burnedKcal > 0) Box(Modifier.padding(start = 8.dp).background(p.card2, CircleShape).padding(8.dp, 3.dp)) { Text("+${vm.burnedKcal.toInt()}", fontSize = 11.sp, fontWeight = FontWeight(700), color = p.ink) }
+                            Text("$caloriesLeft", fontSize = 40.sp, fontWeight = FontWeight(800), letterSpacing = (-1.5).sp, color = p.ink, lineHeight = 40.sp)
+                            Text(if (isToday) "Calories left" else "Calories left · ${Dates.short(selected)}", fontSize = 14.sp, fontWeight = FontWeight(500), color = p.muted)
+                            if (isToday && (vm.burnedKcal > 0 || vm.rolloverKcal > 0)) Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                if (vm.burnedKcal > 0) Box(Modifier.background(p.card2, CircleShape).padding(8.dp, 3.dp)) { Text("+${vm.burnedKcal.toInt()} burned", fontSize = 11.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1) }
+                                if (vm.rolloverKcal > 0) Box(Modifier.background(p.card2, CircleShape).padding(8.dp, 3.dp)) { Text("+${vm.rolloverKcal.toInt()} rollover", fontSize = 11.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1) }
                             }
                         }
-                        Ring((totals.calories / prof.calorieTarget).toFloat(), p.ink, 96.dp, 9.dp) { Icon(FlameIcon, null, tint = p.ink, modifier = Modifier.size(26.dp)) }
+                        Ring((totals.calories / budget.coerceAtLeast(1.0)).toFloat(), p.ink, 96.dp, 9.dp) { Icon(FlameIcon, null, tint = p.ink, modifier = Modifier.size(26.dp)) }
                     }
                 }
             }
@@ -212,6 +218,8 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit, onLogExerci
                     val err = vm.healthError
                     if (vm.healthConnected && err != null) Text(err, fontSize = 12.sp, color = p.red, modifier = Modifier.padding(top = 6.dp, start = 4.dp))
                     else if (vm.healthConnected && (h?.steps ?: 0L) == 0L) Text("No steps yet — turn on syncing to Health Connect in Samsung Health or Google Fit, then refresh.", fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(top = 6.dp, start = 4.dp))
+                    Spacer(Modifier.height(14.dp))
+                    WaterCard(vm, onLogWater)
                 } }
             }
         }
@@ -496,14 +504,17 @@ fun ExerciseRow(e: com.sohum.bandlog.data.ExerciseEntry, onDelete: () -> Unit) {
     var open by androidx.compose.runtime.remember(e.id) { androidx.compose.runtime.mutableStateOf(false) }
     val isBands = e.activityCode?.startsWith("LI-BAND") == true || e.name.contains("lifting", ignoreCase = true) || e.name.contains("band", ignoreCase = true)
     CompactRow(
-        tile = { SmallTile(if (isBands) DumbbellIcon else com.sohum.bandlog.ui.components.RunIcon, p.green, p.greenBg) },
+        tile = { SmallTile(if (isBands) DumbbellIcon else com.sohum.bandlog.ui.components.activityIcon(e.name, e.activityCode), p.green, p.greenBg) },
         title = e.name.replaceFirstChar { it.uppercase() },
         value = "${e.kcal.toInt()} kcal",
         open = open, onClick = { open = !open },
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                (if (e.source == "manual" && e.activityCode == null) "Entered by hand" else "Intensity: ${com.sohum.bandlog.util.Burn.intensityLabel(e.intensity)}") + " · ${e.minutes} min · ${timeOf(e.createdAt)}",
+                (if (e.source == "manual" && e.activityCode == null && e.intensityPct == null) "Entered by hand"
+                else "Intensity: ${e.intensityPct?.let { com.sohum.bandlog.util.Burn.pctShort(it) } ?: com.sohum.bandlog.util.Burn.intensityLabel(e.intensity)}") +
+                    " · ${e.minutes} min" + (e.distanceKm?.let { " · ${fmt(it)} km" } ?: "") + (e.steps?.let { " · $it steps" } ?: "") +
+                    " · ${timeOf(e.startedAt ?: e.createdAt)}" + (if (e.note.isNotBlank() && e.source != "workout") "\n${e.note}" else ""),
                 fontSize = 12.sp, color = p.muted, modifier = Modifier.weight(1f),
             )
             DeleteButton(onDelete)

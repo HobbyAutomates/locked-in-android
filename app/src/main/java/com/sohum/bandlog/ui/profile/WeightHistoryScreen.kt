@@ -60,10 +60,10 @@ private val monthFmt = DateTimeFormatter.ofPattern("MMM yyyy", Locale.ENGLISH)
 
 /** Big current number, the movement since the first weigh-in, and the full log. */
 @Composable
-fun WeightHistoryScreen(vm: AppViewModel, onBack: () -> Unit) {
+fun WeightHistoryScreen(vm: AppViewModel, onBack: () -> Unit, openLog: Boolean = false) {
     val p = palette
     val rows = vm.weights
-    var showLog by remember { mutableStateOf(false) }
+    var showLog by remember { mutableStateOf(openLog) }
 
     LaunchedEffect(Unit) { vm.loadWeights() }
 

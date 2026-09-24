@@ -24,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -43,6 +44,11 @@ import com.sohum.bandlog.ui.theme.palette
 import com.sohum.bandlog.util.Goals
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+
+// v2.3 goal-ring colours (fixed, both themes).
+private val ProteinColor = Color(0xFFE9636B)
+private val CarbsColor = Color(0xFFE5A15B)
+private val FatColor = Color(0xFF5B8DEF)
 
 /** Protein / carbs / fat as whole percentages of the calorie target, always summing to 100. */
 private data class Split(val protein: Int, val carbs: Int, val fat: Int) {
@@ -104,14 +110,21 @@ fun NutritionGoalsScreen(vm: AppViewModel, onBack: () -> Unit, onOpenPersonal: (
     var busy by remember { mutableStateOf(false) }
     var saved by remember { mutableStateOf(false) }
     var missing by remember { mutableStateOf<List<String>>(emptyList()) }
+    var showMicros by remember { mutableStateOf(false) }
+    var fiber by remember(prof) { mutableStateOf(prof.fiberTarget.toString()) }
+    var sugar by remember(prof) { mutableStateOf(prof.sugarTarget.toString()) }
 
     val cal = calories.toIntOrNull()?.coerceIn(800, 10_000) ?: prof.calorieTarget
     val (pg, cg, fg) = generated?.let { Triple(it.protein, it.carbs, it.fat) } ?: split.grams(cal)
 
     fun edited(): Profile {
         val g = generated
-        return if (g != null) prof.copy(calorieTarget = g.calories, proteinTargetG = g.protein, carbTargetGSet = g.carbs, fatTargetGSet = g.fat)
+        val base = if (g != null) prof.copy(calorieTarget = g.calories, proteinTargetG = g.protein, carbTargetGSet = g.carbs, fatTargetGSet = g.fat)
         else prof.copy(calorieTarget = cal, proteinTargetG = pg.coerceIn(10, 500), carbTargetGSet = cg.coerceIn(0, 1000), fatTargetGSet = fg.coerceIn(0, 500))
+        return base.copy(
+            fiberTarget = fiber.toIntOrNull()?.coerceIn(1, 200) ?: prof.fiberTarget,
+            sugarTarget = sugar.toIntOrNull()?.coerceIn(1, 500) ?: prof.sugarTarget,
+        )
     }
     val dirty = touched && edited() != prof
 
@@ -129,7 +142,7 @@ fun NutritionGoalsScreen(vm: AppViewModel, onBack: () -> Unit, onOpenPersonal: (
         Rise(0) {
             Card(padding = 0.dp) {
                 Row(Modifier.fillMaxWidth().padding(16.dp, 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Ring(1f, p.ink, 28.dp, 4.dp) { Box(Modifier.size(7.dp).background(p.ink, CircleShape)) }
+                    Ring(1f, p.ink, 28.dp, 4.dp) { androidx.compose.material3.Icon(com.sohum.bandlog.ui.components.FlameIcon, null, tint = p.ink, modifier = Modifier.size(13.dp)) }
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text("Calorie goal", fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink)
@@ -152,16 +165,34 @@ fun NutritionGoalsScreen(vm: AppViewModel, onBack: () -> Unit, onOpenPersonal: (
                     }
                     // The split as one bar.
                     Row(Modifier.fillMaxWidth().padding(vertical = 8.dp).height(10.dp).background(p.track, CircleShape)) {
-                        listOf(split.protein to p.red, split.carbs to p.orange, split.fat to p.blue).forEach { (pct, c) ->
+                        listOf(split.protein to ProteinColor, split.carbs to CarbsColor, split.fat to FatColor).forEach { (pct, c) ->
                             if (pct > 0) Box(Modifier.weight(pct.toFloat()).height(10.dp).background(c, CircleShape))
                         }
                     }
                     val edit: (Int, Int) -> Unit = { which, d -> split = split.step(which, d); generated = null; touched = true; saved = false }
-                    MacroRow("Protein", p.red, split.protein, pg) { edit(0, it) }
+                    MacroRow("Protein", ProteinColor, split.protein, pg) { edit(0, it) }
                     Hair()
-                    MacroRow("Carbs", p.orange, split.carbs, cg) { edit(1, it) }
+                    MacroRow("Carbs", CarbsColor, split.carbs, cg) { edit(1, it) }
                     Hair()
-                    MacroRow("Fat", p.blue, split.fat, fg) { edit(2, it) }
+                    MacroRow("Fat", FatColor, split.fat, fg) { edit(2, it) }
+                    Hair()
+                    // v2.3: fibre + sugar goals behind an expander.
+                    Row(
+                        Modifier.fillMaxWidth().clickable { showMicros = !showMicros }.padding(vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("View micronutrients", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink, modifier = Modifier.weight(1f))
+                        androidx.compose.material3.Icon(
+                            com.sohum.bandlog.ui.components.ChevronDownIcon, null, tint = p.muted,
+                            modifier = Modifier.size(16.dp).graphicsLayer { rotationZ = if (showMicros) 180f else 0f },
+                        )
+                    }
+                    if (showMicros) {
+                        MicroRow("Fiber", "at least", fiber) { fiber = it; touched = true; saved = false }
+                        Hair()
+                        MicroRow("Sugar", "at most", sugar) { sugar = it; touched = true; saved = false }
+                        Spacer(Modifier.height(6.dp))
+                    }
                 }
             }
         }
@@ -198,9 +229,9 @@ fun NutritionGoalsScreen(vm: AppViewModel, onBack: () -> Unit, onOpenPersonal: (
                     Column(Modifier.fillMaxWidth().background(p.card2, RoundedCornerShape(16.dp)).padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("New goals — tap Save to keep them", fontSize = 12.sp, fontWeight = FontWeight(700), color = p.muted)
                         BeforeAfter("Calories", p.ink, prof.calorieTarget, g.calories, "kcal")
-                        BeforeAfter("Protein", p.red, prof.proteinTargetG, g.protein, "g")
-                        BeforeAfter("Carbs", p.orange, prof.carbTargetG, g.carbs, "g")
-                        BeforeAfter("Fat", p.blue, prof.fatTargetG, g.fat, "g")
+                        BeforeAfter("Protein", ProteinColor, prof.proteinTargetG, g.protein, "g")
+                        BeforeAfter("Carbs", CarbsColor, prof.carbTargetG, g.carbs, "g")
+                        BeforeAfter("Fat", FatColor, prof.fatTargetG, g.fat, "g")
                     }
                 }
             }
@@ -234,6 +265,21 @@ private fun MacroRow(label: String, color: Color, pct: Int, grams: Int, onStep: 
             Text("$pct%", Modifier.width(52.dp), textAlign = TextAlign.Center, fontSize = 15.sp, fontWeight = FontWeight(800), color = p.ink)
             StepButton("+", enabled = pct < 100) { onStep(5) }
         }
+    }
+}
+
+/** A micronutrient goal: grey ring, name, and a grams field. */
+@Composable
+private fun MicroRow(label: String, hint: String, value: String, onChange: (String) -> Unit) {
+    val p = palette
+    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Ring(1f, p.muted, 28.dp, 4.dp) { Box(Modifier.size(7.dp).background(p.muted, CircleShape)) }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(label, fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink)
+            Text("$hint, per day", fontSize = 12.sp, color = p.muted)
+        }
+        NumberField(value, { onChange(it.filter(Char::isDigit).take(3)) }, "g")
     }
 }
 

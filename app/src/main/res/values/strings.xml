@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Locked In</string>
+    <string name="widget_description">Calories left today, with a Log food button</string>
 </resources>

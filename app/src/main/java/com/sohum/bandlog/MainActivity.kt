@@ -21,6 +21,9 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -111,7 +114,7 @@ class MainActivity : ComponentActivity() {
             BandLogTheme(dark = dark) {
                 val vm: AppViewModel = viewModel()
                 val updateVm: UpdateViewModel = viewModel()
-                LaunchedEffect(Unit) { updateVm.checkOnce(); vm.addBurnedBack = ThemePrefs.burned(this@MainActivity); if (vm.signedIn) { vm.refresh(); vm.refreshHealth(this@MainActivity) } }
+                LaunchedEffect(Unit) { updateVm.checkOnce(); vm.localBurned = ThemePrefs.burned(this@MainActivity); vm.localRollover = ThemePrefs.rollover(this@MainActivity); vm.celebrationsOn = ThemePrefs.celebrations(this@MainActivity); if (vm.signedIn) { vm.refresh(); vm.refreshHealth(this@MainActivity) } }
                 Surface(Modifier.fillMaxSize(), color = palette.bg) {
                     when {
                         !vm.signedIn -> LoginScreen(reason = vm.signOutReason, onSignedIn = { vm.onSignedIn() })
@@ -164,7 +167,10 @@ private data class LogRequest(val workout: Workout?, val date: String, val meal:
 private data class Tab(val label: String, val icon: ImageVector)
 
 /** A full-screen page pushed over the tab shell (Profile detail screens, Badges). */
-private enum class Page { PERSONAL, GOALS, GOAL_WEIGHT, REMINDERS, WEIGHT_HISTORY, BADGES, CALENDAR }
+private enum class Page { PERSONAL, GOALS, GOAL_WEIGHT, REMINDERS, WEIGHT_HISTORY, WEIGHT_LOG, BADGES, CALENDAR }
+
+/** v2.3: the + button's speed-dial entries. */
+private enum class DialItem(val label: String) { MEAL("Meal"), WORKOUT("Workout"), EXERCISE("Exercise"), WATER("Water"), WEIGHT("Weight") }
 
 @Composable
 private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: ThemeMode, openMealTick: Int, openWrapTick: Int, onThemeMode: (ThemeMode) -> Unit) {
@@ -172,6 +178,8 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var log by remember { mutableStateOf<LogRequest?>(null) }
     var page by remember { mutableStateOf<Page?>(null) }
+    var dial by remember { mutableStateOf(false) }
+    var waterSheet by remember { mutableStateOf(false) }
     // v2.0: Squad takes Calendar's slot; since v2.1 Calendar is an icon in Home's header, pushed as a page.
     val tabs = listOf(Tab("Home", Icons.Outlined.Home), Tab("Squad", com.sohum.bandlog.ui.components.PeopleIcon), Tab("Scan", com.sohum.bandlog.ui.components.ScanIcon), Tab("Progress", Icons.Outlined.SignalCellularAlt), Tab("Profile", Icons.Outlined.Person))
 
@@ -193,7 +201,7 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             Box(Modifier.weight(1f)) {
                 when (tab) {
-                    0 -> TodayScreen(vm, onOpenWorkout = { w -> log = LogRequest(w, Dates.today(), false) }, onLogExercise = { log = LogRequest(null, Dates.today(), false, exercise = true) }, onOpenCalendar = { page = Page.CALENDAR }, onLog = { d -> log = LogRequest(null, d, false) }, wrapTick = openWrapTick)
+                    0 -> TodayScreen(vm, onOpenWorkout = { w -> log = LogRequest(w, Dates.today(), false) }, onLogExercise = { log = LogRequest(null, Dates.today(), false, exercise = true) }, onOpenCalendar = { page = Page.CALENDAR }, onLog = { d -> log = LogRequest(null, d, false) }, wrapTick = openWrapTick, onLogWater = { waterSheet = true })
                     1 -> com.sohum.bandlog.ui.squad.SquadScreen(vm, onOpenProfile = { tab = 4 })
                     2 -> com.sohum.bandlog.ui.scan.ScanTab(vm)
                     3 -> ProgressScreen(vm) { page = Page.BADGES }
@@ -209,6 +217,29 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
                 }
             }
         }
+        // v2.3 speed dial: a scrim over the page and five actions stacked above the + button.
+        if (dial) BackHandler { dial = false }
+        androidx.compose.animation.AnimatedVisibility(dial, enter = fadeIn(Motion.effects()), exit = fadeOut(Motion.effectsFast())) {
+            Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.45f)).clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { dial = false })
+        }
+        androidx.compose.animation.AnimatedVisibility(
+            dial, modifier = Modifier.align(Alignment.BottomEnd),
+            enter = fadeIn(Motion.effects()) + slideInVertically(Motion.spatial()) { it / 4 },
+            exit = fadeOut(Motion.effectsFast()) + slideOutVertically(Motion.spatialFast()) { it / 4 },
+        ) {
+            SpeedDial(Modifier.navigationBarsPadding().padding(end = 20.dp, bottom = 104.dp)) { item ->
+                dial = false
+                val today = Dates.today()
+                when (item) {
+                    DialItem.MEAL -> log = LogRequest(null, today, true)
+                    DialItem.WORKOUT -> log = LogRequest(null, today, false)
+                    DialItem.EXERCISE -> log = LogRequest(null, today, false, exercise = true)
+                    DialItem.WATER -> waterSheet = true
+                    DialItem.WEIGHT -> page = Page.WEIGHT_LOG
+                }
+            }
+        }
+
         // Bottom bar + FAB, overlaid so screens scroll under it.
         Column(Modifier.align(Alignment.BottomCenter)) {
             Box(Modifier.fillMaxWidth()) {
@@ -224,7 +255,8 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
                         }
                     }
                 }
-                Fab(Modifier.align(Alignment.TopEnd).offset(x = (-20).dp, y = (-30).dp)) { log = LogRequest(null, Dates.today(), false) }
+                // Tap opens the dial; long-press keeps the old straight-to-Log behaviour.
+                Fab(Modifier.align(Alignment.TopEnd).offset(x = (-20).dp, y = (-30).dp), open = dial, onLongClick = { dial = false; log = LogRequest(null, Dates.today(), false) }) { dial = !dial }
             }
         }
 
@@ -244,6 +276,7 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
                     Page.GOAL_WEIGHT -> GoalWeightScreen(vm, back)
                     Page.REMINDERS -> RemindersScreen(vm, back)
                     Page.WEIGHT_HISTORY -> WeightHistoryScreen(vm, back)
+                    Page.WEIGHT_LOG -> WeightHistoryScreen(vm, back, openLog = true)
                     Page.BADGES -> BadgesScreen(vm, back)
                     Page.CALENDAR -> CalendarPage(vm, back) { w, d -> log = LogRequest(w, d, false) }
                 }
@@ -259,6 +292,8 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
                 LogScreen(vm, req.workout, req.date, req.meal, onClose = { log = null }, startOnExercise = req.exercise)
             }
         }
+
+        if (waterSheet) com.sohum.bandlog.ui.today.LogWaterSheet(vm) { waterSheet = false }
     }
 }
 
@@ -311,13 +346,45 @@ private fun CelebrationModal(c: AppViewModel.Celebration, onDismiss: () -> Unit)
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun Fab(modifier: Modifier, onClick: () -> Unit) {
+private fun Fab(modifier: Modifier, open: Boolean, onLongClick: () -> Unit, onClick: () -> Unit) {
     val p = palette
     val t = rememberInfiniteTransition(label = "fab")
     val glow by t.animateFloat(10f, 16f, infiniteRepeatable(tween(1200), RepeatMode.Reverse), label = "fabGlow")
+    val turn by androidx.compose.animation.core.animateFloatAsState(if (open) 45f else 0f, Motion.spatialFast(), label = "fabTurn")
     Box(
-        modifier.size(60.dp).shadow(glow.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow).background(p.btn, CircleShape).clickable(onClick = onClick),
+        modifier.size(60.dp).shadow(glow.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow).background(p.btn, CircleShape)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         contentAlignment = Alignment.Center,
-    ) { Icon(Icons.Outlined.Add, "Log", tint = p.btnInk, modifier = Modifier.size(28.dp)) }
+    ) { Icon(Icons.Outlined.Add, if (open) "Close" else "Log", tint = p.btnInk, modifier = Modifier.size(28.dp).graphicsLayer { rotationZ = turn }) }
+}
+
+/** The five speed-dial actions: a label pill beside a round icon, right-aligned above the + button. */
+@Composable
+private fun SpeedDial(modifier: Modifier, onPick: (DialItem) -> Unit) {
+    val p = palette
+    Column(modifier, horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        DialItem.entries.forEach { item ->
+            val icon = when (item) {
+                DialItem.MEAL -> com.sohum.bandlog.ui.components.BowlIcon
+                DialItem.WORKOUT -> com.sohum.bandlog.ui.components.BandIcon
+                DialItem.EXERCISE -> com.sohum.bandlog.ui.components.RunIcon
+                DialItem.WATER -> com.sohum.bandlog.ui.components.GlassIcon
+                DialItem.WEIGHT -> com.sohum.bandlog.ui.components.ScaleIcon
+            }
+            Row(
+                Modifier.clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { onPick(item) },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.height(36.dp).background(p.card, CircleShape).padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
+                    Text(item.label, fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1)
+                }
+                Spacer(Modifier.width(10.dp))
+                Box(Modifier.size(48.dp).shadow(8.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow).background(p.card, CircleShape), contentAlignment = Alignment.Center) {
+                    Icon(icon, null, tint = p.ink, modifier = Modifier.size(22.dp))
+                }
+            }
+        }
+    }
 }

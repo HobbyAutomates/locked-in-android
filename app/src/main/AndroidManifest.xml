@@ -82,6 +82,19 @@
             </intent-filter>
         </receiver>
 
+        <!-- v2.3 home-screen widget: calories left + Log food. -->
+        <receiver
+            android:name=".widget.CaloriesWidget"
+            android:exported="false"
+            android:label="Locked In · Calories">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_calories_info" />
+        </receiver>
+
         <activity-alias
             android:name="ViewPermissionUsageActivity"
             android:exported="true"

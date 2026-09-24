@@ -147,6 +147,13 @@ data class Profile(
     val shareStats: Boolean = true,
     /** `<uid>/avatar.jpg?v=<millis>` in the public avatars bucket; null shows initials. */
     val avatarPath: String? = null,
+    // ---- v2.3 (columns may not exist yet on an older database: null / defaults then) ----
+    val fiberTarget: Int = 30,
+    val sugarTarget: Int = 50,
+    /** Null when the column isn't there yet; the app then falls back to its local toggle. */
+    val addBurnedToGoal: Boolean? = null,
+    val rolloverCalories: Boolean? = null,
+    val waterGoalMl: Int = 2500,
 ) {
     /** The lens a report opens on: `goal` follows the weight goal (lose → cutting, gain → bulking, else protein). */
     val initialLens: String
@@ -190,18 +197,54 @@ data class Profile(
             lensDefault = o.str("lens_default") ?: "protein",
             shareStats = if (o.isNull("share_stats")) true else o.optBoolean("share_stats", true),
             avatarPath = o.str("avatar_path"),
+            fiberTarget = if (!o.has("fiber_target") || o.isNull("fiber_target")) 30 else o.optInt("fiber_target", 30).coerceAtLeast(1),
+            sugarTarget = if (!o.has("sugar_target") || o.isNull("sugar_target")) 50 else o.optInt("sugar_target", 50).coerceAtLeast(1),
+            addBurnedToGoal = if (!o.has("add_burned_to_goal")) null else o.optBoolean("add_burned_to_goal", false),
+            rolloverCalories = if (!o.has("rollover_calories")) null else o.optBoolean("rollover_calories", false),
+            waterGoalMl = if (!o.has("water_goal_ml") || o.isNull("water_goal_ml")) 2500 else o.optInt("water_goal_ml", 2500).coerceIn(250, 10_000),
         )
     }
 }
 
 /** One row of `bandlog.weight_log`. */
-data class WeightEntry(val id: String, val date: String, val weightKg: Double, val note: String) {
+data class WeightEntry(val id: String, val date: String, val weightKg: Double, val note: String, val photoPath: String? = null) {
     companion object {
         fun from(o: JSONObject) = WeightEntry(
             id = o.getString("id"),
             date = o.getString("date"),
             weightKg = o.optDouble("weight_kg", 0.0),
             note = if (o.isNull("note")) "" else o.optString("note"),
+            photoPath = if (!o.has("photo_path") || o.isNull("photo_path")) null else o.optString("photo_path").ifBlank { null },
+        )
+    }
+}
+
+/** One row of `bandlog.water_log` (v2.3). */
+data class WaterEntry(val id: String, val date: String, val ml: Int, val createdAt: String) {
+    companion object {
+        fun from(o: JSONObject) = WaterEntry(o.getString("id"), o.optString("date"), o.optInt("ml", 0), o.optString("created_at"))
+    }
+}
+
+/** One row of `bandlog.progress_photos` (v2.3); [path] is inside the private progress-photos bucket. */
+data class ProgressPhoto(val id: String, val date: String, val path: String, val note: String) {
+    companion object {
+        fun from(o: JSONObject) = ProgressPhoto(
+            o.getString("id"), o.optString("date"), o.optString("path"),
+            if (!o.has("note") || o.isNull("note")) "" else o.optString("note"),
+        )
+    }
+}
+
+/** A public squad from `bandlog.public_groups()` (v2.3 Discover). */
+data class PublicSquad(val id: String, val name: String, val tagline: String, val coverUrl: String?, val memberCount: Int) {
+    companion object {
+        fun from(o: JSONObject) = PublicSquad(
+            id = o.getString("id"),
+            name = o.optString("name"),
+            tagline = if (!o.has("tagline") || o.isNull("tagline")) "" else o.optString("tagline"),
+            coverUrl = if (!o.has("cover_url") || o.isNull("cover_url")) null else o.optString("cover_url").ifBlank { null },
+            memberCount = o.optInt("member_count", 0),
         )
     }
 }
@@ -607,8 +650,14 @@ data class ExerciseEntry(
     /** For source=workout this holds the workout id so a delete can find its row. */
     val note: String,
     val createdAt: String,
+    // ---- v2.3 Google-Fit-style extras (null on older rows / databases) ----
+    val startedAt: String? = null,
+    val intensityPct: Int? = null,
+    val distanceKm: Double? = null,
+    val steps: Int? = null,
 ) {
     companion object {
+        private fun JSONObject.has0(k: String) = has(k) && !isNull(k)
         fun from(o: JSONObject) = ExerciseEntry(
             id = o.getString("id"),
             date = o.getString("date"),
@@ -620,6 +669,10 @@ data class ExerciseEntry(
             source = o.optString("source", "manual").ifBlank { "manual" },
             note = if (o.isNull("note")) "" else o.optString("note"),
             createdAt = o.optString("created_at", ""),
+            startedAt = if (o.has0("started_at")) o.optString("started_at") else null,
+            intensityPct = if (o.has0("intensity_pct")) o.optInt("intensity_pct") else null,
+            distanceKm = if (o.has0("distance_km")) o.optDouble("distance_km").takeIf { !it.isNaN() } else null,
+            steps = if (o.has0("steps")) o.optInt("steps") else null,
         )
     }
 }

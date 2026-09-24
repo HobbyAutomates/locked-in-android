@@ -82,7 +82,7 @@ enum class ProfilePage { PERSONAL, GOALS, GOAL_WEIGHT, REMINDERS, WEIGHT_HISTORY
 
 private const val INVITE_TEXT =
     "Locked In — workouts, meals by voice, label scanner. " +
-        "Android: https://evizkfvltacrfngsgbuu.supabase.co/storage/v1/object/public/app/LockedIn-14.apk · " +
+        "Android: https://evizkfvltacrfngsgbuu.supabase.co/storage/v1/object/public/app/LockedIn-15.apk · " +
         "iPhone: https://web-production-ff1cf.up.railway.app (Safari → Add to Home Screen)"
 
 /**
@@ -311,12 +311,17 @@ private fun PreferencesRows(vm: AppViewModel, themeMode: ThemeMode, onThemeMode:
         )
     }
     Hair()
-    SettingRow(FlameIcon, p.ink, "Add burned calories back", subtitle = "Exercise raises today's calorie budget") {
-        androidx.compose.material3.Switch(
-            vm.addBurnedBack,
-            { vm.addBurnedBack = it; com.sohum.bandlog.util.ThemePrefs.setBurned(ctx, it) },
-            colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = p.btn, checkedThumbColor = p.btnInk, uncheckedTrackColor = p.track, uncheckedThumbColor = p.muted, uncheckedBorderColor = p.hair),
-        )
+    val switchColors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = p.btn, checkedThumbColor = p.btnInk, uncheckedTrackColor = p.track, uncheckedThumbColor = p.muted, uncheckedBorderColor = p.hair)
+    SettingRow(FlameIcon, p.ink, "Add burned calories to daily goal", subtitle = "Exercise raises today's calorie budget") {
+        androidx.compose.material3.Switch(vm.addBurnedBack, { vm.setAddBurned(ctx, it) }, colors = switchColors)
+    }
+    Hair()
+    SettingRow(Icons.Outlined.Refresh, p.ink, "Rollover calories", subtitle = "Up to 200 unused from yesterday") {
+        androidx.compose.material3.Switch(vm.rolloverOn, { vm.setRollover(ctx, it) }, colors = switchColors)
+    }
+    Hair()
+    SettingRow(com.sohum.bandlog.ui.components.CheckIcon, p.ink, "Badge celebrations", subtitle = "Streak pop-up after a workout") {
+        androidx.compose.material3.Switch(vm.celebrationsOn, { vm.celebrationsOn = it; com.sohum.bandlog.util.ThemePrefs.setCelebrations(ctx, it) }, colors = switchColors)
     }
     Hair()
     SettingRow(Icons.Outlined.Notifications, p.ink, "Reminders", onClick = onReminders) {

@@ -105,7 +105,74 @@ class AppViewModel : ViewModel() {
     var healthConnected by mutableStateOf(false); private set
     var healthToday by mutableStateOf<com.sohum.bandlog.util.Health.Today?>(null); private set
     var healthError by mutableStateOf<String?>(null); private set
-    var addBurnedBack by mutableStateOf(false)
+    /** Local copies of the two budget toggles, used while the profile columns don't exist yet. */
+    var localBurned by mutableStateOf(false)
+    var localRollover by mutableStateOf(false)
+    var celebrationsOn by mutableStateOf(true)
+
+    /** v2.3: saved on the profile (add_burned_to_goal), local pref as the fallback. */
+    val addBurnedBack: Boolean get() = profile.addBurnedToGoal ?: localBurned
+    /** v2.3: rollover_calories — up to 200 kcal of yesterday's unused budget joins today's. */
+    val rolloverOn: Boolean get() = profile.rolloverCalories ?: localRollover
+
+    fun setAddBurned(context: android.content.Context, on: Boolean) {
+        localBurned = on; com.sohum.bandlog.util.ThemePrefs.setBurned(context, on)
+        profile = profile.copy(addBurnedToGoal = if (profile.addBurnedToGoal != null) on else null)
+        viewModelScope.launch { runCatching { Api.patchProfile(org.json.JSONObject().put("add_burned_to_goal", on)) } }
+    }
+
+    fun setRollover(context: android.content.Context, on: Boolean) {
+        localRollover = on; com.sohum.bandlog.util.ThemePrefs.setRollover(context, on)
+        profile = profile.copy(rolloverCalories = if (profile.rolloverCalories != null) on else null)
+        viewModelScope.launch { runCatching { Api.patchProfile(org.json.JSONObject().put("rollover_calories", on)) } }
+    }
+
+    /** Yesterday's unused calories, capped at 200; 0 when rollover is off or nothing was logged yesterday. */
+    val rolloverKcal: Double
+        get() {
+            if (!rolloverOn) return 0.0
+            val y = Dates.addDays(today, -1)
+            if (meals.none { it.date == y }) return 0.0
+            val eaten = com.sohum.bandlog.data.totalsFor(meals, y).calories
+            return (profile.calorieTarget - eaten).coerceIn(0.0, 200.0)
+        }
+
+    /** Today's calorie budget: target + burned (if on) + rollover (if on). */
+    val budgetToday: Double get() = profile.calorieTarget + burnedKcal + rolloverKcal
+
+    // ---- v2.3: water ----
+    var water by mutableStateOf<List<com.sohum.bandlog.data.WaterEntry>>(emptyList()); private set
+    val waterToday: Int get() = water.filter { it.date == today }.sumOf { it.ml }
+
+    suspend fun logWater(ml: Int, date: String = today): Boolean {
+        if (ml <= 0) return false
+        return try {
+            Api.logWater(date, ml)
+            runCatching { water = Api.water(Dates.addDays(today, -30), today) }
+            notice = "Logged $ml mL water"
+            true
+        } catch (e: AuthException) { onAuthLost(e.message); false }
+        catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { error = e.message ?: "Couldn't log water"; false }
+    }
+
+    // ---- v2.3: progress photos ----
+    var progressPhotos by mutableStateOf<List<com.sohum.bandlog.data.ProgressPhoto>>(emptyList()); private set
+    var progressPhotosError by mutableStateOf<String?>(null)
+    fun loadProgressPhotos() {
+        viewModelScope.launch {
+            runCatching { Api.progressPhotos() }.onSuccess { progressPhotos = it; progressPhotosError = null }
+        }
+    }
+
+    suspend fun uploadProgressPhoto(bmp: android.graphics.Bitmap): Boolean = try {
+        val bytes = withContext(Dispatchers.Default) { com.sohum.bandlog.util.Images.jpeg(com.sohum.bandlog.util.Images.fitWithin(bmp, 1024), 85) }
+        Api.uploadProgressPhoto(bytes, today)
+        runCatching { progressPhotos = Api.progressPhotos() }
+        progressPhotosError = null
+        true
+    } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+    catch (e: Exception) { android.util.Log.w("LockedIn", "Progress photo upload failed", e); progressPhotosError = e.message ?: "Upload failed"; false }
 
     /**
      * Logged exercise kcal for [date]. When Health Connect is connected the band-workout rows are
@@ -260,7 +327,8 @@ class AppViewModel : ViewModel() {
                     val g = async { runCatching { Api.weights() }.getOrDefault(weights) }
                     val x = async { runCatching { Api.exercises(from, t) }.getOrDefault(exercises) }
                     val n = async { runCatching { Api.myNudges() }.getOrDefault(nudges) }
-                    profile = p.await(); workouts = w.await(); meals = m.await(); weights = g.await(); exercises = x.await(); nudges = n.await()
+                    val wa = async { runCatching { Api.water(Dates.addDays(t, -30), t) }.getOrDefault(water) }
+                    profile = p.await(); workouts = w.await(); meals = m.await(); weights = g.await(); exercises = x.await(); nudges = n.await(); water = wa.await()
                 }
                 loadedOnce = true
                 pushRollup()
@@ -311,7 +379,7 @@ class AppViewModel : ViewModel() {
             kotlinx.coroutines.delay(50)
             while (loading) kotlinx.coroutines.delay(50)
             val target = profile.weeklyWorkoutTarget
-            if (thisWeek > before) celebrate = Celebration(weekStreak, thisWeek, target, hitTarget = thisWeek >= target && before < target || weekStreak > beforeStreak)
+            if (thisWeek > before && celebrationsOn) celebrate = Celebration(weekStreak, thisWeek, target, hitTarget = thisWeek >= target && before < target || weekStreak > beforeStreak)
         }
         return ok
     }
@@ -319,8 +387,10 @@ class AppViewModel : ViewModel() {
     suspend fun deleteWorkout(id: String) = mutate { runCatching { Api.deleteWorkoutBurn(id) }; Api.deleteWorkout(id) }
 
     /** A burn logged from the Exercise tab (run, bands, an activity, a description, or a manual number). */
-    suspend fun saveExercise(date: String, activityCode: String?, name: String, minutes: Int, intensity: String, kcal: Double, source: String) =
-        mutate { Api.saveExercise(date, activityCode, name, minutes, intensity, kcal, source) }
+    suspend fun saveExercise(
+        date: String, activityCode: String?, name: String, minutes: Int, intensity: String, kcal: Double, source: String,
+        note: String = "", extras: Api.ExerciseExtras = Api.ExerciseExtras(),
+    ) = mutate { Api.saveExercise(date, activityCode, name, minutes, intensity, kcal, source, note, extras) }
     suspend fun deleteExercise(id: String) = mutate { Api.deleteExercise(id) }
     /** Every activity Haiku found in a description, saved as its own row. */
     suspend fun saveDescribed(date: String, items: List<com.sohum.bandlog.data.DescribedExercise>) = mutate {
@@ -396,7 +466,7 @@ class AppViewModel : ViewModel() {
     fun signOut() {
         viewModelScope.launch {
             SupabaseAuth.signOut()
-            signedIn = false; workouts = emptyList(); meals = emptyList(); weights = emptyList(); exercises = emptyList()
+            signedIn = false; workouts = emptyList(); meals = emptyList(); weights = emptyList(); exercises = emptyList(); water = emptyList(); progressPhotos = emptyList()
             profile = Profile(); loadedOnce = false; totalMeals = 0; allWorkoutDates = emptyList()
             onboardingSkipped = false; nudges = emptyList(); rolledYesterday = false
         }

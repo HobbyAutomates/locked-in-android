@@ -104,7 +104,7 @@ fun Chip(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifi
     Box(
         modifier.height(44.dp).pressable().background(bg, CircleShape).clickable(onClick = onClick).padding(horizontal = 14.dp),
         contentAlignment = Alignment.Center,
-    ) { Text(label, color = fg, fontSize = 13.sp, fontWeight = if (selected) FontWeight(600) else FontWeight(500)) }
+    ) { Text(label, color = fg, fontSize = 13.sp, fontWeight = if (selected) FontWeight(600) else FontWeight(500), maxLines = 1, softWrap = false) }
 }
 
 /** iOS-style segmented control on a grey track. Never more than three options; four or more are chips. */
