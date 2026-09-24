@@ -1,5 +1,9 @@
 package com.sohum.bandlog.ui.progress
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -21,11 +25,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
@@ -44,7 +46,6 @@ import com.sohum.bandlog.ui.components.Motion
 import com.sohum.bandlog.ui.components.Rise
 import com.sohum.bandlog.ui.components.RowSpaceBetween
 import com.sohum.bandlog.ui.components.ScreenTitle
-import com.sohum.bandlog.ui.components.Segmented
 import com.sohum.bandlog.ui.theme.palette
 import com.sohum.bandlog.util.Dates
 import com.sohum.bandlog.util.Muscles
@@ -123,7 +124,14 @@ fun ProgressScreen(vm: AppViewModel, onOpenBadges: () -> Unit) {
             }
         }
         item(key = "badges") { Rise(2) { BadgesCard(vm, onOpenBadges) } }
-        item(key = "period") { Rise(2) { Segmented(listOf("This week", "Last week", "2 wks ago", "Month"), period, { period = it }, height = 34.dp) } }
+        item(key = "period") {
+            // Four periods → chips (a segmented control never carries more than three).
+            Rise(2) {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("This week", "Last week", "2 wks ago", "Month").forEachIndexed { i, label -> com.sohum.bandlog.ui.components.Chip(label, period == i, { period = i }) }
+                }
+            }
+        }
         item(key = "energy") { Rise(3) { WeeklyEnergyCard(vm, days, energyLabels, monthMode, ctx) } }
         item(key = "protein") {
             Rise(3) {

@@ -262,39 +262,11 @@ val RunIcon: ImageVector by lazy {
     }
 }
 
-/** Three text lines for the Describe option. */
-val TextLinesIcon: ImageVector by lazy {
-    stroke("TextLines") {
-        moveTo(4f, 7f); horizontalLineTo(20f)
-        moveTo(4f, 12f); horizontalLineTo(16f)
-        moveTo(4f, 17f); horizontalLineTo(12f)
-    }
-}
-
-/** Number keypad for the Manual option. */
-val KeypadIcon: ImageVector by lazy {
-    stroke("Keypad") {
-        moveTo(6f, 5f); horizontalLineTo(6.1f); moveTo(12f, 5f); horizontalLineTo(12.1f); moveTo(18f, 5f); horizontalLineTo(18.1f)
-        moveTo(6f, 11f); horizontalLineTo(6.1f); moveTo(12f, 11f); horizontalLineTo(12.1f); moveTo(18f, 11f); horizontalLineTo(18.1f)
-        moveTo(6f, 17f); horizontalLineTo(6.1f); moveTo(12f, 17f); horizontalLineTo(12.1f); moveTo(18f, 17f); horizontalLineTo(18.1f)
-    }
-}
-
 /** Magnifier for the food Search tab. */
 val SearchIcon: ImageVector by lazy {
     stroke("Search") {
         moveTo(17.5f, 11f); arcTo(6.5f, 6.5f, 0f, true, true, 4.5f, 11f); arcTo(6.5f, 6.5f, 0f, true, true, 17.5f, 11f)
         moveTo(16f, 16f); lineTo(21f, 21f)
-    }
-}
-
-/** Four tiles for the Presets tab. */
-val GridIcon: ImageVector by lazy {
-    stroke("Grid") {
-        moveTo(4f, 4f); horizontalLineTo(10f); verticalLineTo(10f); horizontalLineTo(4f); close()
-        moveTo(14f, 4f); horizontalLineTo(20f); verticalLineTo(10f); horizontalLineTo(14f); close()
-        moveTo(4f, 14f); horizontalLineTo(10f); verticalLineTo(20f); horizontalLineTo(4f); close()
-        moveTo(14f, 14f); horizontalLineTo(20f); verticalLineTo(20f); horizontalLineTo(14f); close()
     }
 }
 

@@ -1,5 +1,10 @@
 package com.sohum.bandlog.ui.squad
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import com.sohum.bandlog.ui.components.CrossIcon
+import androidx.compose.ui.draw.shadow
+import androidx.compose.foundation.layout.heightIn
 import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -29,11 +34,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
@@ -79,7 +82,7 @@ import kotlinx.coroutines.launch
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private const val APK_URL = "https://evizkfvltacrfngsgbuu.supabase.co/storage/v1/object/public/app/LockedIn-12.apk"
+private const val APK_URL = "https://evizkfvltacrfngsgbuu.supabase.co/storage/v1/object/public/app/LockedIn-13.apk"
 private const val WEB_URL = "https://web-production-ff1cf.up.railway.app"
 
 fun squadInviteText(code: String) = "Join my Locked In squad: code $code — Android $APK_URL · iPhone $WEB_URL"
@@ -187,7 +190,14 @@ fun SquadScreen(vm: AppViewModel, onOpenProfile: () -> Unit) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 ScreenTitle("Squad")
                 if (sq.loading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = p.muted)
-                else if (sq.squads.isNotEmpty()) SmallChip(if (adding) "Close" else "+ Add squad", { adding = !adding }, filled = adding)
+                else if (sq.squads.isNotEmpty()) Box(
+                    Modifier.size(44.dp).pressable().shadow(8.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow)
+                        .background(if (adding) p.card else p.btn, CircleShape).clickable { adding = !adding },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (adding) Icon(CrossIcon, "Close", tint = p.ink, modifier = Modifier.size(14.dp))
+                    else Text("+", fontSize = 24.sp, fontWeight = FontWeight(600), color = p.btnInk, modifier = Modifier.padding(bottom = 2.dp))
+                }
             }
         }
         ErrorNote(sq.error)
@@ -287,31 +297,35 @@ private fun CreatedCard(name: String, code: String, onDone: () -> Unit) {
     val ctx = LocalContext.current
     Card(padding = 20.dp) {
         Text("$name is live", fontSize = 13.sp, fontWeight = FontWeight(700), color = p.muted)
-        Text("Send your friends this code:", fontSize = 15.sp, color = p.ink, modifier = Modifier.padding(top = 2.dp))
-        CodeBlock(code, big = true)
+        Text("Send your friends this code", fontSize = 15.sp, color = p.ink, modifier = Modifier.padding(top = 2.dp, bottom = 10.dp))
+        CodePill(code, big = true) { shareInvite(ctx, code) }
         Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PillButton("Invite", { shareInvite(ctx, code) }, Modifier.weight(1f), height = 46.dp)
-            PillButton("See the board", onDone, Modifier.weight(1f), height = 46.dp, bg = p.card2, fg = p.ink)
-        }
+        PillButton("See the board", onDone, height = 48.dp, bg = p.card2, fg = p.ink)
     }
 }
 
+/** The squad code as one big pill: tap it to copy; the round button beside it shares an invite. */
 @Composable
-private fun CodeBlock(code: String, big: Boolean = false) {
+private fun CodePill(code: String, big: Boolean = false, onShare: () -> Unit) {
     val p = palette
     val clip = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     var copied by remember { mutableStateOf(false) }
-    Row(
-        Modifier.padding(top = 8.dp).fillMaxWidth().background(p.card2, RoundedCornerShape(16.dp)).pressable()
-            .clickable { clip.setText(AnnotatedString(code)); copied = true; scope.launch { delay(1500); copied = false } }
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(code, fontSize = if (big) 34.sp else 22.sp, fontWeight = FontWeight(800), letterSpacing = if (big) 6.sp else 4.sp, color = p.ink, modifier = Modifier.weight(1f))
-        Icon(if (copied) CheckIcon else CopyIcon, null, tint = p.muted, modifier = Modifier.size(16.dp))
-        Text(if (copied) " Copied" else " Copy", fontSize = 12.sp, fontWeight = FontWeight(600), color = p.muted)
+    val h = if (big) 64.dp else 56.dp
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            Modifier.weight(1f).height(h).pressable().background(p.card2, CircleShape)
+                .clickable { clip.setText(AnnotatedString(code)); copied = true; scope.launch { delay(1500); copied = false } }
+                .padding(start = 22.dp, end = 18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(code, fontSize = if (big) 30.sp else 24.sp, fontWeight = FontWeight(800), letterSpacing = if (big) 6.sp else 5.sp, color = p.ink, modifier = Modifier.weight(1f), maxLines = 1)
+            Icon(if (copied) CheckIcon else CopyIcon, null, tint = if (copied) p.green else p.muted, modifier = Modifier.size(16.dp))
+            Text(if (copied) " Copied" else " Copy", fontSize = 12.sp, fontWeight = FontWeight(700), color = if (copied) p.green else p.muted)
+        }
+        Box(Modifier.size(h).pressable().background(p.btn, CircleShape).clickable(onClick = onShare), contentAlignment = Alignment.Center) {
+            Icon(ShareIcon, "Invite friends", tint = p.btnInk, modifier = Modifier.size(20.dp))
+        }
     }
 }
 
@@ -345,16 +359,8 @@ private fun Board(sq: SquadViewModel, squad: Squad, me: String, shareStats: Bool
                     }
                 }
             }
-            Text("${sq.board.size} member${if (sq.board.size == 1) "" else "s"} · tap the code to copy it", fontSize = 12.sp, color = p.muted)
-            CodeBlock(squad.code)
-            Spacer(Modifier.height(10.dp))
-            Row(
-                Modifier.fillMaxWidth().height(42.dp).pressable().background(p.card2, CircleShape).clickable { shareInvite(ctx, squad.code) },
-                horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(ShareIcon, null, tint = p.ink, modifier = Modifier.size(16.dp))
-                Text("  Invite friends", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink)
-            }
+            Text("${sq.board.size} member${if (sq.board.size == 1) "" else "s"} · tap the code to copy it", fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(bottom = 10.dp))
+            CodePill(squad.code) { shareInvite(ctx, squad.code) }
         }
     }
 
@@ -380,6 +386,19 @@ private fun Board(sq: SquadViewModel, squad: Squad, me: String, shareStats: Bool
                     }
                     Flame(p.flame, 18.dp)
                     Text(" ${m.weekStreak}", fontSize = 15.sp, fontWeight = FontWeight(800), color = p.ink)
+                    if (!isMe && !trainedToday) {
+                        Spacer(Modifier.width(6.dp))
+                        // One tap, no confirm: the nudge goes out and the pill greys.
+                        Box(Modifier.heightIn(min = 44.dp).pressable().clickable(enabled = !already) { sq.nudge(m) }, contentAlignment = Alignment.Center) {
+                            Row(
+                                Modifier.height(32.dp).background(if (already) p.card2 else p.btn, CircleShape).padding(horizontal = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(FistIcon, null, tint = if (already) p.muted else p.btnInk, modifier = Modifier.size(13.dp))
+                                Text(if (already) " Nudged" else " Nudge", fontSize = 12.sp, fontWeight = FontWeight(700), color = if (already) p.muted else p.btnInk)
+                            }
+                        }
+                    }
                 }
                 Spacer(Modifier.height(12.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -402,17 +421,6 @@ private fun Board(sq: SquadViewModel, squad: Squad, me: String, shareStats: Bool
                         if (m.shareStats) "${(todayRow?.proteinG ?: 0.0).toInt()} g · ${String.format(Locale.US, "%,d", (todayRow?.calories ?: 0.0).toInt())} kcal" else "streaks only",
                         fontSize = 13.sp, fontWeight = FontWeight(600), color = if (m.shareStats) p.ink else p.muted,
                     )
-                }
-                if (!isMe && !trainedToday) {
-                    Spacer(Modifier.height(12.dp))
-                    val first = m.name.substringBefore(' ')
-                    Row(
-                        Modifier.fillMaxWidth().height(38.dp).pressable().background(if (already) p.card2 else p.btn, CircleShape).clickable(enabled = !already) { sq.nudge(m) },
-                        horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(FistIcon, null, tint = if (already) p.muted else p.btnInk, modifier = Modifier.size(16.dp))
-                        Text(if (already) "  Nudged $first" else "  Nudge $first", fontSize = 13.sp, fontWeight = FontWeight(700), color = if (already) p.muted else p.btnInk)
-                    }
                 }
             }
         }

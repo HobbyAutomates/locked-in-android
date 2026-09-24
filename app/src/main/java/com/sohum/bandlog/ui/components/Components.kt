@@ -1,5 +1,7 @@
 package com.sohum.bandlog.ui.components
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -33,10 +35,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -102,14 +102,15 @@ fun Chip(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifi
     val bg = when { selected && color != null -> colorBg ?: color.copy(alpha = 0.16f); selected -> p.btn; else -> p.card2 }
     val fg = when { selected && color != null -> color; selected -> p.btnInk; else -> p.ink }
     Box(
-        modifier.height(38.dp).pressable().background(bg, CircleShape).clickable(onClick = onClick).padding(horizontal = 14.dp),
+        modifier.height(44.dp).pressable().background(bg, CircleShape).clickable(onClick = onClick).padding(horizontal = 14.dp),
         contentAlignment = Alignment.Center,
     ) { Text(label, color = fg, fontSize = 13.sp, fontWeight = if (selected) FontWeight(600) else FontWeight(500)) }
 }
 
-/** iOS-style segmented control on a grey track. */
+/** iOS-style segmented control on a grey track. Never more than three options; four or more are chips. */
 @Composable
-fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier, height: Dp = 38.dp) {
+fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier, height: Dp = 44.dp) {
+    require(options.size <= 3) { "Segmented takes at most 3 options — use chips for more" }
     val p = palette
     Row(modifier.fillMaxWidth().background(p.card2, CircleShape).padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         options.forEachIndexed { i, o ->

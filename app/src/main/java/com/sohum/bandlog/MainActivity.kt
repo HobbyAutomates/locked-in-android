@@ -1,5 +1,7 @@
 package com.sohum.bandlog
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -37,7 +39,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ArrowBack
-import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.SignalCellularAlt
@@ -47,16 +48,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -174,7 +172,7 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var log by remember { mutableStateOf<LogRequest?>(null) }
     var page by remember { mutableStateOf<Page?>(null) }
-    // v2.0: Squad takes Calendar's slot; Calendar is a card link on Home and opens as a pushed page.
+    // v2.0: Squad takes Calendar's slot; since v2.1 Calendar is an icon in Home's header, pushed as a page.
     val tabs = listOf(Tab("Home", Icons.Outlined.Home), Tab("Squad", com.sohum.bandlog.ui.components.PeopleIcon), Tab("Scan", com.sohum.bandlog.ui.components.ScanIcon), Tab("Progress", Icons.Outlined.SignalCellularAlt), Tab("Profile", Icons.Outlined.Person))
 
     // A tapped meal reminder lands straight on the Meal form.
@@ -190,7 +188,7 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             Box(Modifier.weight(1f)) {
                 when (tab) {
-                    0 -> TodayScreen(vm, onOpenWorkout = { w -> log = LogRequest(w, Dates.today(), false) }, onLogExercise = { log = LogRequest(null, Dates.today(), false, exercise = true) }, onOpenCalendar = { page = Page.CALENDAR }, wrapTick = openWrapTick)
+                    0 -> TodayScreen(vm, onOpenWorkout = { w -> log = LogRequest(w, Dates.today(), false) }, onLogExercise = { log = LogRequest(null, Dates.today(), false, exercise = true) }, onOpenCalendar = { page = Page.CALENDAR }, onLog = { d -> log = LogRequest(null, d, false) }, wrapTick = openWrapTick)
                     1 -> com.sohum.bandlog.ui.squad.SquadScreen(vm, onOpenProfile = { tab = 4 })
                     2 -> com.sohum.bandlog.ui.scan.ScanTab(vm)
                     3 -> ProgressScreen(vm) { page = Page.BADGES }
@@ -259,7 +257,7 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
     }
 }
 
-/** The Calendar, pushed from Home's "Calendar →" card with a back pill over it. */
+/** The Calendar, pushed from the calendar icon in Home's header, with a back pill over it. */
 @Composable
 private fun CalendarPage(vm: AppViewModel, onBack: () -> Unit, onOpen: (Workout?, String) -> Unit) {
     val p = palette

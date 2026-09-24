@@ -1,5 +1,7 @@
 package com.sohum.bandlog.ui.log
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import android.graphics.Bitmap
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -9,8 +11,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -23,6 +25,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -35,492 +38,197 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sohum.bandlog.data.Api
 import com.sohum.bandlog.data.FoodHit
 import com.sohum.bandlog.data.FoodPreset
 import com.sohum.bandlog.data.MealItem
-import com.sohum.bandlog.data.ParseResult
-import com.sohum.bandlog.data.PlateEstimate
+import com.sohum.bandlog.data.SavedMeal
 import com.sohum.bandlog.ui.AppViewModel
+import com.sohum.bandlog.ui.components.BottomSheet
 import com.sohum.bandlog.ui.components.CameraIcon
 import com.sohum.bandlog.ui.components.Card
+import com.sohum.bandlog.ui.components.Chip
+import com.sohum.bandlog.ui.components.CrossIcon
 import com.sohum.bandlog.ui.components.DropIcon
 import com.sohum.bandlog.ui.components.ErrorNote
-import com.sohum.bandlog.ui.components.GridIcon
 import com.sohum.bandlog.ui.components.Hair
 import com.sohum.bandlog.ui.components.MacroDot
 import com.sohum.bandlog.ui.components.MicIcon
 import com.sohum.bandlog.ui.components.PillButton
 import com.sohum.bandlog.ui.components.QuantitySheet
-import com.sohum.bandlog.ui.components.Rise
 import com.sohum.bandlog.ui.components.SearchIcon
-import com.sohum.bandlog.ui.components.SmallChip
 import com.sohum.bandlog.ui.components.pressable
-import com.sohum.bandlog.ui.scan.PhotoReview
 import com.sohum.bandlog.ui.scan.decodeScaled
-import com.sohum.bandlog.ui.scan.toJpegBase64
-import com.sohum.bandlog.ui.scan.toJpegBytes
 import com.sohum.bandlog.ui.theme.palette
 import com.sohum.bandlog.ui.today.fmt
+import com.sohum.bandlog.util.DictationState
 import com.sohum.bandlog.util.QUnit
 import com.sohum.bandlog.util.Quantity
 import com.sohum.bandlog.util.QuantityFood
+import com.sohum.bandlog.util.Restaurant
 import com.sohum.bandlog.util.rememberDictation
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.math.roundToInt
 
 private val CATEGORIES = listOf(
     "breakfast" to "Breakfast", "staple" to "Staples", "dal" to "Dal", "sabzi" to "Sabzi", "protein" to "Protein",
     "snack" to "Snacks", "drink" to "Drinks", "sweet" to "Sweets", "fruit" to "Fruit",
 )
+private const val YOURS = "yours"
+private const val RESTAURANT = "restaurant"
 private val SOURCE_LABEL = mapOf("dish" to "INDB", "ifct" to "IFCT", "usda" to "USDA", "custom" to "Curated", "off" to "OFF")
 
-/** What the Quantity sheet is open for: a food to add, or a review row to change. */
-private data class SheetReq(val food: QuantityFood, val initial: Quantity? = null, val replace: Int? = null, val restaurant: Boolean = false)
+private val UNIT_WORD = Regex(
+    "\\d+(\\.\\d+)?\\s*(g|gm|gms|gram|grams|ml|kg|katori|katoris|roti|rotis|chapati|chapatis|cup|cups|bowl|bowls|tbsp|tsp|scoop|scoops|piece|pieces|pc|pcs|slice|slices|glass|glasses|plate|plates|egg|eggs)\\b",
+    RegexOption.IGNORE_CASE,
+)
+
+/** Whether the bar holds a description ("2 roti, dal") rather than a food name to look up. */
+internal fun looksLikeSentence(s: String): Boolean {
+    val t = s.trim()
+    if (t.isEmpty()) return false
+    return t.split(Regex("\\s+")).size >= 3 || ',' in t || UNIT_WORD.containsMatchIn(t) || t.any { it in 'ऀ'..'ॿ' }
+}
+
+/** A plate row whose amount is being changed through the Quantity sheet. */
+private data class SheetReq(val food: QuantityFood, val initial: Quantity, val replace: Int)
+
+/** A parse or plate photo still working; its items land on the plate when it finishes. */
+private class Pending(val label: String, val job: Deferred<AppViewModel.MealBatch>)
 
 /**
- * The Meal form: Dictate · Search · Presets · Photo build one review list, every quantity goes
- * through the shared Quantity sheet, and "Cooked in…" adds the fat as its own row.
+ * v2.1 Add food: one screen. A search bar (type to search the food table, the mic to say it, the
+ * camera beside it for a plate photo), the preset grid below it while the bar is empty ("Yours"
+ * first: saved meals + your most-used foods), and the plate as a sticky panel at the bottom.
+ * Tapping a preset or a result adds it at its default serving; the amount on a plate row opens
+ * the Quantity sheet. A sentence in the bar gets one "Work it out" button (parse-meal).
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MealForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
     val p = palette
     val scope = rememberCoroutineScope()
     val focus = LocalFocusManager.current
-    var tab by rememberSaveable { mutableIntStateOf(0) }
+    val ctx = LocalContext.current
     var text by rememberSaveable { mutableStateOf("") }
-    var parsing by remember { mutableStateOf(false) }
-    var result by remember { mutableStateOf<ParseResult?>(null) }
     var items by remember { mutableStateOf<List<MealItem>>(emptyList()) }
+    val rawParts = remember { mutableStateListOf<String>() }
+    var notes by remember { mutableStateOf<List<String>>(emptyList()) }
+    var pending by remember { mutableStateOf<List<Pending>>(emptyList()) }
+    var photoPath by remember { mutableStateOf<String?>(null) }
+    var parsedText by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
-    var fixText by remember { mutableStateOf("") }
-    var fixing by remember { mutableStateOf(false) }
-    var savedName by remember { mutableStateOf("") }
-    var showSaveAs by remember { mutableStateOf(false) }
+    var toast by remember { mutableStateOf<String?>(null) }
+    var toastTick by remember { mutableIntStateOf(0) }
+    var cat by rememberSaveable { mutableStateOf<String?>(null) }
     var sheet by remember { mutableStateOf<SheetReq?>(null) }
-    val added = remember { mutableListOf<String>() }
+    var cookedFor by remember { mutableStateOf<Int?>(null) }
+    var fixOpen by remember { mutableStateOf(false) }
+    var repeatOpen by remember { mutableStateOf(false) }
+    var photoOpen by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { vm.loadSavedMeals(); vm.loadPresets() }
+    LaunchedEffect(toastTick) { if (toast != null) { delay(1800); toast = null } }
 
-    val showReview = result != null || items.isNotEmpty()
+    val use = remember(vm.meals) { vm.foodUse() }
     val fats = remember(vm.presets) { vm.presets.filter { it.category == "fat" } }
 
-    fun add(item: MealItem, label: String = item.name) { items = items + item; added += label; error = null }
+    fun say(msg: String) { toast = msg; toastTick++ }
 
-    /** "Cooked in…": the fat becomes its own row right after the dish, and the dish remembers it. */
-    fun cookedIn(dishIdx: Int, fat: FoodPreset) {
-        val tsp = fat.servings.firstOrNull { it.label.contains("1 tsp", ignoreCase = true) } ?: fat.servings.firstOrNull()
-        val food = QuantityFood.from(fat, tsp?.label)
-        val fatItem = food.item(if (tsp != null) Quantity(QUnit.SERVING, 1.0) else Quantity(QUnit.G, 5.0))
-        items = items.toMutableList().also { l -> l[dishIdx] = l[dishIdx].copy(cookedIn = fat.id); l.add(dishIdx + 1, fatItem) }
-        added += "${fat.label} (cooked in)"
+    fun add(item: MealItem, raw: String, amount: String) {
+        items = items + item; rawParts += raw; error = null
+        say("Added · $amount · ${item.calories.roundToInt()} kcal")
     }
 
-    Column(Modifier.fillMaxSize()) {
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp, 6.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            // ---- Dictate · Search · Presets · Photo ----
-            Rise(0) {
-                Row(Modifier.fillMaxWidth().background(p.card2, CircleShape).padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf(MicIcon to "Dictate", SearchIcon to "Search", GridIcon to "Presets", CameraIcon to "Photo").forEachIndexed { i, (icon, label) ->
-                        val sel = tab == i
-                        Row(
-                            Modifier.weight(1f).height(32.dp).background(if (sel) p.card else androidx.compose.ui.graphics.Color.Transparent, CircleShape).clickable { tab = i; focus.clearFocus() },
-                            horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(icon, null, tint = if (sel) p.ink else p.muted, modifier = Modifier.size(13.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text(label, fontSize = 12.sp, fontWeight = FontWeight(600), color = if (sel) p.ink else p.muted, maxLines = 1)
-                        }
-                    }
-                }
-            }
+    /** One tap = on the plate at the default serving (100 g when there is none). */
+    fun addFood(food: QuantityFood, raw: String, restaurant: Boolean = false) {
+        val base = if (food.servingGrams != null) food.item(Quantity(QUnit.SERVING, 1.0)) else food.item(Quantity(QUnit.G, 100.0))
+        val item = if (restaurant) Restaurant.apply(base, Restaurant.oily(food.name, food.category)) else base
+        add(item, raw, (food.serving?.label ?: "100 g") + if (restaurant) " (restaurant)" else "")
+    }
 
-            if (vm.savedMeals.isNotEmpty() && !showReview && tab == 0) Rise(0) {
-                Column {
-                    Text("Saved meals · one tap", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted, modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
-                    vm.savedMeals.chunked(2).forEach { row ->
-                        Row(Modifier.padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            row.forEach { sm ->
-                                Card(Modifier.weight(1f), padding = 12.dp, onClick = { text = sm.name; items = sm.items; result = ParseResult(sm.items, emptyList(), emptyList()) }) {
-                                    Text(sm.name, fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1)
-                                    Text("${sm.calories.toInt()} kcal · ${fmt(sm.proteinG)} g P", fontSize = 12.sp, color = p.muted)
-                                }
-                            }
-                            if (row.size == 1) Spacer(Modifier.weight(1f))
-                        }
-                    }
-                }
-            }
+    fun addSaved(sm: SavedMeal) {
+        items = items + sm.items; rawParts += sm.name; error = null
+        say("Added · ${sm.name} · ${sm.calories.roundToInt()} kcal")
+    }
 
-            when (tab) {
-                0 -> DictateCard(
-                    text = text, onText = { text = it }, parsing = parsing,
-                    showQuick = result == null && items.isEmpty(),
-                    onRun = {
-                        scope.launch {
-                            parsing = true; error = null
-                            try {
-                                val r = Api.parseMeal(text)
-                                result = r
-                                items = items + r.items
-                            } catch (e: Exception) { error = e.message } finally { parsing = false }
-                        }
-                    },
-                    onQuick = { vm.quickLogMeal(text.trim(), date); onClose() },
-                )
-                1 -> SearchCard { hit -> sheet = SheetReq(QuantityFood.from(hit)) }
-                2 -> PresetsCard(vm.presets, vm.presetsLoading, onRestaurant = { preset -> sheet = SheetReq(QuantityFood.from(preset), restaurant = true) }) { preset, serving ->
-                    if (serving == null) sheet = SheetReq(QuantityFood.from(preset))
-                    else add(QuantityFood.from(preset, serving).item(Quantity(QUnit.SERVING, 1.0)), preset.label)
+    /** Watch a background job; when it lands its items join the plate. */
+    fun track(label: String, job: Deferred<AppViewModel.MealBatch>, onDone: (AppViewModel.MealBatch) -> Unit = {}) {
+        val pd = Pending(label, job)
+        pending = pending + pd
+        scope.launch {
+            val r = runCatching { job.await() }
+            pending = pending - pd
+            r.onSuccess { b ->
+                if (b.items.isEmpty()) error = "Couldn't find any food in “${label.take(40)}” — try naming it differently."
+                else {
+                    items = items + b.items; notes = notes + b.notes
+                    b.photoPath?.let { photoPath = it }
+                    say("Added ${b.items.size} item${if (b.items.size == 1) "" else "s"} · ${b.items.sumOf { it.calories }.roundToInt()} kcal")
                 }
-                else -> PhotoCard(vm, date, onClose)
-            }
-
-            ErrorNote(error)
-
-            if (showReview) {
-                Rise(1) { Text("Review · tap a quantity to change it", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted, modifier = Modifier.padding(horizontal = 4.dp)) }
-                Rise(2) {
-                    Card(padding = 0.dp) {
-                        Column(Modifier.padding(horizontal = 16.dp)) {
-                            if (items.isEmpty()) Text("No items left. Add some from Dictate, Search or Presets.", fontSize = 13.sp, color = p.muted, modifier = Modifier.padding(vertical = 14.dp))
-                            items.forEachIndexed { idx, it ->
-                                if (idx > 0) Hair()
-                                val isFat = fats.any { f -> f.id == it.cookedIn || f.foodId == it.foodId || f.label == it.name }
-                                ReviewRow(
-                                    item = it,
-                                    fats = fats,
-                                    showCookedIn = it.cookedIn == null && it.source != "scan" && !isFat && QuantityFood.wantsCookedIn(it.name),
-                                    onCookedIn = { fat -> cookedIn(idx, fat) },
-                                    onOpen = {
-                                        val byServing = it.unit == "serving" && it.servings != null && it.servings > 0
-                                        sheet = SheetReq(QuantityFood.from(it), if (byServing) Quantity(QUnit.SERVING, it.servings!!) else Quantity(QUnit.G, it.grams.toInt().toDouble()), replace = idx)
-                                    },
-                                    onRemove = { items = items.filterIndexed { i, _ -> i != idx } },
-                                )
-                            }
-                        }
-                    }
-                }
-                val r = result
-                if (r != null && (r.assumptions.isNotEmpty() || r.unparsed.isNotEmpty())) Rise(3) {
-                    Text((r.assumptions + r.unparsed.map { "Ignored: $it" }).joinToString(" · "), fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(horizontal = 4.dp))
-                }
-                if (r != null) Rise(4) {
-                    Card(padding = 12.dp) {
-                        Text("Something wrong? Tell me and I'll redo it", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted)
-                        Spacer(Modifier.height(6.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.weight(1f).background(p.card2, RoundedCornerShape(12.dp)).padding(10.dp)) {
-                                BasicTextField(
-                                    fixText, { fixText = it }, Modifier.fillMaxWidth(), singleLine = true,
-                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
-                                    textStyle = TextStyle(fontSize = 14.sp, color = p.ink), cursorBrush = SolidColor(p.ink),
-                                    decorationBox = { inner -> if (fixText.isEmpty()) Text("e.g. it was two scoops, and the rice was raw", fontSize = 14.sp, color = p.muted); inner() },
-                                )
-                            }
-                            Spacer(Modifier.width(8.dp))
-                            PillButton(if (fixing) "…" else "Fix", enabled = fixText.isNotBlank() && !fixing, modifier = Modifier.width(64.dp), height = 40.dp, onClick = {
-                                scope.launch {
-                                    fixing = true; error = null
-                                    try { val fixed = Api.parseMeal(text, fixText, items); result = fixed; items = fixed.items; fixText = "" } catch (e: Exception) { error = e.message } finally { fixing = false }
-                                }
-                            })
-                        }
-                    }
-                }
-                Rise(5) {
-                    if (showSaveAs) Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.weight(1f).background(p.card2, RoundedCornerShape(12.dp)).padding(10.dp)) {
-                            BasicTextField(
-                                savedName, { savedName = it }, Modifier.fillMaxWidth(), singleLine = true,
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
-                                textStyle = TextStyle(fontSize = 14.sp, color = p.ink), cursorBrush = SolidColor(p.ink),
-                                decorationBox = { inner -> if (savedName.isEmpty()) Text("Name it, e.g. Dinner usual", fontSize = 14.sp, color = p.muted); inner() },
-                            )
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        PillButton("Save", enabled = savedName.isNotBlank(), modifier = Modifier.width(72.dp), height = 40.dp, onClick = {
-                            scope.launch { runCatching { Api.saveSavedMeal(savedName.trim(), items); vm.loadSavedMeals(); showSaveAs = false; savedName = "" }.onFailure { error = it.message } }
-                        })
-                    } else TextButton(onClick = { showSaveAs = true }) { Text("Save as a repeat meal", color = p.muted, fontSize = 13.sp) }
-                }
-            }
-        }
-        if (showReview) {
-            Row(Modifier.padding(16.dp, 12.dp).navigationBarsPadding().imePadding(), verticalAlignment = Alignment.CenterVertically) {
-                Column {
-                    Text("${items.sumOf { it.calories }.toInt()} kcal", fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.5).sp, color = p.ink)
-                    Text("${fmt(items.sumOf { it.proteinG })} g protein", fontSize = 12.sp, color = p.muted)
-                }
-                Spacer(Modifier.width(12.dp))
-                PillButton(if (saving) "Saving…" else "Save meal · ${items.size} item${if (items.size == 1) "" else "s"}", enabled = items.isNotEmpty() && !saving, modifier = Modifier.weight(1f), onClick = {
-                    scope.launch {
-                        saving = true
-                        val raw = text.trim().ifBlank { added.joinToString(", ").ifBlank { "Meal" } }
-                        if (vm.saveMeal(date, raw, items)) onClose() else { error = vm.error; saving = false }
-                    }
-                })
-            }
+                onDone(b)
+            }.onFailure { error = it.message ?: "Couldn't work that out" }
         }
     }
 
-    sheet?.let { req ->
-        QuantitySheet(
-            food = req.food, initial = req.initial,
-            title = if (req.replace != null) "Change the amount" else "How much?",
-            cta = if (req.replace != null) "Update" else "Add",
-            restaurantStart = req.restaurant,
-            onDismiss = { sheet = null },
-            onDone = { item, _ ->
-                sheet = null
-                val idx = req.replace
-                if (idx != null) items = items.toMutableList().also { l -> val old = l[idx]; l[idx] = item.copy(cookedIn = item.cookedIn ?: old.cookedIn, source = old.source, foodId = old.foodId) }
-                else add(item)
-            },
-        )
+    fun workItOut() {
+        val t = text.trim()
+        if (t.isEmpty()) return
+        focus.clearFocus()
+        rawParts += t
+        parsedText = (parsedText?.let { "$it, " } ?: "") + t
+        text = ""
+        track(t, vm.parseAsync(t))
     }
-}
 
-// ---- Dictate ----
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun DictateCard(text: String, onText: (String) -> Unit, parsing: Boolean, showQuick: Boolean, onRun: () -> Unit, onQuick: () -> Unit) {
-    val p = palette
-    val focus = LocalFocusManager.current
-    val (dictation, toggle) = rememberDictation { chunk ->
+    val (dictation, toggleMic) = rememberDictation { chunk ->
         val base = text.trimEnd()
-        onText(if (base.isEmpty()) chunk else base + (if (base.endsWith(",") || base.endsWith("।")) " " else ", ") + chunk)
+        text = if (base.isEmpty()) chunk else base + (if (base.endsWith(",") || base.endsWith("।")) " " else ", ") + chunk
+        // A spoken meal is always a description — work it out straight away.
+        if (looksLikeSentence(text)) workItOut()
     }
-    Rise(1) {
-        Card {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // Tap: listen / stop. Long-press: switch English ↔ Hindi.
-                Box(
-                    Modifier.size(40.dp).pressable().background(if (dictation.listening) p.red else p.btn, CircleShape)
-                        .combinedClickable(onClick = toggle, onLongClick = { dictation.toggleLang() }),
-                    contentAlignment = Alignment.Center,
-                ) { Icon(MicIcon, "Dictate", tint = if (dictation.listening) androidx.compose.ui.graphics.Color.White else p.btnInk, modifier = Modifier.size(18.dp)) }
-                Spacer(Modifier.width(10.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Describe what you ate", fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink)
-                    Text(
-                        when {
-                            dictation.listening -> "Listening in ${if (dictation.lang == "hi-IN") "Hindi" else "English"}… tap the mic to stop"
-                            dictation.available -> "Tap the mic, or type. Hold the mic for Hindi."
-                            else -> "Type, or use your keyboard's mic. Hindi works too."
-                        },
-                        fontSize = 12.sp, color = p.muted,
-                    )
-                }
-                if (dictation.available) SmallChip(dictation.langLabel, { dictation.toggleLang() })
-            }
-            Spacer(Modifier.height(12.dp))
-            Box(Modifier.fillMaxWidth().background(p.card2, RoundedCornerShape(14.dp)).padding(14.dp)) {
-                BasicTextField(
-                    text, onText, Modifier.fillMaxWidth().height(64.dp),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
-                    textStyle = TextStyle(fontSize = 15.sp, color = p.ink, lineHeight = 22.sp), cursorBrush = SolidColor(p.ink),
-                    decorationBox = { inner -> if (text.isEmpty()) Text("150 g rice, 100 g dal, 2 eggs — or: दो रोटी, एक कटोरी दाल", fontSize = 15.sp, color = p.muted); inner() },
-                )
-            }
-            dictation.error?.let { Spacer(Modifier.height(6.dp)); Text(it, fontSize = 12.sp, color = p.orange) }
-            Spacer(Modifier.height(12.dp))
-            PillButton(if (parsing) "Working out the calories…" else "Work out the calories", enabled = text.isNotBlank() && !parsing, height = 48.dp, onClick = onRun)
-            if (showQuick) {
-                Spacer(Modifier.height(8.dp))
-                PillButton("Log now, review later", enabled = text.isNotBlank() && !parsing, height = 44.dp, bg = p.card2, fg = p.ink, onClick = onQuick)
-            }
-            if (parsing) { Spacer(Modifier.height(10.dp)); LinearProgressIndicator(Modifier.fillMaxWidth(), color = p.ink, trackColor = p.track) }
-        }
-    }
-}
 
-// ---- Search ----
-
-@Composable
-private fun SearchCard(onPick: (FoodHit) -> Unit) {
-    val p = palette
-    val focus = LocalFocusManager.current
-    var q by rememberSaveable { mutableStateOf("") }
-    var hits by remember { mutableStateOf<List<FoodHit>>(emptyList()) }
-    var busy by remember { mutableStateOf(false) }
-    var err by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(q) {
-        if (q.trim().length < 2) { hits = emptyList(); return@LaunchedEffect }
-        delay(200)
-        busy = true
-        runCatching { Api.searchFoods(q) }.onSuccess { hits = it; err = null }.onFailure { err = it.message }
-        busy = false
-    }
-    Rise(1) {
-        Card(padding = 0.dp) {
-            Column(Modifier.padding(16.dp, 14.dp, 16.dp, 4.dp)) {
-                Row(Modifier.fillMaxWidth().background(p.card2, RoundedCornerShape(12.dp)).padding(12.dp, 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(SearchIcon, null, tint = p.muted, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(8.dp))
-                    BasicTextField(
-                        q, { q = it.take(60) }, Modifier.weight(1f), singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), keyboardActions = KeyboardActions(onSearch = { focus.clearFocus() }),
-                        textStyle = TextStyle(fontSize = 15.sp, color = p.ink), cursorBrush = SolidColor(p.ink),
-                        decorationBox = { inner -> if (q.isEmpty()) Text("Roti, dal tadka, paneer, अंडा, Maggi…", fontSize = 15.sp, color = p.muted); inner() },
-                    )
-                    if (busy) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = p.muted)
-                }
-                Text("3,000+ Indian and Western foods · English, Hinglish or हिंदी", fontSize = 11.sp, color = p.muted, modifier = Modifier.padding(top = 6.dp))
-            }
-            Column(Modifier.padding(horizontal = 16.dp)) {
-                err?.let { Text(it, fontSize = 13.sp, color = p.red, modifier = Modifier.padding(vertical = 12.dp)) }
-                if (q.trim().length >= 2 && !busy && hits.isEmpty() && err == null) Text("Nothing matches “$q” — try Dictate, which can estimate it.", fontSize = 13.sp, color = p.muted, modifier = Modifier.padding(vertical = 14.dp))
-                hits.forEachIndexed { i, h ->
-                    if (i > 0) Hair()
-                    Row(Modifier.fillMaxWidth().clickable { onPick(h) }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(h.name, fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
-                                if (h.nameHi != null) Text("  ${h.nameHi}", fontSize = 13.sp, fontWeight = FontWeight(500), color = p.muted, maxLines = 1)
-                            }
-                            Text(
-                                "${h.calories.toInt()} kcal · ${fmt(h.proteinG)} g P per 100 g" + (h.units.firstOrNull()?.let { " · ${it.label} ${it.grams.toInt()} g" } ?: ""),
-                                fontSize = 12.sp, color = p.muted, maxLines = 1,
-                            )
-                        }
-                        Box(Modifier.padding(start = 8.dp).background(p.card2, CircleShape).padding(7.dp, 2.dp)) {
-                            Text(SOURCE_LABEL[h.source] ?: h.source, fontSize = 10.sp, fontWeight = FontWeight(700), color = p.muted)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ---- Presets ----
-
-/** Category chips → grid of preset cards → serving chips (+ Custom…). [onPick] gets the tapped serving label, or null for Custom. */
-@Composable
-private fun PresetsCard(presets: List<FoodPreset>, loading: Boolean, onRestaurant: (FoodPreset) -> Unit, onPick: (FoodPreset, String?) -> Unit) {
-    val p = palette
-    var cat by rememberSaveable { mutableStateOf("breakfast") }
-    var open by remember { mutableStateOf<String?>(null) }
-    val list = remember(presets, cat) { presets.filter { it.category == cat }.sortedBy { it.sort } }
-    // v2.0: common outside dishes at the top of Snacks and Protein; each opens as a restaurant portion.
-    val outside = remember(presets) { presets.filter { it.category == "restaurant" }.sortedBy { it.sort } }
-    Rise(1) {
-        Column {
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                CATEGORIES.forEach { (key, label) ->
-                    val sel = key == cat
-                    Box(
-                        Modifier.height(34.dp).pressable().background(if (sel) p.btn else p.card2, CircleShape).clickable { cat = key; open = null }.padding(horizontal = 14.dp),
-                        contentAlignment = Alignment.Center,
-                    ) { Text(label, fontSize = 13.sp, fontWeight = FontWeight(600), color = if (sel) p.btnInk else p.ink) }
-                }
-            }
-            Spacer(Modifier.height(10.dp))
-            if ((cat == "snack" || cat == "protein") && outside.isNotEmpty()) {
-                Text("Restaurant", fontSize = 12.sp, fontWeight = FontWeight(700), color = p.muted, modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
-                Row(Modifier.horizontalScroll(rememberScrollState()).padding(bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    outside.forEach { pr -> SmallChip(pr.label, { onRestaurant(pr) }, dashed = true) }
-                }
-            }
-            if (presets.isEmpty()) {
-                Card {
-                    if (loading) { LinearProgressIndicator(Modifier.fillMaxWidth(), color = p.ink, trackColor = p.track); Spacer(Modifier.height(8.dp)) }
-                    Text(if (loading) "Loading the presets…" else "Presets didn't load — pull to refresh on Home, or use Search.", fontSize = 13.sp, color = p.muted)
-                }
-            }
-            // An open card spans the row on its own; the rest sit two to a row.
-            val rows = mutableListOf<List<FoodPreset>>()
-            var i = 0
-            while (i < list.size) {
-                if (list[i].id == open) { rows += listOf(list[i]); i++ }
-                else if (i + 1 < list.size && list[i + 1].id != open) { rows += listOf(list[i], list[i + 1]); i += 2 }
-                else { rows += listOf(list[i]); i++ }
-            }
-            rows.forEach { row ->
-                Row(Modifier.padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    row.forEach { pr ->
-                        val isOpen = open == pr.id
-                        val def = pr.default
-                        Card(Modifier.weight(1f), padding = 12.dp, onClick = { open = if (isOpen) null else pr.id }) {
-                            Text(pr.label, fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1)
-                            Text(
-                                (pr.labelHi?.let { "$it · " } ?: "") + (def?.let { "${it.label} · ${(pr.calories * it.grams / 100).toInt()} kcal" } ?: "per 100 g"),
-                                fontSize = 12.sp, color = p.muted, maxLines = 1,
-                            )
-                            if (isOpen) {
-                                Spacer(Modifier.height(10.dp))
-                                (pr.servings.map { s -> "${s.label} · ${(pr.calories * s.grams / 100).toInt()} kcal" to s.label } + ("Custom…" to null)).chunked(3).forEach { chips ->
-                                    Row(Modifier.padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        chips.forEach { (label, serving) ->
-                                            SmallChip(label, { onPick(pr, serving); open = null }, filled = serving != null && serving == pr.defaultServing, dashed = serving == null)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if (row.size == 1 && row[0].id != open) Spacer(Modifier.weight(1f))
-                }
-            }
-        }
-    }
-}
-
-// ---- Photo ----
-
-/** The plate camera inside the Meal form: photo → /api/photo-meal → the same review as the Scan tab. */
-@Composable
-private fun PhotoCard(vm: AppViewModel, date: String, onClose: () -> Unit) {
-    val p = palette
-    val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var photo by remember { mutableStateOf<Bitmap?>(null) }
-    var plate by remember { mutableStateOf<PlateEstimate?>(null) }
-    var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    // ---- plate photo ----
     val target = remember { mutableStateOf<android.net.Uri?>(null) }
+    fun estimate(b: Bitmap?) {
+        if (b == null) { error = "Couldn't open that photo"; return }
+        rawParts += "Plate photo"
+        track("Your plate photo", vm.photoAsync(b))
+    }
     val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
-        if (ok) target.value?.let { uri -> scope.launch { photo = withContext(Dispatchers.IO) { decodeScaled(ctx, uri, 1600) }; plate = null } }
+        if (ok) target.value?.let { uri -> scope.launch { estimate(withContext(Dispatchers.IO) { decodeScaled(ctx, uri, 1600) }) } }
     }
     val gallery = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) scope.launch { photo = withContext(Dispatchers.IO) { decodeScaled(ctx, uri, 1600) }; plate = null }
+        if (uri != null) scope.launch { estimate(withContext(Dispatchers.IO) { decodeScaled(ctx, uri, 1600) }) }
     }
     fun openCamera() {
         val dir = File(ctx.cacheDir, "scans").apply { mkdirs() }
@@ -528,57 +236,449 @@ private fun PhotoCard(vm: AppViewModel, date: String, onClose: () -> Unit) {
         target.value = uri
         runCatching { camera.launch(uri) }.onFailure { error = "No camera app found — pick from gallery instead." }
     }
-    Rise(1) {
-        Card {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(40.dp).background(p.btn, CircleShape), contentAlignment = Alignment.Center) { Icon(CameraIcon, null, tint = p.btnInk, modifier = Modifier.size(18.dp)) }
-                Spacer(Modifier.width(10.dp))
-                Column {
-                    Text("Photograph your plate", fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink)
-                    Text("Every item with grams, calories, macros and micros", fontSize = 12.sp, color = p.muted)
+
+    fun save() {
+        val raw = rawParts.joinToString(", ").ifBlank { items.joinToString(", ") { it.name } }.ifBlank { "Meal" }
+        // Log now, review later — automatically: Save while a parse / photo is working closes the
+        // page, Home shows the pending row, and the meal saves the moment the job lands.
+        if (pending.isNotEmpty()) { vm.saveMealAfter(date, raw, items, photoPath, pending.map { it.job }); onClose(); return }
+        scope.launch {
+            saving = true
+            if (vm.saveMeal(date, raw, items, photoPath)) onClose() else { error = vm.error; saving = false }
+        }
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        Box(Modifier.weight(1f)) {
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp, 6.dp, 16.dp, 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    FoodBar(
+                        text = text, onText = { text = it.take(160) }, dictation = dictation, onMic = toggleMic,
+                        onSubmit = { if (looksLikeSentence(text)) workItOut() else focus.clearFocus() },
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Box(
+                        Modifier.size(52.dp).pressable().shadow(10.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow).background(p.btn, CircleShape).clickable { focus.clearFocus(); photoOpen = true },
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(CameraIcon, "Photo of your plate", tint = p.btnInk, modifier = Modifier.size(20.dp)) }
                 }
-            }
-            Spacer(Modifier.height(12.dp))
-            photo?.let { bmp ->
-                Image(bmp.asImageBitmap(), null, Modifier.fillMaxWidth().height(200.dp).clip(RoundedCornerShape(14.dp)), contentScale = ContentScale.Crop)
-                Spacer(Modifier.height(10.dp))
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PillButton(if (photo == null) "Take photo" else "Retake", { openCamera() }, Modifier.weight(1f), height = 46.dp)
-                PillButton("Gallery", { gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, Modifier.weight(1f), height = 46.dp, bg = p.card2, fg = p.ink)
-            }
-            if (photo != null && plate == null) {
-                Spacer(Modifier.height(10.dp))
-                PillButton(if (busy) "Looking at the plate…" else "Estimate", enabled = !busy, height = 48.dp, onClick = {
-                    scope.launch {
-                        busy = true; error = null
-                        try { plate = Api.photoMeal(withContext(Dispatchers.IO) { toJpegBase64(photo!!, 85) }, "") } catch (e: Exception) { error = e.message } finally { busy = false }
+                dictation.error?.let { Text(it, fontSize = 12.sp, color = p.orange, modifier = Modifier.padding(horizontal = 4.dp)) }
+                ErrorNote(error)
+
+                val q = text.trim()
+                if (q.length >= 2 || looksLikeSentence(q)) {
+                    SearchResults(q, looksLikeSentence(q), onWorkItOut = { workItOut() }) { h ->
+                        focus.clearFocus()
+                        addFood(QuantityFood.from(h), h.name)
+                        text = ""
                     }
-                })
-                if (busy) { Spacer(Modifier.height(10.dp)); LinearProgressIndicator(Modifier.fillMaxWidth(), color = p.ink, trackColor = p.track) }
+                } else {
+                    PresetGrid(
+                        vm = vm, use = use, selected = cat, onSelect = { cat = it },
+                        onPlate = items.mapNotNull { it.foodId }.groupingBy { it }.eachCount(),
+                        onPreset = { pr -> addFood(QuantityFood.from(pr), pr.label, restaurant = pr.category == RESTAURANT) },
+                        onSaved = { addSaved(it) },
+                    )
+                }
+                if (items.isEmpty() && pending.isEmpty()) Spacer(Modifier.navigationBarsPadding())
+            }
+            Toast(toast, Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp))
+        }
+        if (items.isNotEmpty() || pending.isNotEmpty()) {
+            Plate(
+                items = items, pending = pending, notes = notes, fats = fats, presets = vm.presets, saving = saving,
+                canFix = parsedText != null && items.isNotEmpty(),
+                onFix = { fixOpen = true }, onRepeat = { repeatOpen = true },
+                onQuantity = { idx ->
+                    val it = items[idx]
+                    val byServing = it.unit == "serving" && it.servings != null && it.servings > 0
+                    // Re-offer the preset's household servings when the row came from one.
+                    val preset = vm.presets.firstOrNull { pr -> pr.foodId == it.foodId && pr.category != "fat" } ?: vm.presets.firstOrNull { pr -> pr.foodId == it.foodId }
+                    val servings = preset?.servings.orEmpty().ifEmpty {
+                        if (byServing) listOf(com.sohum.bandlog.data.Serving("1 serving", it.grams / it.servings!!)) else emptyList()
+                    }
+                    val food = QuantityFood.from(it, servings).copy(defaultServing = preset?.defaultServing)
+                    val sg = food.servingGrams
+                    sheet = SheetReq(food, if (byServing && sg != null) Quantity(QUnit.SERVING, (it.grams / sg * 2).roundToInt() / 2.0) else Quantity(QUnit.G, it.grams.roundToInt().toDouble()), idx)
+                },
+                onRemove = { idx -> items = items.filterIndexed { i, _ -> i != idx } },
+                onCookedIn = { idx -> cookedFor = idx },
+                onSave = { save() },
+            )
+        }
+    }
+
+    sheet?.let { req ->
+        QuantitySheet(
+            food = req.food, initial = req.initial, title = "Change the amount", cta = "Update",
+            onDismiss = { sheet = null },
+            onDone = { item, _ ->
+                sheet = null
+                items = items.toMutableList().also { l ->
+                    if (req.replace in l.indices) { val old = l[req.replace]; l[req.replace] = item.copy(cookedIn = item.cookedIn ?: old.cookedIn, source = old.source, foodId = old.foodId) }
+                }
+            },
+        )
+    }
+
+    cookedFor?.let { idx ->
+        val dish = items.getOrNull(idx)
+        if (dish == null) cookedFor = null
+        else BottomSheet(title = "Cooked in…", subtitle = "Adds the fat as its own row under ${dish.name}", onDismiss = { cookedFor = null }) {
+            if (fats.isEmpty()) Text("The fats list didn't load — try again in a moment.", fontSize = 13.sp, color = p.muted)
+            fats.forEachIndexed { i, fat ->
+                if (i > 0) Hair()
+                val tsp = fat.servings.firstOrNull { it.label.contains("1 tsp", ignoreCase = true) } ?: fat.servings.firstOrNull()
+                val kcal = ((tsp?.grams ?: 5.0) * fat.calories / 100).roundToInt()
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable {
+                        val food = QuantityFood.from(fat, tsp?.label)
+                        val fatItem = food.item(if (tsp != null) Quantity(QUnit.SERVING, 1.0) else Quantity(QUnit.G, 5.0))
+                        items = items.toMutableList().also { l -> l[idx] = l[idx].copy(cookedIn = fat.id); l.add(idx + 1, fatItem) }
+                        rawParts += "${fat.label} (cooked in)"
+                        cookedFor = null
+                        say("Added · ${tsp?.label ?: "5 g"} ${fat.label.lowercase()} · $kcal kcal")
+                    },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(DropIcon, null, tint = p.orange, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Text(fat.label, fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink, modifier = Modifier.weight(1f))
+                    Text("${tsp?.label ?: "5 g"} · $kcal kcal", fontSize = 13.sp, color = p.muted)
+                }
             }
         }
     }
-    ErrorNote(error)
-    plate?.let { est ->
-        PhotoReview(est, photo, readOnly = false) { items, path ->
-            scope.launch {
-                busy = true
-                val photoPath = path ?: photo?.let { b -> runCatching { Api.uploadMealPhoto(withContext(Dispatchers.IO) { toJpegBytes(b, 85) }) }.getOrNull() }
-                val ok = vm.saveMeal(date, est.plateNote.ifBlank { items.joinToString(", ") { it.name } }, items.map { it.toMealItem() }, photoPath)
-                busy = false
-                if (ok) onClose() else error = vm.error
+
+    if (fixOpen) {
+        var fix by remember { mutableStateOf("") }
+        var fixing by remember { mutableStateOf(false) }
+        BottomSheet(
+            title = "What's off?", subtitle = "Tell me and I'll redo the plate", onDismiss = { fixOpen = false },
+            primary = if (fixing) "Redoing…" else "Redo", primaryEnabled = fix.isNotBlank() && !fixing,
+            onPrimary = {
+                scope.launch {
+                    fixing = true
+                    try {
+                        val r = Api.parseMeal(parsedText ?: rawParts.joinToString(", "), fix.trim(), items)
+                        items = r.items; notes = r.assumptions + r.unparsed.map { "Ignored: $it" }
+                        fixOpen = false; say("Redone · ${r.items.sumOf { it.calories }.roundToInt()} kcal")
+                    } catch (e: Exception) { error = e.message; fixOpen = false } finally { fixing = false }
+                }
+            },
+        ) { SheetField(fix, { fix = it }, "e.g. it was two scoops, and the rice was raw") }
+    }
+
+    if (repeatOpen) {
+        var name by remember { mutableStateOf("") }
+        BottomSheet(
+            title = "Save as a repeat meal", subtitle = "It shows up first, under Yours", onDismiss = { repeatOpen = false },
+            primary = "Save", primaryEnabled = name.isNotBlank(),
+            onPrimary = {
+                val n = name.trim()
+                scope.launch {
+                    runCatching { Api.saveSavedMeal(n, items); vm.loadSavedMeals() }
+                        .onSuccess { repeatOpen = false; say("Saved “$n” under Yours") }
+                        .onFailure { error = it.message; repeatOpen = false }
+                }
+            },
+        ) { SheetField(name, { name = it.take(40) }, "Name it, e.g. Dinner usual") }
+    }
+
+    if (photoOpen) {
+        BottomSheet(
+            title = "Photo of your plate", subtitle = "Every item with grams and calories, added to your plate", onDismiss = { photoOpen = false },
+            primary = "Take photo", onPrimary = { photoOpen = false; openCamera() },
+        ) {
+            PillButton("Choose from gallery", { photoOpen = false; gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, bg = p.card2, fg = p.ink)
+        }
+    }
+}
+
+/** "Added · 1 katori · 158 kcal": a black pill that rises over the plate for a moment. */
+@Composable
+private fun Toast(text: String?, modifier: Modifier) {
+    val p = palette
+    AnimatedVisibility(text != null, modifier, enter = slideInVertically { it / 2 } + fadeIn(), exit = fadeOut()) {
+        Box(Modifier.shadow(10.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow).background(p.btn, CircleShape).padding(16.dp, 10.dp)) {
+            Text(text ?: "", fontSize = 13.sp, fontWeight = FontWeight(700), color = p.btnInk, maxLines = 1)
+        }
+    }
+}
+
+// ---- the bar ----
+
+/** "Search or say what you ate…" with the mic inside (tap: listen, long-press: English ↔ Hindi). */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun FoodBar(text: String, onText: (String) -> Unit, dictation: DictationState, onMic: () -> Unit, onSubmit: () -> Unit, modifier: Modifier) {
+    val p = palette
+    val shape = RoundedCornerShape(26.dp)
+    Row(
+        modifier.height(52.dp).shadow(10.dp, shape, ambientColor = p.shadow, spotColor = p.shadow).background(p.card, shape).padding(start = 16.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(SearchIcon, null, tint = p.muted, modifier = Modifier.size(17.dp))
+        Spacer(Modifier.width(10.dp))
+        BasicTextField(
+            text, onText, Modifier.weight(1f), singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), keyboardActions = KeyboardActions(onSearch = { onSubmit() }),
+            textStyle = TextStyle(fontSize = 15.sp, color = p.ink), cursorBrush = SolidColor(p.ink),
+            decorationBox = { inner ->
+                if (text.isEmpty()) Text(
+                    if (dictation.listening) "Listening in ${if (dictation.lang == "hi-IN") "Hindi" else "English"}…" else "Search or say what you ate…",
+                    fontSize = 15.sp, color = p.muted, maxLines = 1,
+                )
+                inner()
+            },
+        )
+        if (text.isNotEmpty()) Box(Modifier.size(44.dp).clickable { onText("") }, contentAlignment = Alignment.Center) {
+            Icon(CrossIcon, "Clear", tint = p.muted, modifier = Modifier.size(13.dp))
+        }
+        // The language switch only shows while listening; otherwise hold the mic to switch.
+        else if (dictation.listening) Box(Modifier.heightIn(min = 44.dp).clickable { dictation.toggleLang() }.padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {
+            Text(dictation.langLabel, fontSize = 11.sp, fontWeight = FontWeight(700), color = p.muted)
+        }
+        Box(
+            Modifier.size(44.dp).background(if (dictation.listening) p.red else p.card2, CircleShape)
+                .combinedClickable(onClick = onMic, onLongClick = { dictation.toggleLang() }),
+            contentAlignment = Alignment.Center,
+        ) { Icon(MicIcon, "Say what you ate", tint = if (dictation.listening) Color.White else p.ink, modifier = Modifier.size(18.dp)) }
+    }
+}
+
+// ---- search results ----
+
+@Composable
+private fun SearchResults(q: String, sentence: Boolean, onWorkItOut: () -> Unit, onPick: (FoodHit) -> Unit) {
+    val p = palette
+    var hits by remember { mutableStateOf<List<FoodHit>>(emptyList()) }
+    var busy by remember { mutableStateOf(false) }
+    var err by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(q) {
+        if (q.length < 2) { hits = emptyList(); return@LaunchedEffect }
+        delay(200)
+        busy = true
+        runCatching { Api.searchFoods(q) }.onSuccess { hits = it; err = null }.onFailure { err = it.message }
+        busy = false
+    }
+    if (sentence) {
+        PillButton("Work it out", onWorkItOut, height = 48.dp)
+        Text("Counts every item you typed — or tap a match below.", fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(horizontal = 4.dp))
+    }
+    ErrorNote(err)
+    if (!busy && hits.isEmpty() && err == null && !sentence) {
+        Card {
+            Text("Nothing matches “$q” in the food table.", fontSize = 14.sp, color = p.ink)
+            Spacer(Modifier.height(10.dp))
+            PillButton("Work it out", onWorkItOut, height = 46.dp)
+        }
+        return
+    }
+    if (busy && hits.isEmpty()) LinearProgressIndicator(Modifier.fillMaxWidth(), color = p.ink, trackColor = p.track)
+    if (hits.isNotEmpty()) Card(padding = 0.dp) {
+        Column(Modifier.padding(horizontal = 16.dp)) {
+            hits.forEachIndexed { i, h ->
+                if (i > 0) Hair()
+                Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable { onPick(h) }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(h.name, fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
+                            if (h.nameHi != null) Text("  ${h.nameHi}", fontSize = 13.sp, fontWeight = FontWeight(500), color = p.muted, maxLines = 1)
+                        }
+                        val unit = h.units.firstOrNull()
+                        Text(
+                            (unit?.let { "${it.label} · ${(h.calories * it.grams / 100).roundToInt()} kcal" } ?: "100 g · ${h.calories.roundToInt()} kcal") + " · ${SOURCE_LABEL[h.source] ?: h.source}",
+                            fontSize = 12.sp, color = p.muted, maxLines = 1,
+                        )
+                    }
+                    AddDot(0)
+                }
             }
         }
     }
 }
 
-// ---- Review row ----
+/** The "+" at the end of a tappable food; a count once it's on the plate. */
+@Composable
+private fun AddDot(count: Int) {
+    val p = palette
+    Box(Modifier.padding(start = 8.dp).size(28.dp).background(if (count > 0) p.btn else p.card2, CircleShape), contentAlignment = Alignment.Center) {
+        Text(if (count > 0) "×$count" else "+", fontSize = if (count > 0) 11.sp else 16.sp, fontWeight = FontWeight(800), color = if (count > 0) p.btnInk else p.ink)
+    }
+}
+
+// ---- presets ----
 
 @Composable
-private fun ReviewRow(item: MealItem, fats: List<FoodPreset>, showCookedIn: Boolean, onCookedIn: (FoodPreset) -> Unit, onOpen: () -> Unit, onRemove: () -> Unit) {
+private fun PresetGrid(
+    vm: AppViewModel,
+    use: Map<String, Int>,
+    selected: String?,
+    onSelect: (String) -> Unit,
+    onPlate: Map<String, Int>,
+    onPreset: (FoodPreset) -> Unit,
+    onSaved: (SavedMeal) -> Unit,
+) {
     val p = palette
-    // Delta badge: shows "+99 kcal" for a moment after the amount changes.
+    val presets = vm.presets
+    val top = remember(presets, use) {
+        presets.filter { it.category != "fat" && (use[it.foodId] ?: 0) > 0 }.sortedByDescending { use[it.foodId] ?: 0 }.distinctBy { it.foodId }.take(8)
+    }
+    val hasYours = vm.savedMeals.isNotEmpty() || top.isNotEmpty()
+    // Categories you eat from most come first; the rest keep their usual order.
+    val cats = remember(presets, use) {
+        CATEGORIES.withIndex().sortedWith(compareByDescending<IndexedValue<Pair<String, String>>> { (_, c) -> presets.filter { it.category == c.first }.sumOf { use[it.foodId] ?: 0 } }.thenBy { it.index }).map { it.value }
+    }
+    val chips = (if (hasYours) listOf(YOURS to "Yours") else emptyList()) + cats + (if (presets.any { it.category == RESTAURANT }) listOf(RESTAURANT to "Restaurant") else emptyList())
+    val cat = selected?.takeIf { s -> chips.any { it.first == s } } ?: chips.first().first
+
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        chips.forEach { (key, label) -> Chip(label, key == cat, { onSelect(key) }) }
+    }
+    if (presets.isEmpty()) {
+        Card {
+            if (vm.presetsLoading) {
+                LinearProgressIndicator(Modifier.fillMaxWidth(), color = p.ink, trackColor = p.track)
+                Spacer(Modifier.height(8.dp))
+                Text("Loading the presets…", fontSize = 13.sp, color = p.muted)
+            } else {
+                Text("The presets didn't load.", fontSize = 14.sp, color = p.ink)
+                Spacer(Modifier.height(10.dp))
+                PillButton("Try again", { vm.loadPresets(force = true) }, height = 46.dp)
+            }
+        }
+        return
+    }
+    if (cat == YOURS) {
+        vm.savedMeals.chunked(2).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { sm -> FoodCard(Modifier.weight(1f), sm.name, "Saved meal · ${sm.calories.roundToInt()} kcal · ${fmt(sm.proteinG)} g P", 0) { onSaved(sm) } }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+        PresetRows(top, onPlate, onPreset)
+    } else {
+        val list = remember(presets, cat, use) { presets.filter { it.category == cat }.sortedWith(compareByDescending<FoodPreset> { use[it.foodId] ?: 0 }.thenBy { it.sort }) }
+        PresetRows(list, onPlate, onPreset)
+    }
+}
+
+@Composable
+private fun PresetRows(list: List<FoodPreset>, onPlate: Map<String, Int>, onPreset: (FoodPreset) -> Unit) {
+    list.chunked(2).forEach { row ->
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            row.forEach { pr ->
+                val def = pr.default
+                FoodCard(
+                    Modifier.weight(1f), pr.label,
+                    (pr.labelHi?.let { "$it · " } ?: "") + (def?.let { "${it.label} · ${(pr.calories * it.grams / 100).roundToInt()} kcal" } ?: "100 g · ${pr.calories.roundToInt()} kcal"),
+                    onPlate[pr.foodId] ?: 0,
+                ) { onPreset(pr) }
+            }
+            if (row.size == 1) Spacer(Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun FoodCard(modifier: Modifier, title: String, sub: String, count: Int, onClick: () -> Unit) {
+    val p = palette
+    Card(modifier, padding = 12.dp, onClick = onClick) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(title, fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1)
+                Text(sub, fontSize = 12.sp, color = p.muted, maxLines = 2, lineHeight = 15.sp)
+            }
+            AddDot(count)
+        }
+    }
+}
+
+// ---- the plate ----
+
+@Composable
+private fun Plate(
+    items: List<MealItem>,
+    pending: List<Pending>,
+    notes: List<String>,
+    fats: List<FoodPreset>,
+    presets: List<FoodPreset>,
+    saving: Boolean,
+    canFix: Boolean,
+    onFix: () -> Unit,
+    onRepeat: () -> Unit,
+    onQuantity: (Int) -> Unit,
+    onRemove: (Int) -> Unit,
+    onCookedIn: (Int) -> Unit,
+    onSave: () -> Unit,
+) {
+    val p = palette
+    val shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp)
+    Column(
+        Modifier.fillMaxWidth().shadow(18.dp, shape, ambientColor = p.shadow, spotColor = p.shadow).background(p.card, shape)
+            .padding(start = 16.dp, end = 16.dp, top = 6.dp).navigationBarsPadding().imePadding(),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Your plate", fontSize = 15.sp, fontWeight = FontWeight(800), color = p.ink)
+            Text(if (items.isEmpty()) "" else "  ·  ${items.size} item${if (items.size == 1) "" else "s"}", fontSize = 13.sp, color = p.muted, modifier = Modifier.weight(1f))
+            if (canFix) TextLink("Fix", onFix)
+            if (items.isNotEmpty()) TextLink("Save as repeat", onRepeat)
+        }
+        Column(Modifier.heightIn(max = 250.dp).verticalScroll(rememberScrollState())) {
+            pending.forEach { PendingPlateRow(it.label) }
+            items.forEachIndexed { idx, it ->
+                if (idx > 0 || pending.isNotEmpty()) Hair()
+                val isFat = fats.any { f -> f.id == it.cookedIn || f.foodId == it.foodId }
+                PlateRow(
+                    item = it,
+                    amount = amountLabel(it, presets),
+                    cookedInLabel = it.cookedIn?.let { id -> if (id == "restaurant") "Restaurant portion · oil included" else "Cooked in ${fats.firstOrNull { f -> f.id == id }?.label ?: id}" },
+                    showCookedIn = it.cookedIn == null && it.source != "scan" && !isFat && fats.isNotEmpty() && QuantityFood.wantsCookedIn(it.name),
+                    onCookedIn = { onCookedIn(idx) }, onQuantity = { onQuantity(idx) }, onRemove = { onRemove(idx) },
+                )
+            }
+        }
+        if (notes.isNotEmpty()) Text(notes.joinToString(" · "), fontSize = 11.sp, color = p.muted, maxLines = 2, lineHeight = 14.sp, modifier = Modifier.padding(top = 4.dp))
+        Row(Modifier.padding(top = 8.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column {
+                Text("${items.sumOf { it.calories }.roundToInt()} kcal", fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.5).sp, color = p.ink)
+                Text("${fmt((items.sumOf { it.proteinG } * 10).roundToInt() / 10.0)} g protein", fontSize = 12.sp, color = p.muted)
+            }
+            Spacer(Modifier.width(12.dp))
+            PillButton(
+                when { saving -> "Saving…"; pending.isNotEmpty() -> "Save"; else -> "Save · ${items.size} item${if (items.size == 1) "" else "s"}" },
+                onSave, Modifier.weight(1f), enabled = !saving,
+            )
+        }
+    }
+}
+
+@Composable
+private fun TextLink(label: String, onClick: () -> Unit) {
+    Box(Modifier.heightIn(min = 44.dp).clickable(onClick = onClick).padding(horizontal = 8.dp), contentAlignment = Alignment.Center) {
+        Text(label, fontSize = 13.sp, fontWeight = FontWeight(700), color = palette.ink)
+    }
+}
+
+@Composable
+private fun PendingPlateRow(label: String) {
+    val p = palette
+    Row(Modifier.fillMaxWidth().heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically) {
+        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = p.muted)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(label, fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1)
+            Text("Working it out… Save any time, it'll finish on its own.", fontSize = 11.sp, color = p.muted, maxLines = 1)
+        }
+    }
+}
+
+@Composable
+private fun PlateRow(item: MealItem, amount: String, cookedInLabel: String?, showCookedIn: Boolean, onCookedIn: () -> Unit, onQuantity: () -> Unit, onRemove: () -> Unit) {
+    val p = palette
+    // Delta badge: "+99 kcal" for a moment after the amount changes.
     var last by remember { mutableStateOf(item.calories) }
     var delta by remember { mutableIntStateOf(0) }
     var showDelta by remember { mutableStateOf(false) }
@@ -586,34 +686,59 @@ private fun ReviewRow(item: MealItem, fats: List<FoodPreset>, showCookedIn: Bool
         val d = (item.calories - last).toInt(); last = item.calories
         if (d != 0) { delta = d; showDelta = true; delay(1400); showDelta = false }
     }
-    Row(Modifier.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(item.name + if (item.source == "estimated") " ~" else "", fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
-                if (item.source == "scan") Box(Modifier.padding(start = 6.dp).background(p.card2, CircleShape).padding(7.dp, 2.dp)) { Text("scan", fontSize = 10.sp, fontWeight = FontWeight(700), color = p.muted) }
-            }
+    Row(Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(item.name + if (item.source == "estimated") " ~" else "", fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("${item.calories.toInt()} kcal", fontSize = 12.sp, color = p.muted)
+                Text("${item.calories.roundToInt()} kcal", fontSize = 12.sp, color = p.muted)
                 MacroDot("${fmt(item.proteinG)}g", p.red); MacroDot("${fmt(item.carbsG)}g", p.orange); MacroDot("${fmt(item.fatG)}g", p.blue)
             }
-            if (showCookedIn && fats.isNotEmpty()) {
-                Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(DropIcon, null, tint = p.muted, modifier = Modifier.size(12.dp))
-                    Text("Cooked in…", fontSize = 11.sp, color = p.muted)
-                    fats.take(4).forEach { f -> SmallChip(f.label, { onCookedIn(f) }) }
-                }
+            if (cookedInLabel != null) Text(cookedInLabel, fontSize = 11.sp, color = p.muted)
+            else if (showCookedIn) Row(
+                Modifier.heightIn(min = 32.dp).clickable(onClick = onCookedIn),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(DropIcon, null, tint = p.orange, modifier = Modifier.size(12.dp))
+                Text(" Cooked in…", fontSize = 12.sp, fontWeight = FontWeight(700), color = p.ink)
             }
-            item.cookedIn?.let { id -> Text(if (id == "restaurant") "Restaurant portion · oil included" else "Cooked in ${fats.firstOrNull { it.id == id }?.label ?: id}", fontSize = 11.sp, color = p.muted) }
         }
         AnimatedVisibility(showDelta, enter = scaleIn() + fadeIn(), exit = fadeOut() + scaleOut()) {
             Box(Modifier.padding(end = 6.dp).background(if (delta > 0) p.btn else p.card2, CircleShape).padding(8.dp, 3.dp)) {
                 Text((if (delta > 0) "+" else "") + "$delta kcal", fontSize = 11.sp, fontWeight = FontWeight(700), color = if (delta > 0) p.btnInk else p.ink)
             }
         }
-        // The quantity chip opens the sheet.
-        Box(Modifier.height(36.dp).pressable().background(p.card2, RoundedCornerShape(10.dp)).clickable(onClick = onOpen).padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
-            Text(item.quantityLabel, fontSize = 13.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1, textAlign = TextAlign.End)
+        // The amount opens the Quantity sheet.
+        Box(Modifier.heightIn(min = 44.dp).clickable(onClick = onQuantity), contentAlignment = Alignment.Center) {
+            Box(Modifier.height(34.dp).background(p.card2, RoundedCornerShape(10.dp)).padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
+                Text(amount, fontSize = 13.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1)
+            }
         }
-        IconButton(onClick = onRemove, Modifier.size(32.dp)) { Icon(Icons.Outlined.Delete, "Remove", tint = p.muted) }
+        Box(Modifier.size(44.dp).clickable(onClick = onRemove), contentAlignment = Alignment.Center) {
+            Icon(CrossIcon, "Remove ${item.name}", tint = p.muted, modifier = Modifier.size(13.dp))
+        }
+    }
+}
+
+/** "1 katori", "2 roti", "1.5 cup" when the row is counted in a preset's household serving; else the grams. */
+private fun amountLabel(item: MealItem, presets: List<FoodPreset>): String {
+    val n = item.servings
+    if (item.unit != "serving" || n == null || n <= 0) return item.quantityLabel
+    val pr = presets.firstOrNull { it.foodId == item.foodId } ?: return item.quantityLabel
+    val unit = pr.default?.label?.removePrefix("1 ")?.trim() ?: return item.quantityLabel
+    return "${fmt(n)} $unit"
+}
+
+/** A one-line text field on the grey fill, for the plate's sheets. */
+@Composable
+internal fun SheetField(value: String, onChange: (String) -> Unit, placeholder: String) {
+    val p = palette
+    val focus = LocalFocusManager.current
+    Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).background(p.card2, RoundedCornerShape(14.dp)).padding(14.dp, 12.dp), contentAlignment = Alignment.CenterStart) {
+        BasicTextField(
+            value, onChange, Modifier.fillMaxWidth(), singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
+            textStyle = TextStyle(fontSize = 15.sp, color = p.ink), cursorBrush = SolidColor(p.ink),
+            decorationBox = { inner -> if (value.isEmpty()) Text(placeholder, fontSize = 15.sp, color = p.muted, maxLines = 1); inner() },
+        )
     }
 }

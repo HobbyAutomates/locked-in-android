@@ -1,8 +1,11 @@
 package com.sohum.bandlog.ui
 
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sohum.bandlog.data.Api
@@ -49,7 +52,7 @@ class AppViewModel : ViewModel() {
     val mealStreak: Int get() = Streaks.dayStreak(mealDates)
     val thisWeek: Int get() = Streaks.thisWeekCount(workoutDates)
 
-    /** Meals being parsed + saved in the background ("log now, review later"). Shown as shimmer rows. */
+    /** Meals saved while their parse / photo was still running. Shown as the pending banner on Home. */
     var pendingMeals by mutableStateOf<List<String>>(emptyList()); private set
     /** Set when a workout save bumps the week count / streak; the shell shows the celebration modal. */
     var celebrate by mutableStateOf<Celebration?>(null); private set
@@ -152,19 +155,55 @@ class AppViewModel : ViewModel() {
         viewModelScope.launch { com.sohum.bandlog.util.Health.writeSession(context.applicationContext, "Bands: " + muscles.joinToString(", "), minutes ?: 30, date) }
     }
 
-    /** Cal AI-style optimistic log: the row appears instantly; Haiku prices it in the background. */
-    fun quickLogMeal(text: String, date: String) {
-        pendingMeals = pendingMeals + text
+    // ---- v2.1: the one Add-food screen ----
+
+    /** What a background parse or plate photo adds to the plate: items, any notes, and the stored photo. */
+    data class MealBatch(val items: List<MealItem>, val notes: List<String> = emptyList(), val photoPath: String? = null)
+
+    /**
+     * "Work it out": parse-meal, run in the view model's scope so it survives the Log page closing
+     * (Save while it's still running saves as soon as it lands — see [saveMealAfter]).
+     */
+    fun parseAsync(text: String): Deferred<MealBatch> = viewModelScope.async {
+        val r = Api.parseMeal(text)
+        MealBatch(r.items, r.assumptions + r.unparsed.map { "Ignored: $it" })
+    }
+
+    /** The plate photo → per-item estimate; the JPEG is stored (or uploaded) so it saves with the meal. */
+    fun photoAsync(photo: android.graphics.Bitmap): Deferred<MealBatch> = viewModelScope.async {
+        val b64 = withContext(Dispatchers.Default) { com.sohum.bandlog.ui.scan.toJpegBase64(photo, 85) }
+        val est = Api.photoMeal(b64, "")
+        val path = est.photoPath ?: runCatching { Api.uploadMealPhoto(withContext(Dispatchers.Default) { com.sohum.bandlog.ui.scan.toJpegBytes(photo, 85) }) }.getOrNull()
+        MealBatch(est.items.map { it.toMealItem() }, est.notes, path)
+    }
+
+    /**
+     * Save pressed while a parse / photo is still working: the page closes, Home shows the pending
+     * row, and the meal is saved with everything already on the plate plus whatever the jobs add.
+     */
+    fun saveMealAfter(date: String, raw: String, items: List<MealItem>, photoPath: String?, jobs: List<Deferred<MealBatch>>) {
+        val label = raw.ifBlank { "Meal" }
+        pendingMeals = pendingMeals + label
         viewModelScope.launch {
             try {
-                val parsed = Api.parseMeal(text)
-                if (parsed.items.isNotEmpty()) Api.saveMeal(date, text, parsed.items)
-                else error = "Couldn't find any food in “${text.take(40)}”"
+                val batches = jobs.mapNotNull { runCatching { it.await() }.getOrNull() }
+                val all = items + batches.flatMap { it.items }
+                if (all.isNotEmpty()) Api.saveMeal(date, label, all, photoPath ?: batches.firstNotNullOfOrNull { it.photoPath })
+                else error = "Couldn't find any food in “${label.take(40)}”"
                 refresh()
             } catch (e: Exception) { error = e.message ?: "Couldn't log that meal" }
-            finally { pendingMeals = pendingMeals - text }
+            finally { pendingMeals = pendingMeals - label }
         }
     }
+
+    /** How often each food_id was logged in the last [days] days — orders presets most-used first. */
+    fun foodUse(days: Long = 60): Map<String, Int> {
+        val from = Dates.addDays(today, -days)
+        return meals.asSequence().filter { it.date >= from }.flatMap { it.items.asSequence() }.mapNotNull { it.foodId }.groupingBy { it }.eachCount()
+    }
+
+    /** The most recent band workout, for the Workout form's "Same as last time" pill. */
+    val lastWorkout: Workout? get() = workouts.maxWithOrNull(compareBy<Workout>({ it.date }, { it.id }))
 
     fun loadSavedMeals() { viewModelScope.launch { runCatching { savedMeals = Api.savedMeals() } } }
 

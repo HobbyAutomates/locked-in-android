@@ -1,5 +1,7 @@
 package com.sohum.bandlog.ui.scan
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -47,12 +49,10 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -83,7 +83,6 @@ import com.sohum.bandlog.ui.components.CameraIcon
 import com.sohum.bandlog.ui.components.Card
 import com.sohum.bandlog.ui.components.CheckIcon
 import com.sohum.bandlog.ui.components.ChevronDownIcon
-import com.sohum.bandlog.ui.components.Chip
 import com.sohum.bandlog.ui.components.CrossIcon
 import com.sohum.bandlog.ui.components.ErrorNote
 import com.sohum.bandlog.ui.components.Hair
@@ -100,7 +99,7 @@ import com.sohum.bandlog.ui.components.Rise
 import com.sohum.bandlog.ui.components.RowSpaceBetween
 import com.sohum.bandlog.ui.components.ScanIcon
 import com.sohum.bandlog.ui.components.ScreenTitle
-import com.sohum.bandlog.ui.components.Segmented
+import com.sohum.bandlog.ui.components.SmallChip
 import com.sohum.bandlog.ui.components.SpoonIcon
 import com.sohum.bandlog.ui.components.SubPage
 import com.sohum.bandlog.ui.log.NumberField
@@ -123,7 +122,7 @@ private const val OCR_MIN_CHARS = 120
 private val LENSES = listOf("protein" to "Protein", "snack" to "Snack", "cutting" to "Cutting", "bulking" to "Bulking")
 
 
-/** Bottom-nav tab: title, the three-mode scanner, and the History list. A tapped row opens its stored report. */
+/** Bottom-nav tab: title, the one-button scanner, and the History list. A tapped row opens its stored report. */
 @Composable
 fun ScanTab(vm: AppViewModel) {
     val p = palette
@@ -136,7 +135,6 @@ fun ScanTab(vm: AppViewModel) {
         Column(Modifier.fillMaxSize()) {
             Column(Modifier.padding(16.dp, 12.dp, 16.dp, 0.dp)) {
                 ScreenTitle("Scan")
-                Text("Label, barcode, or a photo of your plate", fontSize = 13.sp, color = p.muted)
             }
             Box(Modifier.weight(1f).padding(bottom = 96.dp)) {
                 ScanForm(vm, history, onScanned = { historyTick++ }, onOpen = { open = it }, onDelete = { item ->
@@ -157,9 +155,17 @@ fun ScanTab(vm: AppViewModel) {
     }
 }
 
+/** Label words in English and Hindi — with ≥120 characters read, one of these means it's a label. */
+private val LABEL_WORDS = Regex("ingredients|nutrition|energy|protein|kcal|सामग्री|पोषण|ऊर्जा|प्रोटीन|कैलोरी", RegexOption.IGNORE_CASE)
+
+internal fun looksLikeLabel(text: String): Boolean = text.trim().length >= OCR_MIN_CHARS && LABEL_WORDS.containsMatchIn(text)
+
+private val KINDS = listOf("barcode" to "Barcode", "label" to "Label", "plate" to "Plate")
+
 /**
- * Three ways in: Label (ML Kit OCR → text → report), Barcode (ML Kit barcode → Open Food Facts →
- * the same report) and Food photo (Sonnet vision → per-item estimate you can edit and save as a meal).
+ * v2.1: one Scan button. The phone works out what the photo is — ML Kit barcode first, then ML Kit
+ * OCR (≥120 characters that read like a nutrition panel → label), otherwise a plate — and runs
+ * that flow straight away. A chip row ("Looks like a label — change?") overrides the guess.
  */
 @Composable
 private fun ScanForm(
@@ -173,15 +179,17 @@ private fun ScanForm(
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val focus = LocalFocusManager.current
-    var mode by remember { mutableIntStateOf(0) } // 0 label · 1 barcode · 2 food photo
     // Profile → Preferences → "Judge scans for" decides where the lens starts.
-    var lens by remember(vm.profile.initialLens) { mutableStateOf(vm.profile.initialLens) }
+    val lens = vm.profile.initialLens
     var photo by remember { mutableStateOf<Bitmap?>(null) }
+    var kind by remember { mutableStateOf<String?>(null) }
     var ocr by remember { mutableStateOf("") }
     var barcode by remember { mutableStateOf("") }
     var reading by remember { mutableStateOf(false) }
     var showText by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf("") }
+    var noteOpen by remember { mutableStateOf(false) }
+    var digitsOpen by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var report by remember { mutableStateOf<LabelReport?>(null) }
@@ -191,57 +199,33 @@ private fun ScanForm(
 
     fun clearResults() { report = null; plate = null; notFound = false; error = null }
 
-    /** New photo → clear the old results and run the on-device reader that fits the mode. */
-    fun accept(bitmap: Bitmap?) {
-        photo = bitmap; ocr = ""; clearResults()
-        val bmp = bitmap ?: return
-        when (mode) {
-            0 -> scope.launch {
-                reading = true
-                ocr = runCatching { Ocr.read(bmp) }.getOrDefault("")
-                reading = false
-                showText = ocr.isNotBlank() || ocr.length < OCR_MIN_CHARS
-            }
-            1 -> scope.launch {
-                reading = true
-                val code = runCatching { Barcode.read(bmp) }.getOrNull()
-                reading = false
-                if (code != null) barcode = code else error = "No barcode found — get closer, or type the digits below."
-            }
-        }
+    suspend fun labelFrom(bmp: Bitmap?) {
+        if (ocr.isBlank() && bmp != null) ocr = runCatching { Ocr.read(bmp) }.getOrDefault("")
+        val text = ocr.trim()
+        val b64 = if (text.length < OCR_MIN_CHARS && bmp != null) withContext(Dispatchers.IO) { toJpegBase64(bmp, 88) } else null
+        report = Api.scanLabel(text, note, b64, lens)
     }
 
-    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
-        if (ok) target.value?.let { uri -> scope.launch { accept(withContext(Dispatchers.IO) { decodeScaled(ctx, uri, if (mode == 2) 1600 else 2200) }) } }
-    }
-    val gallery = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) scope.launch { accept(withContext(Dispatchers.IO) { decodeScaled(ctx, uri, if (mode == 2) 1600 else 2200) }) }
-    }
-
-    fun openCamera() {
-        val dir = File(ctx.cacheDir, "scans").apply { mkdirs() }
-        val f = File(dir, "capture.jpg")
-        val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f)
-        target.value = uri
-        runCatching { camera.launch(uri) }.onFailure { error = "No camera app found — pick from gallery instead." }
-    }
-
-    fun analyse() {
+    /** Runs the flow for [k] on the current photo (or typed digits). */
+    fun runKind(k: String) {
         val bmp = photo
+        kind = k
         scope.launch {
             busy = true; clearResults()
             try {
-                when (mode) {
-                    0 -> {
-                        bmp ?: return@launch
-                        val text = ocr.trim()
-                        val b64 = if (text.length < OCR_MIN_CHARS) withContext(Dispatchers.IO) { toJpegBase64(bmp, 88) } else null
-                        report = Api.scanLabel(text, note, b64, lens)
+                when (k) {
+                    "barcode" -> {
+                        val digits = barcode.filter(Char::isDigit)
+                        if (digits.length < 8) { error = "No barcode in that photo — type the digits under the bars."; digitsOpen = true; return@launch }
+                        val r = Api.scanBarcode(digits, lens, note)
+                        when {
+                            r != null -> report = r
+                            // Not on Open Food Facts: if the same photo shows the label, read that instead.
+                            bmp != null && looksLikeLabel(ocr.ifBlank { runCatching { Ocr.read(bmp) }.getOrDefault("").also { ocr = it } }) -> { kind = "label"; labelFrom(bmp) }
+                            else -> notFound = true
+                        }
                     }
-                    1 -> {
-                        val r = Api.scanBarcode(barcode.filter(Char::isDigit), lens, note)
-                        if (r == null) notFound = true else report = r
-                    }
+                    "label" -> labelFrom(bmp)
                     else -> {
                         bmp ?: return@launch
                         plate = Api.photoMeal(withContext(Dispatchers.IO) { toJpegBase64(bmp, 85) }, note)
@@ -252,95 +236,128 @@ private fun ScanForm(
         }
     }
 
-    val canAnalyse = when (mode) { 1 -> barcode.filter(Char::isDigit).length >= 8; else -> photo != null }
+    /** New photo → barcode? → label? → plate, then straight into that flow. */
+    fun accept(bitmap: Bitmap?) {
+        photo = bitmap; ocr = ""; barcode = ""; kind = null; clearResults(); showText = false
+        val bmp = bitmap ?: run { error = "Couldn't open that photo"; return }
+        scope.launch {
+            reading = true
+            val code = runCatching { Barcode.read(bmp) }.getOrNull()
+            if (code != null) barcode = code else ocr = runCatching { Ocr.read(bmp) }.getOrDefault("")
+            reading = false
+            runKind(when { code != null -> "barcode"; looksLikeLabel(ocr) -> "label"; else -> "plate" })
+        }
+    }
+
+    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+        if (ok) target.value?.let { uri -> scope.launch { accept(withContext(Dispatchers.IO) { decodeScaled(ctx, uri, 2200) }) } }
+    }
+    val gallery = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) scope.launch { accept(withContext(Dispatchers.IO) { decodeScaled(ctx, uri, 2200) }) }
+    }
+    fun openCamera() {
+        val dir = File(ctx.cacheDir, "scans").apply { mkdirs() }
+        val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", File(dir, "capture.jpg"))
+        target.value = uri
+        runCatching { camera.launch(uri) }.onFailure { error = "No camera app found — pick from gallery instead." }
+    }
 
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp, 6.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Rise(0) {
-                Segmented(listOf("Label", "Barcode", "Food photo"), mode, { i -> mode = i; photo = null; ocr = ""; barcode = ""; clearResults() })
-            }
-            Rise(1) {
                 Card {
-                    val (icon, title, sub) = when (mode) {
-                        0 -> Triple(ScanIcon, "Scan an ingredients label", "What it is, how it fits your goal, and whether to trust the pack")
-                        1 -> Triple(BarcodeIcon, "Scan the barcode", "EAN under the bars — looked up on Open Food Facts")
-                        else -> Triple(CameraIcon, "Photograph your plate", "Every item with grams, calories, macros and micros")
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(40.dp).background(p.btn, CircleShape), contentAlignment = Alignment.Center) { Icon(icon, null, tint = p.btnInk, modifier = Modifier.size(18.dp)) }
-                        Spacer(Modifier.width(10.dp))
-                        Column {
-                            Text(title, fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink)
-                            Text(sub, fontSize = 12.sp, color = p.muted)
+                    val bmp = photo
+                    if (bmp == null) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(44.dp).background(p.btn, CircleShape), contentAlignment = Alignment.Center) { Icon(ScanIcon, null, tint = p.btnInk, modifier = Modifier.size(20.dp)) }
+                            Spacer(Modifier.width(12.dp))
+                            Column {
+                                Text("Scan anything you eat", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
+                                Text("A barcode, a label or your plate — it works out which", fontSize = 12.sp, color = p.muted)
+                            }
                         }
-                    }
-                    if (mode != 2) {
-                        Spacer(Modifier.height(12.dp))
-                        Text("Judge it for", fontSize = 12.sp, fontWeight = FontWeight(600), color = p.muted)
-                        Spacer(Modifier.height(6.dp))
-                        LensSwitch(lens) { lens = it }
+                    } else {
+                        Image(bmp.asImageBitmap(), null, Modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape(14.dp)), contentScale = ContentScale.Crop)
                     }
                     Spacer(Modifier.height(12.dp))
-                    val bmp = photo
-                    if (bmp != null) {
-                        Image(bmp.asImageBitmap(), null, Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(14.dp)), contentScale = ContentScale.Crop)
-                        Spacer(Modifier.height(10.dp))
-                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        PillButton(if (bmp == null) "Take photo" else "Retake", { openCamera() }, Modifier.weight(1f), height = 46.dp)
-                        PillButton("Gallery", { gallery.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, Modifier.weight(1f), height = 46.dp, bg = p.card2, fg = p.ink)
+                        PillButton(if (bmp == null) "Scan" else "Scan again", { openCamera() }, Modifier.weight(1f), enabled = !busy && !reading, height = 48.dp)
+                        PillButton("Gallery", { gallery.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, Modifier.weight(0.6f), enabled = !busy && !reading, height = 48.dp, bg = p.card2, fg = p.ink)
                     }
-                    if (mode == 1) {
+
+                    // What the phone thinks it is, with a one-tap override.
+                    val k = kind
+                    if (bmp != null && k != null) {
                         Spacer(Modifier.height(10.dp))
-                        Box(Modifier.fillMaxWidth().background(p.card2, RoundedCornerShape(12.dp)).padding(12.dp)) {
-                            BasicTextField(
-                                barcode, { barcode = it.filter(Char::isDigit).take(14) }, Modifier.fillMaxWidth(), singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-                                keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
-                                textStyle = TextStyle(fontSize = 16.sp, fontWeight = FontWeight(700), color = p.ink, letterSpacing = 1.sp), cursorBrush = SolidColor(p.ink),
-                                decorationBox = { inner -> if (barcode.isEmpty()) Text(if (reading) "Reading the barcode…" else "Or type the digits, e.g. 8901058851298", fontSize = 14.sp, color = p.muted); inner() },
-                            )
+                        Text(
+                            "Looks like " + when (k) { "barcode" -> "a barcode"; "label" -> "a label"; else -> "a plate" } + " — change?",
+                            fontSize = 12.sp, fontWeight = FontWeight(600), color = p.muted,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            KINDS.forEach { (key, label) -> SmallChip(label, { if (key != k && !busy) runKind(key) }, filled = key == k) }
                         }
                     }
-                    if (mode == 0 && bmp != null) {
-                        Spacer(Modifier.height(10.dp))
-                        WhatIRead(ocr, reading, showText, { showText = !showText }) { ocr = it }
+                    if (reading || busy) {
+                        Spacer(Modifier.height(8.dp))
+                        LinearProgressIndicator(Modifier.fillMaxWidth(), color = p.ink, trackColor = p.track)
+                        Text(
+                            when {
+                                reading -> "Working out what it is…"
+                                k == "plate" -> "Identifying each item, then checking the food table. 10–20 s."
+                                k == "barcode" -> "Looking it up, then writing your report. About 10 seconds."
+                                ocr.trim().length < OCR_MIN_CHARS -> "Your phone couldn't read enough, so the photo is going up too — 20–45 s."
+                                else -> "Checking the brand and writing your report. About 8 seconds."
+                            },
+                            fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(top = 6.dp),
+                        )
                     }
-                    if (canAnalyse) {
+                    if (k == "label" && bmp != null && !reading) {
                         Spacer(Modifier.height(10.dp))
-                        Box(Modifier.fillMaxWidth().background(p.card2, RoundedCornerShape(12.dp)).padding(12.dp)) {
-                            BasicTextField(
-                                note, { note = it }, Modifier.fillMaxWidth(), singleLine = true,
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
-                                textStyle = TextStyle(fontSize = 14.sp, color = p.ink), cursorBrush = SolidColor(p.ink),
-                                decorationBox = { inner -> if (note.isEmpty()) Text(if (mode == 2) "Optional: e.g. the dal has ghee, two rotis" else "Optional: what is it / what do you want to know", fontSize = 14.sp, color = p.muted); inner() },
-                            )
-                        }
+                        WhatIRead(ocr, false, showText, { showText = !showText }) { ocr = it }
+                    }
+
+                    // The quieter ways in: typed digits, a note for the analysis.
+                    if (digitsOpen) {
                         Spacer(Modifier.height(10.dp))
-                        val label = when { busy && mode == 2 -> "Looking at the plate…"; busy -> "Analysing…"; mode == 2 -> "Estimate"; mode == 1 -> "Look it up"; else -> "Analyse" }
-                        PillButton(label, enabled = !busy && !reading, height = 48.dp, onClick = { analyse() })
-                        if (busy) {
-                            Spacer(Modifier.height(10.dp))
-                            LinearProgressIndicator(Modifier.fillMaxWidth(), color = p.ink, trackColor = p.track)
-                            Text(
-                                when (mode) {
-                                    2 -> "Identifying each item, then checking the food table. 10–20 s."
-                                    1 -> "Looking it up, then writing your report. About 10 seconds."
-                                    else -> if (ocr.trim().length < OCR_MIN_CHARS) "Your phone couldn't read enough, so the photo is going up too — 20–45 s." else "Checking the brand and writing your report. About 8 seconds."
-                                },
-                                fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(top = 6.dp),
-                            )
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Box(Modifier.weight(1f).height(48.dp).background(p.card2, RoundedCornerShape(12.dp)).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
+                                BasicTextField(
+                                    barcode, { barcode = it.filter(Char::isDigit).take(14) }, Modifier.fillMaxWidth(), singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Go),
+                                    keyboardActions = KeyboardActions(onGo = { focus.clearFocus(); runKind("barcode") }),
+                                    textStyle = TextStyle(fontSize = 16.sp, fontWeight = FontWeight(700), color = p.ink, letterSpacing = 1.sp), cursorBrush = SolidColor(p.ink),
+                                    decorationBox = { inner -> if (barcode.isEmpty()) Text("e.g. 8901058851298", fontSize = 14.sp, color = p.muted); inner() },
+                                )
+                            }
+                            PillButton("Look up", { focus.clearFocus(); runKind("barcode") }, Modifier.width(96.dp), enabled = barcode.length >= 8 && !busy, height = 48.dp)
                         }
+                    }
+                    if (noteOpen && bmp != null) {
+                        Spacer(Modifier.height(10.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Box(Modifier.weight(1f).height(48.dp).background(p.card2, RoundedCornerShape(12.dp)).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
+                                BasicTextField(
+                                    note, { note = it }, Modifier.fillMaxWidth(), singleLine = true,
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
+                                    textStyle = TextStyle(fontSize = 14.sp, color = p.ink), cursorBrush = SolidColor(p.ink),
+                                    decorationBox = { inner -> if (note.isEmpty()) Text(if (k == "plate") "e.g. the dal has ghee, two rotis" else "What is it / what do you want to know", fontSize = 14.sp, color = p.muted, maxLines = 1); inner() },
+                                )
+                            }
+                            PillButton("Redo", { focus.clearFocus(); k?.let { runKind(it) } }, Modifier.width(80.dp), enabled = k != null && !busy && !reading, height = 48.dp)
+                        }
+                    }
+                    if (!digitsOpen || (!noteOpen && bmp != null)) Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.Center) {
+                        if (!digitsOpen) TextLinkSmall("Type barcode digits") { digitsOpen = true }
+                        if (!noteOpen && bmp != null) TextLinkSmall("Add a note") { noteOpen = true }
                     }
                 }
             }
             ErrorNote(error)
             if (notFound) Rise(2) {
                 Card {
-                    Text("Not in the database yet", fontWeight = FontWeight(700), fontSize = 15.sp, color = p.ink)
-                    Text("Open Food Facts doesn't know this barcode. Scan the label instead — it reads the pack itself.", fontSize = 13.sp, color = p.muted, lineHeight = 18.sp)
+                    Text("Not in the database yet — photograph the label side instead.", fontSize = 14.sp, color = p.ink, lineHeight = 19.sp)
                     Spacer(Modifier.height(10.dp))
-                    PillButton("Scan the label", { mode = 0; photo = null; clearResults() }, height = 44.dp, bg = p.card2, fg = p.ink)
+                    PillButton("Scan again", { openCamera() }, height = 46.dp)
                 }
             }
             report?.let { ReportView(it, lens, onLogged = { vm.refresh() }) }
@@ -351,7 +368,7 @@ private fun ScanForm(
                         val photoPath = path ?: photo?.let { b -> runCatching { Api.uploadMealPhoto(withContext(Dispatchers.IO) { toJpegBytes(b, 85) }) }.getOrNull() }
                         val ok = vm.saveMeal(Dates.today(), est.plateNote.ifBlank { items.joinToString(", ") { it.name } }, items.map { it.toMealItem() }, photoPath)
                         busy = false
-                        if (ok) { plate = null; photo = null } else error = vm.error
+                        if (ok) { plate = null; photo = null; kind = null } else error = vm.error
                     }
                 }
             }
@@ -361,11 +378,18 @@ private fun ScanForm(
     }
 }
 
-/** Protein · Snack · Cutting · Bulking. */
+@Composable
+private fun TextLinkSmall(label: String, onClick: () -> Unit) {
+    Box(Modifier.heightIn(min = 44.dp).clickable(onClick = onClick).padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight(700), color = palette.muted)
+    }
+}
+
+/** Protein · Snack · Cutting · Bulking, as small chips. */
 @Composable
 private fun LensSwitch(value: String, onChange: (String) -> Unit) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        LENSES.forEach { (key, label) -> Chip(label, key == value, { onChange(key) }, Modifier.weight(1f)) }
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        LENSES.forEach { (key, label) -> SmallChip(label, { onChange(key) }, filled = key == value) }
     }
 }
 
@@ -413,9 +437,12 @@ private fun WhatIRead(text: String, reading: Boolean, expanded: Boolean, onToggl
 /** great = green, ok = orange, weak = grey. Never red: a weak fit is a description, not a warning. */
 @Composable
 private fun fitColor(verdict: String): Color = when (verdict) { "great" -> palette.green; "ok" -> palette.orange; else -> palette.muted }
-private fun fitLabel(verdict: String) = when (verdict) { "great" -> "Great fit"; "ok" -> "Fine"; else -> "Weak fit" }
 private fun eatLabel(verdict: String) = when (verdict) { "great" -> "Eat it"; "ok" -> "Sometimes"; else -> "Skip for this" }
 
+/**
+ * v2.1 report: a hero (product, score ring, one-liner, the "Eat it?" pill for the lens and why,
+ * lens chips), then "Log 1 serving", then everything else folded into one "Details" expander.
+ */
 @Composable
 fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Unit = {}) {
     val p = palette
@@ -425,6 +452,7 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Uni
     }
     val scope = rememberCoroutineScope()
     var lens by remember(r) { mutableStateOf(if (r.fits.containsKey(initialLens)) initialLens else r.lens) }
+    var details by remember(r) { mutableStateOf(false) }
     val g = r.infographic
     val fit = r.fits[lens]
     val score = g.score
@@ -435,212 +463,188 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Uni
     var logged by remember(r) { mutableStateOf<String?>(null) }
     var logError by remember(r) { mutableStateOf<String?>(null) }
 
-    // 1. What it is: product, the neutral description, the score for the report's lens.
+    // ---- hero ----
     Rise(1) {
         Card(padding = 18.dp) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                if (r.imageUrl != null) { RemoteImage(url = r.imageUrl, size = 64.dp, radius = 12.dp, fallback = BarcodeIcon); Spacer(Modifier.width(12.dp)) }
+                if (r.imageUrl != null) { RemoteImage(url = r.imageUrl, size = 56.dp, radius = 12.dp, fallback = BarcodeIcon); Spacer(Modifier.width(12.dp)) }
                 Column(Modifier.weight(1f)) {
                     // Long product names wrap (no maxLines) and never push the ring off the card.
                     Text(r.product.ifBlank { "Unknown product" }, fontSize = 19.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink, lineHeight = 23.sp, softWrap = true)
-                    if (g.oneLiner.isNotBlank()) {
-                        Spacer(Modifier.height(4.dp))
-                        Text(g.oneLiner, fontSize = 13.sp, color = p.muted, lineHeight = 18.sp)
-                    }
+                    if (g.oneLiner.isNotBlank()) Text(g.oneLiner, fontSize = 13.sp, color = p.muted, lineHeight = 18.sp, modifier = Modifier.padding(top = 4.dp))
                 }
                 Spacer(Modifier.width(12.dp))
-                Ring(score / 10f, scoreColor, 72.dp, 8.dp) {
+                Ring(score / 10f, scoreColor, 68.dp, 8.dp) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("$score", fontSize = 24.sp, fontWeight = FontWeight(800), letterSpacing = (-1).sp, color = p.ink, lineHeight = 26.sp)
+                        Text("$score", fontSize = 22.sp, fontWeight = FontWeight(800), letterSpacing = (-1).sp, color = p.ink, lineHeight = 24.sp)
                         Text("/ 10", fontSize = 10.sp, fontWeight = FontWeight(600), color = p.muted)
                     }
                 }
             }
-            if (r.whatItIs.isNotBlank()) {
-                Spacer(Modifier.height(12.dp))
-                Text(r.whatItIs, fontSize = 14.sp, color = p.ink, lineHeight = 20.sp)
-            }
-            if (food != null) {
-                Spacer(Modifier.height(14.dp))
-                PillButton("Log 1 serving" + (r.servingG?.takeIf { it > 0 }?.let { " · ${it.roundToInt()} g" } ?: ""), { logFood = food }, height = 44.dp)
-                logged?.let { Spacer(Modifier.height(8.dp)); Row(verticalAlignment = Alignment.CenterVertically) { Icon(CheckIcon, null, tint = p.green, modifier = Modifier.size(14.dp)); Text("  $it — on Home", fontSize = 12.sp, fontWeight = FontWeight(600), color = p.green) } }
-                logError?.let { Spacer(Modifier.height(8.dp)); Text(it, fontSize = 12.sp, color = p.red) }
-            }
-        }
-    }
-
-    // 1b. One serving as a donut: P / C / F share of its calories.
-    if (food != null && (food.proteinG + food.carbsG + food.fatG) > 0) Rise(1) {
-        Card {
-            Text("One serving", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
-            Text(if (r.servingG != null && r.servingG > 0) "${r.servingG.roundToInt()} g · where the calories come from" else "Per 100 g · where the calories come from", fontSize = 12.sp, color = p.muted)
-            Spacer(Modifier.height(12.dp))
-            val k = (r.servingG?.takeIf { it > 0 } ?: 100.0) / 100.0
-            val pr = food.proteinG * k; val cb = food.carbsG * k; val ft = food.fatG * k
-            val kcalSum = pr * 4 + cb * 4 + ft * 9
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                MacroDonut(pr, cb, ft) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("${(food.calories * k).roundToInt()}", fontSize = 18.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink, lineHeight = 20.sp)
-                        Text("kcal", fontSize = 10.sp, fontWeight = FontWeight(600), color = p.muted)
-                    }
-                }
-                Spacer(Modifier.width(16.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(Triple("Protein", pr * 4, p.red to pr), Triple("Carbs", cb * 4, p.orange to cb), Triple("Fat", ft * 9, p.blue to ft)).forEach { (label, kc, cg) ->
-                        MacroDot("$label ${if (kcalSum > 0) (kc / kcalSum * 100).roundToInt() else 0}% · ${fmt((cg.second * 10).roundToInt() / 10.0)} g", cg.first)
-                    }
-                }
-            }
-        }
-    }
-
-    // 2. How it fits: the lens switcher and that lens's card, with the per-lens "eat it" pill.
-    if (r.fits.isNotEmpty()) Rise(2) {
-        Card {
-            Text("How it fits", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
-            Spacer(Modifier.height(10.dp))
-            LensSwitch(lens) { lens = it }
             if (fit != null) {
                 val c = fitColor(fit.verdict)
+                Spacer(Modifier.height(14.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.background(c, CircleShape).padding(14.dp, 7.dp)) {
+                        Text(eatLabel(fit.verdict), fontSize = 13.sp, fontWeight = FontWeight(800), color = if (fit.verdict == "weak") p.card else Color.White)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text("for ${LENSES.firstOrNull { it.first == lens }?.second?.lowercase() ?: lens}", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted)
+                }
+                if (fit.why.isNotBlank()) Text(fit.why, fontSize = 14.sp, color = p.ink, lineHeight = 20.sp, modifier = Modifier.padding(top = 8.dp))
+            }
+            if (r.fits.size > 1) {
+                Spacer(Modifier.height(4.dp))
+                LensSwitch(lens) { lens = it }
+            }
+        }
+    }
+
+    if (food != null) Rise(2) {
+        Column {
+            PillButton("Log 1 serving" + (r.servingG?.takeIf { it > 0 }?.let { " · ${it.roundToInt()} g" } ?: ""), { logFood = food })
+            logged?.let { Row(Modifier.padding(top = 8.dp, start = 4.dp), verticalAlignment = Alignment.CenterVertically) { Icon(CheckIcon, null, tint = p.green, modifier = Modifier.size(14.dp)); Text("  $it — on Home", fontSize = 12.sp, fontWeight = FontWeight(600), color = p.green) } }
+            logError?.let { Text(it, fontSize = 12.sp, color = p.red, modifier = Modifier.padding(top = 8.dp, start = 4.dp)) }
+        }
+    }
+
+    // ---- details ----
+    Rise(3) {
+        val rot by animateFloatAsState(if (details) 180f else 0f, Motion.spatialFast(), label = "details")
+        Card(padding = 16.dp, onClick = { details = !details }) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Details", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
+                    Text("Trust, sugar, salt, protein, ingredients, claims", fontSize = 12.sp, color = p.muted, maxLines = 1)
+                }
+                Icon(ChevronDownIcon, null, tint = p.muted, modifier = Modifier.size(20.dp).graphicsLayer { rotationZ = rot })
+            }
+        }
+    }
+    AnimatedVisibility(details) {
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            if (r.whatItIs.isNotBlank()) Card { Text("What it is", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink); Spacer(Modifier.height(6.dp)); Text(r.whatItIs, fontSize = 14.sp, color = p.ink, lineHeight = 20.sp) }
+
+            TrustMeter(r.verdict, r.verdictReason)
+
+            // One serving as a donut, and against the whole day.
+            if (food != null && (food.proteinG + food.carbsG + food.fatG) > 0) Card {
+                Text("One serving", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
+                Text(if (r.servingG != null && r.servingG > 0) "${r.servingG.roundToInt()} g · where the calories come from" else "Per 100 g · where the calories come from", fontSize = 12.sp, color = p.muted)
                 Spacer(Modifier.height(12.dp))
-                Column(Modifier.fillMaxWidth().background(c.copy(alpha = 0.12f), RoundedCornerShape(14.dp)).padding(14.dp)) {
+                val k = (r.servingG?.takeIf { it > 0 } ?: 100.0) / 100.0
+                val pr = food.proteinG * k; val cb = food.carbsG * k; val ft = food.fatG * k
+                val kcalSum = pr * 4 + cb * 4 + ft * 9
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    MacroDonut(pr, cb, ft) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("${(food.calories * k).roundToInt()}", fontSize = 18.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink, lineHeight = 20.sp)
+                            Text("kcal", fontSize = 10.sp, fontWeight = FontWeight(600), color = p.muted)
+                        }
+                    }
+                    Spacer(Modifier.width(16.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(Triple("Protein", pr * 4, p.red to pr), Triple("Carbs", cb * 4, p.orange to cb), Triple("Fat", ft * 9, p.blue to ft)).forEach { (label, kc, cg) ->
+                            MacroDot("$label ${if (kcalSum > 0) (kc / kcalSum * 100).roundToInt() else 0}% · ${fmt((cg.second * 10).roundToInt() / 10.0)} g", cg.first)
+                        }
+                    }
+                }
+                if (g.caloriesPct + g.proteinPct + g.carbsPct + g.fatPct > 0) {
+                    Spacer(Modifier.height(14.dp))
+                    Text("…is this much of your whole day", fontSize = 12.sp, color = p.muted)
+                    Spacer(Modifier.height(8.dp))
+                    ShareRow("Calories", g.caloriesPct, p.ink)
+                    ShareRow("Protein", g.proteinPct, p.red)
+                    ShareRow("Carbs", g.carbsPct, p.orange)
+                    ShareRow("Fat", g.fatPct, p.blue)
+                }
+            }
+
+            // Sugar in teaspoons and salt, side by side in one card.
+            val spoons = g.sugarTsp.roundToInt()
+            if (g.sugarTsp > 0.04 || g.sodiumPct > 0) Card {
+                if (g.sugarTsp > 0.04) {
+                    Text("Sugar", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
+                    Spacer(Modifier.height(8.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.background(c.copy(alpha = 0.18f), CircleShape).padding(12.dp, 6.dp)) {
-                            Text(fitLabel(fit.verdict), fontSize = 12.sp, fontWeight = FontWeight(800), color = c)
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Box(Modifier.background(c, CircleShape).padding(12.dp, 6.dp)) {
-                            Text(eatLabel(fit.verdict), fontSize = 12.sp, fontWeight = FontWeight(800), color = if (fit.verdict == "weak") p.card else Color.White)
-                        }
+                        repeat(spoons.coerceIn(0, 12)) { Icon(SpoonIcon, null, tint = p.orange, modifier = Modifier.size(19.dp).padding(end = 2.dp)) }
+                        if (spoons > 12) Text("+", fontSize = 18.sp, fontWeight = FontWeight(800), color = p.orange)
+                    }
+                    Text(if (spoons == 0) "Less than 1 tsp of sugar per serving" else "$spoons tsp of sugar per serving", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted, modifier = Modifier.padding(top = 6.dp))
+                }
+                if (g.sodiumPct > 0) {
+                    if (g.sugarTsp > 0.04) { Spacer(Modifier.height(12.dp)); Hair(); Spacer(Modifier.height(12.dp)) }
+                    val c = if (g.sodiumPct >= 40) p.red else if (g.sodiumPct >= 20) p.orange else p.green
+                    RowSpaceBetween {
+                        Text("Salt", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
+                        Text("${g.sodiumPct}% of a day", fontSize = 13.sp, fontWeight = FontWeight(800), color = c)
                     }
                     Spacer(Modifier.height(8.dp))
-                    Text(fit.why, fontSize = 14.sp, color = p.ink, lineHeight = 20.sp)
+                    FillBar(g.sodiumPct / 100f, c)
                 }
             }
-        }
-    }
 
-    // 3. Trust meter (safety and honesty only).
-    Rise(3) { TrustMeter(r.verdict, r.verdictReason) }
-
-    // 4. One serving against the day.
-    if (g.caloriesPct + g.proteinPct + g.carbsPct + g.fatPct > 0) Rise(4) {
-        Card {
-            Text("One serving = …", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
-            Text("…this much of your whole day.", fontSize = 12.sp, color = p.muted)
-            Spacer(Modifier.height(12.dp))
-            ShareRow("Calories", g.caloriesPct, p.ink)
-            ShareRow("Protein", g.proteinPct, p.red)
-            ShareRow("Carbs", g.carbsPct, p.orange)
-            ShareRow("Fat", g.fatPct, p.blue)
-        }
-    }
-
-    // 5. Sugar, counted in teaspoons.
-    val spoons = g.sugarTsp.roundToInt()
-    if (g.sugarTsp > 0.04) Rise(5) {
-        Card {
-            Text("Sugar", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
-            Spacer(Modifier.height(10.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                repeat(spoons.coerceIn(0, 12)) { Icon(SpoonIcon, null, tint = p.orange, modifier = Modifier.size(19.dp).padding(end = 2.dp)) }
-                if (spoons > 12) Text("+", fontSize = 18.sp, fontWeight = FontWeight(800), color = p.orange)
-                if (spoons == 0) Text("under half a spoon", fontSize = 13.sp, color = p.muted)
+            Card {
+                val pc = when (r.proteinRating) { "excellent", "good" -> p.green; "average" -> p.orange; else -> p.muted }
+                val gauge = when (r.proteinRating) { "excellent" -> 1f; "good" -> 0.75f; "average" -> 0.45f; else -> 0.15f }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Ring(gauge, pc, 60.dp, 8.dp) { Text(r.proteinPerServing?.let { "${it.roundToInt()}g" } ?: "—", fontSize = 15.sp, fontWeight = FontWeight(800), color = p.ink) }
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Protein · ${r.proteinRating.replaceFirstChar { it.uppercase() }}", fontSize = 15.sp, fontWeight = FontWeight(700), color = pc)
+                        if (r.proteinQuality.isNotBlank()) Text(r.proteinQuality, fontSize = 13.sp, color = p.ink, lineHeight = 18.sp, modifier = Modifier.padding(top = 2.dp))
+                    }
+                }
+                if (r.proteinNote.isNotBlank()) { Spacer(Modifier.height(8.dp)); Text(r.proteinNote, fontSize = 13.sp, color = p.muted, lineHeight = 18.sp) }
             }
-            Spacer(Modifier.height(8.dp))
-            Text(if (spoons == 0) "Less than 1 tsp of sugar per serving" else "$spoons tsp of sugar per serving", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted)
-        }
-    }
 
-    // 6. Salt.
-    if (g.sodiumPct > 0) Rise(6) {
-        Card {
-            val c = if (g.sodiumPct >= 40) p.red else if (g.sodiumPct >= 20) p.orange else p.green
-            RowSpaceBetween {
-                Text("Salt", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
-                Text("${g.sodiumPct}%", fontSize = 15.sp, fontWeight = FontWeight(800), color = c)
-            }
-            Spacer(Modifier.height(10.dp))
-            FillBar(g.sodiumPct / 100f, c)
-            Spacer(Modifier.height(8.dp))
-            Text("% of a day's salt", fontSize = 12.sp, color = p.muted)
-        }
-    }
-
-    // 7. Protein.
-    Rise(7) {
-        Card {
-            val pc = when (r.proteinRating) { "excellent", "good" -> p.green; "average" -> p.orange; else -> p.muted }
-            val gauge = when (r.proteinRating) { "excellent" -> 1f; "good" -> 0.75f; "average" -> 0.45f; else -> 0.15f }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Ring(gauge, pc, 64.dp, 8.dp) { Text(r.proteinPerServing?.let { "${it.roundToInt()}g" } ?: "—", fontSize = 15.sp, fontWeight = FontWeight(800), color = p.ink) }
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Protein · ${r.proteinRating.replaceFirstChar { it.uppercase() }}", fontSize = 15.sp, fontWeight = FontWeight(700), color = pc)
-                    if (r.proteinQuality.isNotBlank()) Text(r.proteinQuality, fontSize = 13.sp, color = p.ink, lineHeight = 18.sp, modifier = Modifier.padding(top = 2.dp))
+            if (r.concerns.isNotEmpty()) Card {
+                Text("Ingredients", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
+                r.concerns.forEach { (ing, issue, sev) ->
+                    val c = when (sev) { "high" -> p.red; "medium" -> p.orange; else -> p.green }
+                    Spacer(Modifier.height(10.dp))
+                    Box(Modifier.background(c.copy(alpha = 0.16f), CircleShape).padding(12.dp, 6.dp)) { Text(ing, fontSize = 13.sp, fontWeight = FontWeight(700), color = c) }
+                    Spacer(Modifier.height(4.dp))
+                    Text(issue, fontSize = 13.sp, color = p.muted, lineHeight = 18.sp)
                 }
             }
-            if (r.proteinNote.isNotBlank()) { Spacer(Modifier.height(8.dp)); Text(r.proteinNote, fontSize = 13.sp, color = p.muted, lineHeight = 18.sp) }
-        }
-    }
 
-    // 8. Ingredients as chips.
-    if (r.concerns.isNotEmpty()) Rise(8) {
-        Card {
-            Text("Ingredients", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
-            r.concerns.forEach { (ing, issue, sev) ->
-                val c = when (sev) { "high" -> p.red; "medium" -> p.orange; else -> p.green }
-                Spacer(Modifier.height(10.dp))
-                Box(Modifier.background(c.copy(alpha = 0.16f), CircleShape).padding(12.dp, 6.dp)) { Text(ing, fontSize = 13.sp, fontWeight = FontWeight(700), color = c) }
-                Spacer(Modifier.height(4.dp))
-                Text(issue, fontSize = 13.sp, color = p.muted, lineHeight = 18.sp)
-            }
-        }
-    }
-
-    // 9. Claims.
-    if (r.claims.isNotEmpty()) Rise(9) {
-        Card {
-            Text("Claims on the pack", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
-            r.claims.forEach { (claim, status, why) ->
-                Spacer(Modifier.height(10.dp))
-                val (c, icon) = when (status) { "supported" -> p.green to CheckIcon; "misleading", "false" -> p.red to CrossIcon; else -> p.orange to QuestionIcon }
-                Row(verticalAlignment = Alignment.Top) {
-                    Box(Modifier.size(22.dp).background(c.copy(alpha = 0.16f), CircleShape), contentAlignment = Alignment.Center) { Icon(icon, null, tint = c, modifier = Modifier.size(13.dp)) }
-                    Spacer(Modifier.width(10.dp))
-                    Column {
-                        Text("“$claim”", fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink, lineHeight = 19.sp)
-                        Text(why, fontSize = 13.sp, color = p.muted, lineHeight = 18.sp)
+            if (r.claims.isNotEmpty()) Card {
+                Text("Claims on the pack", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
+                r.claims.forEach { (claim, status, why) ->
+                    Spacer(Modifier.height(10.dp))
+                    val (c, icon) = when (status) { "supported" -> p.green to CheckIcon; "misleading", "false" -> p.red to CrossIcon; else -> p.orange to QuestionIcon }
+                    Row(verticalAlignment = Alignment.Top) {
+                        Box(Modifier.size(22.dp).background(c.copy(alpha = 0.16f), CircleShape), contentAlignment = Alignment.Center) { Icon(icon, null, tint = c, modifier = Modifier.size(13.dp)) }
+                        Spacer(Modifier.width(10.dp))
+                        Column {
+                            Text("“$claim”", fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink, lineHeight = 19.sp)
+                            Text(why, fontSize = 13.sp, color = p.muted, lineHeight = 18.sp)
+                        }
                     }
                 }
             }
-        }
-    }
 
-    // 10. For you / better options / the web.
-    if (r.suggestions.isNotEmpty()) Rise(10) {
-        Column(Modifier.fillMaxWidth().background(p.btn, RoundedCornerShape(20.dp)).padding(18.dp)) {
-            Text("For you · ${LENSES.firstOrNull { it.first == r.lens }?.second ?: r.lens}", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.btnInk)
-            r.suggestions.forEach {
-                Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.Top) { Text("•  ", color = p.btnInk.copy(alpha = 0.6f), fontSize = 14.sp); Text(it, fontSize = 14.sp, color = p.btnInk, lineHeight = 20.sp) }
-            }
-        }
-    }
-    if (r.alternatives.isNotEmpty()) Rise(11) {
-        Card {
-            Text("Better options", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
-            Spacer(Modifier.height(10.dp))
-            r.alternatives.chunked(2).forEach { pair ->
-                Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    pair.forEach { alt -> Box(Modifier.weight(1f).background(p.card2, CircleShape).padding(12.dp, 9.dp)) { Text(alt, fontSize = 12.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 2) } }
-                    if (pair.size == 1) Spacer(Modifier.weight(1f))
+            if (r.suggestions.isNotEmpty()) Column(Modifier.fillMaxWidth().background(p.btn, RoundedCornerShape(20.dp)).padding(18.dp)) {
+                Text("For you · ${LENSES.firstOrNull { it.first == r.lens }?.second ?: r.lens}", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.btnInk)
+                r.suggestions.forEach {
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.Top) { Text("•  ", color = p.btnInk.copy(alpha = 0.6f), fontSize = 14.sp); Text(it, fontSize = 14.sp, color = p.btnInk, lineHeight = 20.sp) }
                 }
             }
+            if (r.alternatives.isNotEmpty()) Card {
+                Text("Better options", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
+                Spacer(Modifier.height(10.dp))
+                r.alternatives.chunked(2).forEach { pair ->
+                    Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        pair.forEach { alt -> Box(Modifier.weight(1f).background(p.card2, CircleShape).padding(12.dp, 9.dp)) { Text(alt, fontSize = 12.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 2) } }
+                        if (pair.size == 1) Spacer(Modifier.weight(1f))
+                    }
+                }
+            }
+            if (r.research.isNotEmpty()) Collapsible("What the web says", r.research)
         }
     }
-    if (r.research.isNotEmpty()) Rise(12) { Collapsible("What the web says", r.research) }
 
     logFood?.let { f ->
         QuantitySheet(

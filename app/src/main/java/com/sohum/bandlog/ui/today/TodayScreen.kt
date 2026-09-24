@@ -1,5 +1,11 @@
 package com.sohum.bandlog.ui.today
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import com.sohum.bandlog.ui.components.PillButton
+import com.sohum.bandlog.ui.components.Chevron
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -27,8 +33,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,7 +51,6 @@ import com.sohum.bandlog.ui.components.DumbbellIcon
 import com.sohum.bandlog.ui.components.ErrorNote
 import com.sohum.bandlog.ui.components.Flame
 import com.sohum.bandlog.ui.components.FlameIcon
-import com.sohum.bandlog.ui.components.IconTile
 import com.sohum.bandlog.ui.components.MacroDot
 import com.sohum.bandlog.ui.components.Ring
 import com.sohum.bandlog.ui.components.Rise
@@ -58,7 +61,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 @Composable
-fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit, onLogExercise: () -> Unit = {}, onOpenCalendar: () -> Unit = {}, wrapTick: Int = 0) {
+fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit, onLogExercise: () -> Unit = {}, onOpenCalendar: () -> Unit = {}, onLog: (String) -> Unit = {}, wrapTick: Int = 0) {
     val p = palette
     val today = vm.today
     var selected by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(today) }
@@ -78,6 +81,15 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit, onLogExerci
     val showWrap = com.sohum.bandlog.util.Wrap.inWindow() && !wrapHidden && vm.loadedOnce
     val latestNudge = vm.nudges.firstOrNull()
     var nudgeHidden by androidx.compose.runtime.remember(latestNudge?.id) { androidx.compose.runtime.mutableStateOf(latestNudge?.let { com.sohum.bandlog.util.Wrap.nudgeDismissed(ctx, it.id) } ?: true) }
+    // v2.1: one banner slot — nudge, then the wrap, then a meal still being worked out.
+    val banners = buildList {
+        if (latestNudge != null && !nudgeHidden) add("nudge")
+        if (showWrap) add("wrap")
+        if (vm.pendingMeals.isNotEmpty()) add("pending")
+    }
+    var bannerAt by androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    // A tapped wrap notification lands on the wrap, not whatever banner was up.
+    androidx.compose.runtime.LaunchedEffect(wrapTick) { if (wrapTick > 0) bannerAt = banners.indexOf("wrap").coerceAtLeast(0) }
     // Steps and burned calories go stale while the app is backgrounded; re-read on every resume.
     val owner = androidx.compose.ui.platform.LocalLifecycleOwner.current
     androidx.compose.runtime.DisposableEffect(owner) {
@@ -97,21 +109,16 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit, onLogExerci
                         Spacer(Modifier.width(8.dp))
                         Text("Locked In", fontSize = 22.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink)
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        HeaderButton(onClick = onOpenCalendar) { Icon(Icons.Outlined.CalendarMonth, "Calendar", tint = p.ink, modifier = Modifier.size(18.dp)) }
                         // Compose 1.6's PullToRefresh is still experimental, so Home gets an
                         // explicit refresh button instead — same job, no API risk.
-                        Box(
-                            Modifier.size(34.dp).shadow(8.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow)
-                                .background(p.card, CircleShape)
-                                .clickable(enabled = !vm.loading) { vm.refresh(); vm.refreshHealth(ctx) },
-                            contentAlignment = Alignment.Center,
-                        ) {
+                        HeaderButton(enabled = !vm.loading, onClick = { vm.refresh(); vm.refreshHealth(ctx) }) {
                             if (vm.loading) CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 2.dp, color = p.muted)
                             else Icon(Icons.Outlined.Refresh, "Refresh", tint = p.ink, modifier = Modifier.size(17.dp))
                         }
-                        Spacer(Modifier.width(8.dp))
                         Row(
-                            Modifier.shadow(8.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow).background(p.card, CircleShape).padding(start = 9.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
+                            Modifier.height(40.dp).shadow(8.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow).background(p.card, CircleShape).padding(start = 10.dp, end = 13.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Flame(p.flame, 16.dp)
@@ -123,11 +130,26 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit, onLogExerci
                 ErrorNote(vm.error, Modifier.padding(top = 8.dp))
             }
         }
-        if (latestNudge != null && !nudgeHidden) item(key = "nudge") {
-            Rise(1) { NudgeBanner(vm.nudges) { com.sohum.bandlog.util.Wrap.dismissNudge(ctx, latestNudge.id); nudgeHidden = true } }
-        }
-        if (showWrap) item(key = "wrap") {
-            Rise(1) { WrapCard(vm.wrap()) { com.sohum.bandlog.util.Wrap.dismiss(ctx, wrapDate); wrapHidden = true } }
+        if (banners.isNotEmpty()) item(key = "banner") {
+            val kind = banners[bannerAt.mod(banners.size)]
+            Rise(1) {
+                Column {
+                    when (kind) {
+                        "nudge" -> NudgeBanner(vm.nudges) { latestNudge?.let { com.sohum.bandlog.util.Wrap.dismissNudge(ctx, it.id) }; nudgeHidden = true }
+                        "wrap" -> WrapCard(vm.wrap()) { com.sohum.bandlog.util.Wrap.dismiss(ctx, wrapDate); wrapHidden = true }
+                        else -> PendingBanner(vm.pendingMeals)
+                    }
+                    if (banners.size > 1) Row(
+                        Modifier.fillMaxWidth().height(28.dp).clickable { bannerAt = (bannerAt + 1).mod(banners.size) },
+                        horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        banners.indices.forEach { i ->
+                            Box(Modifier.padding(horizontal = 3.dp).size(if (i == bannerAt.mod(banners.size)) 7.dp else 6.dp).background(if (i == bannerAt.mod(banners.size)) p.ink else p.hair, CircleShape))
+                        }
+                        Text("  next", fontSize = 11.sp, fontWeight = FontWeight(600), color = p.muted)
+                    }
+                }
+            }
         }
         item { Rise(1) { WeekStrip(today, selected, trained) { selected = it } } }
         item {
@@ -159,57 +181,37 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit, onLogExerci
             val h = vm.healthToday
             val burned = vm.burnedToday
             item {
-                Rise(4) {
-                    Column {
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            if (vm.healthConnected) Card(Modifier.weight(1f), padding = 14.dp) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                Rise(4) { Column {
+                    // v2.1: steps and calories burned are one card, split down the middle.
+                    Card(padding = 0.dp) {
+                        Row(Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically) {
+                            if (vm.healthConnected) {
+                                Row(Modifier.weight(1f).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Ring(((h?.steps ?: 0L) / prof.stepGoal.toFloat()).coerceIn(0f, 1f), p.green, 44.dp, 5.dp) { Icon(com.sohum.bandlog.ui.components.StepsIcon, null, tint = p.green, modifier = Modifier.size(16.dp)) }
                                     Spacer(Modifier.width(10.dp))
                                     Column {
-                                        Text(String.format(Locale.US, "%,d", h?.steps ?: 0L), fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink)
-                                        Text("of ${String.format(Locale.US, "%,d", prof.stepGoal.toLong())} steps", fontSize = 12.sp, color = p.muted)
+                                        Text(String.format(Locale.US, "%,d", h?.steps ?: 0L), fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink, maxLines = 1)
+                                        Text("of ${String.format(Locale.US, "%,d", prof.stepGoal.toLong())} steps", fontSize = 12.sp, color = p.muted, maxLines = 1)
                                     }
                                 }
+                                Box(Modifier.width(1.dp).fillMaxHeight().padding(vertical = 14.dp).background(p.hair))
                             }
                             // Health Connect active kcal (when connected) + logged exercise, deduplicated in the view model.
-                            Card(Modifier.weight(1f), padding = 14.dp, onClick = onLogExercise) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Ring((burned / 400.0).toFloat().coerceIn(0f, 1f), p.orange, 44.dp, 5.dp) { Icon(FlameIcon, null, tint = p.orange, modifier = Modifier.size(16.dp)) }
-                                    Spacer(Modifier.width(10.dp))
-                                    Column(Modifier.weight(1f)) {
-                                        Text("${burned.toInt()}", fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink)
-                                        Text(if (vm.healthConnected) "kcal burned" else "kcal burned · log exercise", fontSize = 12.sp, color = p.muted, maxLines = 1)
-                                    }
-                                    if (!vm.healthConnected) Text("›", fontSize = 18.sp, color = p.muted)
+                            Row(Modifier.weight(1f).clickable(onClick = onLogExercise).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Ring((burned / 400.0).toFloat().coerceIn(0f, 1f), p.orange, 44.dp, 5.dp) { Icon(FlameIcon, null, tint = p.orange, modifier = Modifier.size(16.dp)) }
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text("${burned.toInt()}", fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink)
+                                    Text(if (vm.healthConnected) "kcal burned" else "kcal burned · log exercise", fontSize = 12.sp, color = p.muted, maxLines = 1)
                                 }
+                                Chevron()
                             }
                         }
-                        val err = vm.healthError
-                        if (vm.healthConnected) {
-                            if (err != null) Text(err, fontSize = 12.sp, color = p.red, modifier = Modifier.padding(top = 6.dp, start = 4.dp))
-                            else if ((h?.steps ?: 0L) == 0L) Text("No steps in Health Connect yet. In Samsung Health / Google Fit, turn on syncing to Health Connect (Settings → Health Connect), then pull to refresh here.", fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(top = 6.dp, start = 4.dp))
-                        }
                     }
-                }
-            }
-        }
-        item {
-            Rise(4) {
-                // Calendar left the tab bar for Squad in v2.0; it lives one tap away here.
-                Card(padding = 14.dp, onClick = onOpenCalendar) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(38.dp).background(p.card2, androidx.compose.foundation.shape.RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
-                            Icon(Icons.Outlined.CalendarMonth, null, tint = p.ink, modifier = Modifier.size(20.dp))
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("Calendar", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
-                            Text("Every session and meal, month by month", fontSize = 12.sp, color = p.muted)
-                        }
-                        Text("→", fontSize = 18.sp, fontWeight = FontWeight(600), color = p.muted)
-                    }
-                }
+                    val err = vm.healthError
+                    if (vm.healthConnected && err != null) Text(err, fontSize = 12.sp, color = p.red, modifier = Modifier.padding(top = 6.dp, start = 4.dp))
+                    else if (vm.healthConnected && (h?.steps ?: 0L) == 0L) Text("No steps yet — turn on syncing to Health Connect in Samsung Health or Google Fit, then refresh.", fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(top = 6.dp, start = 4.dp))
+                } }
             }
         }
         item {
@@ -220,14 +222,29 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit, onLogExerci
                 }
             }
         }
-        if (isToday) items(vm.pendingMeals, key = { "p$it" }) { txt -> Rise(5) { PendingMealRow(txt) } }
-        if (todayWorkouts.isEmpty() && todayMeals.isEmpty() && todayExercises.isEmpty() && (!isToday || vm.pendingMeals.isEmpty())) item {
-            Rise(5) { Text(if (isToday) "Nothing yet today. Tap + to log a workout, a meal or some exercise." else "Nothing logged on ${Dates.long(selected)}.", color = p.muted, fontSize = 13.sp) }
+        if (todayWorkouts.isEmpty() && todayMeals.isEmpty() && todayExercises.isEmpty()) item {
+            Rise(5) {
+                Card {
+                    Text(if (isToday) "Nothing logged yet today." else "Nothing logged on ${Dates.long(selected)}.", fontSize = 14.sp, color = p.ink)
+                    Spacer(Modifier.height(10.dp))
+                    PillButton(if (isToday) "Log something" else "Log for this day", { onLog(selected) }, height = 46.dp)
+                }
+            }
         }
         items(todayWorkouts, key = { "w" + it.id }) { w -> Rise(5) { WorkoutRow(w, burnKcal = workoutBurn[w.id]) { onOpenWorkout(w) } } }
         items(todayExercises, key = { "e" + it.id }) { e -> Rise(5) { ExerciseRow(e) { vm.launch { vm.deleteExercise(e.id) } } } }
         items(todayMeals, key = { "m" + it.id }) { m -> Rise(6) { MealRow(m, onDelete = { vm.launch { vm.deleteMeal(m.id) } }, onFeedback = { r -> vm.launch { runCatching { com.sohum.bandlog.data.Api.feedback(r, m.rawText, m.id) } } }) } }
     }
+}
+
+/** A 40 dp round header button on the card colour. */
+@Composable
+private fun HeaderButton(enabled: Boolean = true, onClick: () -> Unit, content: @Composable () -> Unit) {
+    val p = palette
+    Box(
+        Modifier.size(40.dp).shadow(8.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow).background(p.card, CircleShape).clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { content() }
 }
 
 /** "Sohum nudged you" — squad-mates poking you to train, dismissible. Text with an inline icon, no emoji. */
@@ -311,25 +328,6 @@ private fun WrapStat(modifier: Modifier, value: String, label: String, color: Co
     }
 }
 
-/** Shimmering placeholder while Haiku prices a quick-logged meal in the background. */
-@Composable
-private fun PendingMealRow(text: String) {
-    val p = palette
-    val t = androidx.compose.animation.core.rememberInfiniteTransition(label = "shimmer")
-    val a by t.animateFloat(0.35f, 0.9f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(700), androidx.compose.animation.core.RepeatMode.Reverse), label = "alpha")
-    Card(padding = 14.dp) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(56.dp).background(p.card2.copy(alpha = a), androidx.compose.foundation.shape.RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = p.muted) }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(text, fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1)
-                Box(Modifier.fillMaxWidth(0.5f).height(12.dp).background(p.card2.copy(alpha = a), CircleShape))
-                Text("Working out the calories… you can leave the app.", fontSize = 12.sp, color = p.muted)
-            }
-        }
-    }
-}
-
 @Composable
 private fun WeekStrip(today: String, selected: String, trained: Set<String>, onSelect: (String) -> Unit) {
     val p = palette
@@ -392,101 +390,146 @@ private fun MacroCard(modifier: Modifier, macro: String, consumed: Double, targe
     }
 }
 
+/** The banner for meals saved while their parse / photo was still running. */
+@Composable
+private fun PendingBanner(texts: List<String>) {
+    val p = palette
+    val t = androidx.compose.animation.core.rememberInfiniteTransition(label = "shimmer")
+    val a by t.animateFloat(0.35f, 0.9f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(700), androidx.compose.animation.core.RepeatMode.Reverse), label = "alpha")
+    Card(padding = 14.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(40.dp).background(p.card2.copy(alpha = a), androidx.compose.foundation.shape.RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = p.muted) }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(texts.first() + if (texts.size > 1) " + ${texts.size - 1} more" else "", fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1)
+                Text("Working out the calories — it saves on its own.", fontSize = 12.sp, color = p.muted, maxLines = 1)
+            }
+        }
+    }
+}
+
+/** One line per entry: tile, what it was, the number, a chevron. Tapping opens the details. */
+@Composable
+private fun CompactRow(
+    tile: @Composable () -> Unit,
+    title: String,
+    value: String,
+    open: Boolean,
+    onClick: () -> Unit,
+    details: (@Composable () -> Unit)? = null,
+) {
+    val p = palette
+    val rot by androidx.compose.animation.core.animateFloatAsState(if (open) 90f else 0f, com.sohum.bandlog.ui.components.Motion.spatialFast(), label = "chev")
+    Card(padding = 0.dp) {
+        Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            tile()
+            Spacer(Modifier.width(12.dp))
+            Text(title, fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1, modifier = Modifier.weight(1f))
+            Spacer(Modifier.width(8.dp))
+            Text(value, fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1)
+            Spacer(Modifier.width(6.dp))
+            Text("›", fontSize = 20.sp, fontWeight = FontWeight(500), color = p.muted, modifier = Modifier.graphicsLayer { rotationZ = rot })
+        }
+        androidx.compose.animation.AnimatedVisibility(open && details != null) {
+            Column(Modifier.fillMaxWidth().padding(start = 64.dp, end = 12.dp, bottom = 10.dp)) { details?.invoke() }
+        }
+    }
+}
+
+@Composable
+private fun SmallTile(icon: androidx.compose.ui.graphics.vector.ImageVector, tint: Color, bg: Color) {
+    Box(Modifier.size(40.dp).background(bg, androidx.compose.foundation.shape.RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) { Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp)) }
+}
+
+/** A band session: muscles on one line, minutes / burn on the right; tapping opens the editor. */
 @Composable
 fun WorkoutRow(w: Workout, burnKcal: Double? = null, onClick: () -> Unit) {
     val p = palette
-    Card(onClick = onClick, padding = 14.dp) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconTile(DumbbellIcon, p.ink, p.card2)
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                RowSpaceBetween {
-                    Text(Dates.relative(w.date), fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink)
-                    Text(w.bandLevel + (w.resistanceKg?.let { " · ${fmt(it)} kg" } ?: ""), fontSize = 12.sp, color = p.muted)
-                }
-                Text(w.muscles.joinToString(" · "), fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (burnKcal != null && burnKcal > 0) Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(FlameIcon, null, tint = p.ink, modifier = Modifier.size(13.dp))
-                        Text(" ${burnKcal.toInt()} kcal", fontSize = 12.sp, fontWeight = FontWeight(700), color = p.ink)
-                    }
-                    w.minutes?.let { Text("$it mins", fontSize = 12.sp, color = p.muted) }
-                    if (w.exercises.isNotBlank()) Text(w.exercises, fontSize = 12.sp, color = p.muted, maxLines = 1)
-                }
-            }
-        }
-    }
+    CompactRow(
+        tile = { SmallTile(DumbbellIcon, p.ink, p.card2) },
+        title = w.muscles.joinToString(" · ").ifBlank { "Workout" },
+        value = when {
+            burnKcal != null && burnKcal > 0 -> "${burnKcal.toInt()} kcal"
+            w.minutes != null -> "${w.minutes} min"
+            else -> w.bandLevel
+        },
+        open = false, onClick = onClick,
+    )
 }
 
-/** A logged burn (run / activity / described / manual): flame + calories, then intensity and minutes. */
+/** A logged burn (run / activity / described / manual). Details: intensity, minutes, delete. */
 @Composable
 fun ExerciseRow(e: com.sohum.bandlog.data.ExerciseEntry, onDelete: () -> Unit) {
     val p = palette
-    val isRun = e.activityCode == com.sohum.bandlog.util.Burn.RUN_CODE || e.name.contains("run", ignoreCase = true) || e.name.contains("jog", ignoreCase = true)
+    var open by androidx.compose.runtime.remember(e.id) { androidx.compose.runtime.mutableStateOf(false) }
     val isBands = e.activityCode?.startsWith("LI-BAND") == true || e.name.contains("lifting", ignoreCase = true) || e.name.contains("band", ignoreCase = true)
-    Card(padding = 14.dp) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconTile(if (isBands) DumbbellIcon else com.sohum.bandlog.ui.components.RunIcon, if (isRun || isBands) p.ink else p.green, if (isRun || isBands) p.card2 else p.greenBg)
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    CompactRow(
+        tile = { SmallTile(if (isBands) DumbbellIcon else com.sohum.bandlog.ui.components.RunIcon, p.green, p.greenBg) },
+        title = e.name.replaceFirstChar { it.uppercase() },
+        value = "${e.kcal.toInt()} kcal",
+        open = open, onClick = { open = !open },
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                (if (e.source == "manual" && e.activityCode == null) "Entered by hand" else "Intensity: ${com.sohum.bandlog.util.Burn.intensityLabel(e.intensity)}") + " · ${e.minutes} min · ${timeOf(e.createdAt)}",
+                fontSize = 12.sp, color = p.muted, modifier = Modifier.weight(1f),
+            )
+            DeleteButton(onDelete)
+        }
+    }
+}
+
+/** A meal: what was in it and the calories; details list every item, macros, thumbs up / down and delete. */
+@Composable
+fun MealRow(m: Meal, onDelete: () -> Unit, onFeedback: ((String) -> Unit)? = null) {
+    val p = palette
+    var open by androidx.compose.runtime.remember(m.id) { androidx.compose.runtime.mutableStateOf(false) }
+    var voted by androidx.compose.runtime.remember(m.id) { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    CompactRow(
+        tile = {
+            if (m.photoPath != null) com.sohum.bandlog.ui.components.RemoteImage(storagePath = m.photoPath, size = 40.dp, radius = 12.dp, fallback = BowlIcon, fallbackTint = p.orange, fallbackBg = p.orangeBg)
+            else SmallTile(BowlIcon, p.orange, p.orangeBg)
+        },
+        title = m.items.joinToString(", ") { it.name }.ifBlank { "Meal" },
+        value = "${m.calories.toInt()} kcal",
+        open = open, onClick = { open = !open },
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            m.items.forEach { it ->
                 RowSpaceBetween {
-                    Text(e.name.replaceFirstChar { it.uppercase() }, fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1, modifier = Modifier.weight(1f))
-                    Text(timeOf(e.createdAt), fontSize = 12.sp, color = p.muted)
+                    Text(it.name, fontSize = 13.sp, color = p.ink, maxLines = 1, modifier = Modifier.weight(1f))
+                    Text("${it.quantityLabel} · ${it.calories.toInt()} kcal", fontSize = 12.sp, color = p.muted)
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(FlameIcon, null, tint = p.ink, modifier = Modifier.size(15.dp))
-                    Text(" ${e.kcal.toInt()} calories", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
-                }
-                Text(
-                    (if (e.source == "manual" && e.activityCode == null) "Manual" else "Intensity: ${com.sohum.bandlog.util.Burn.intensityLabel(e.intensity)}") + " · ${e.minutes} mins",
-                    fontSize = 12.sp, color = p.muted,
-                )
             }
-            IconButton(onClick = onDelete, Modifier.size(32.dp)) { Icon(Icons.Outlined.Delete, "Delete", tint = p.muted) }
+            Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                MacroDot("${fmt(m.protein)}g", p.red)
+                MacroDot("${fmt(m.items.sumOf { it.carbsG })}g", p.orange)
+                MacroDot("${fmt(m.items.sumOf { it.fatG })}g", p.blue)
+                Spacer(Modifier.weight(1f))
+                Text(timeOf(m.createdAt), fontSize = 12.sp, color = p.muted)
+            }
+            RowSpaceBetween {
+                if (onFeedback != null) Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (voted == null) "How did the AI do?" else "Thanks — noted", fontSize = 12.sp, color = p.muted)
+                    listOf("up" to com.sohum.bandlog.ui.components.ThumbUpIcon, "down" to com.sohum.bandlog.ui.components.ThumbDownIcon).forEach { (r, icon) ->
+                        val sel = voted == r
+                        Box(Modifier.size(44.dp).clickable(enabled = voted == null) { voted = r; onFeedback(r) }, contentAlignment = Alignment.Center) {
+                            Box(Modifier.size(30.dp).background(if (sel) p.btn else p.card2, CircleShape), contentAlignment = Alignment.Center) {
+                                Icon(icon, r, tint = if (sel) p.btnInk else p.muted, modifier = Modifier.size(15.dp))
+                            }
+                        }
+                    }
+                } else Spacer(Modifier.width(1.dp))
+                DeleteButton(onDelete)
+            }
         }
     }
 }
 
 @Composable
-fun MealRow(m: Meal, onDelete: () -> Unit, onFeedback: ((String) -> Unit)? = null) {
-    val p = palette
-    var voted by androidx.compose.runtime.remember(m.id) { androidx.compose.runtime.mutableStateOf<String?>(null) }
-    Card(padding = 14.dp) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (m.photoPath != null) com.sohum.bandlog.ui.components.RemoteImage(storagePath = m.photoPath, size = 56.dp, fallback = BowlIcon, fallbackTint = p.orange, fallbackBg = p.orangeBg)
-            else IconTile(BowlIcon, p.orange, p.orangeBg)
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                RowSpaceBetween {
-                    Text(m.items.joinToString(", ") { it.name }.ifBlank { "Meal" }, fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1, modifier = Modifier.weight(1f))
-                    Text(timeOf(m.createdAt), fontSize = 12.sp, color = p.muted)
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(FlameIcon, null, tint = p.ink, modifier = Modifier.size(15.dp))
-                    Text(" ${m.calories.toInt()} calories", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    MacroDot("${fmt(m.protein)}g", p.red)
-                    MacroDot("${fmt(m.items.sumOf { it.carbsG })}g", p.orange)
-                    MacroDot("${fmt(m.items.sumOf { it.fatG })}g", p.blue)
-                }
-            }
-            IconButton(onClick = onDelete, Modifier.size(32.dp)) { Icon(Icons.Outlined.Delete, "Delete", tint = p.muted) }
-        }
-        if (onFeedback != null) {
-            Spacer(Modifier.height(8.dp))
-            RowSpaceBetween {
-                Text(if (voted == null) "How did the AI do?" else "Thanks — noted", fontSize = 12.sp, color = p.muted)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf("up" to com.sohum.bandlog.ui.components.ThumbUpIcon, "down" to com.sohum.bandlog.ui.components.ThumbDownIcon).forEach { (r, icon) ->
-                        val sel = voted == r
-                        Box(Modifier.size(30.dp).background(if (sel) p.btn else p.card2, CircleShape).then(Modifier.clickable(enabled = voted == null) { voted = r; onFeedback(r) }), contentAlignment = Alignment.Center) {
-                            Icon(icon, r, tint = if (sel) p.btnInk else p.muted, modifier = Modifier.size(15.dp))
-                        }
-                    }
-                }
-            }
-        }
+private fun DeleteButton(onDelete: () -> Unit) {
+    Box(Modifier.size(44.dp).clickable(onClick = onDelete), contentAlignment = Alignment.Center) {
+        Icon(Icons.Outlined.Delete, "Delete", tint = palette.muted, modifier = Modifier.size(20.dp))
     }
 }
 

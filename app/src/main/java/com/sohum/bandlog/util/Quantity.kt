@@ -76,7 +76,7 @@ data class QuantityFood(
     /** ½ · 1 · 2 servings, 50 g, 100 g, ½ pack, 1 pack. */
     fun quickChips(): List<Pair<String, Quantity>> {
         val out = mutableListOf<Pair<String, Quantity>>()
-        val sl = serving?.label ?: "serving"
+        val sl = serving?.label?.removePrefix("1 ")?.trim()?.ifBlank { null } ?: "serving"
         if (servingGrams != null) {
             out += "½ $sl" to Quantity(QUnit.SERVING, 0.5)
             out += "1 $sl" to Quantity(QUnit.SERVING, 1.0)

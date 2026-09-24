@@ -121,7 +121,7 @@ fun GoalWeightScreen(vm: AppViewModel, onBack: () -> Unit) {
                             regenerate,
                             { regenerate = it },
                             enabled = Goals.missing(prof).isEmpty(),
-                            colors = SwitchDefaults.colors(checkedTrackColor = p.btn, checkedThumbColor = p.btnInk),
+                            colors = SwitchDefaults.colors(checkedTrackColor = p.btn, checkedThumbColor = p.btnInk, uncheckedTrackColor = p.track, uncheckedThumbColor = p.muted, uncheckedBorderColor = p.hair),
                         )
                     }
                 }

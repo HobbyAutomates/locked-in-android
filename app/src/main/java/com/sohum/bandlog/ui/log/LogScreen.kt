@@ -1,5 +1,7 @@
 package com.sohum.bandlog.ui.log
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -10,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -30,18 +33,14 @@ import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
@@ -57,29 +56,19 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.sohum.bandlog.data.Api
-import com.sohum.bandlog.data.MealItem
-import com.sohum.bandlog.data.ParseResult
 import com.sohum.bandlog.data.Workout
 import com.sohum.bandlog.ui.AppViewModel
 import com.sohum.bandlog.ui.components.Card
 import com.sohum.bandlog.ui.components.Chip
 import com.sohum.bandlog.ui.components.ErrorNote
 import com.sohum.bandlog.ui.components.Hair
-import com.sohum.bandlog.ui.components.MacroDot
-import com.sohum.bandlog.ui.components.MicIcon
 import com.sohum.bandlog.ui.components.PillButton
 import com.sohum.bandlog.ui.components.Rise
 import com.sohum.bandlog.ui.components.RowSpaceBetween
 import com.sohum.bandlog.ui.components.Segmented
 import com.sohum.bandlog.ui.components.Chip as SelChip
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.material3.TextButton as M3TextButton
+import com.sohum.bandlog.ui.components.pressable
 import com.sohum.bandlog.ui.theme.palette
 import com.sohum.bandlog.ui.today.fmt
 import com.sohum.bandlog.util.Dates
@@ -133,6 +122,26 @@ private fun WorkoutForm(vm: AppViewModel, existing: Workout?, initialDate: Strin
 
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp, 6.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            // v2.1: one tap repeats the last session; everything stays editable.
+            val last = vm.lastWorkout
+            if (existing == null && last != null) Rise(0) {
+                val applied = muscles == last.muscles.toSet() && band == last.bandLevel && exercises == last.exercises
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 48.dp).pressable().background(if (applied) p.card2 else p.btn, CircleShape)
+                        .clickable(enabled = !applied) {
+                            muscles = last.muscles.toSet(); band = last.bandLevel
+                            last.resistanceKg?.let { kg = fmt(it) }; last.minutes?.let { minutes = it.toString() }
+                            exercises = last.exercises; error = null
+                        }
+                        .padding(horizontal = 18.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(com.sohum.bandlog.ui.components.HistoryIcon, null, tint = if (applied) p.muted else p.btnInk, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (applied) "Same as last time · filled in" else "Same as last time", fontSize = 14.sp, fontWeight = FontWeight(700), color = if (applied) p.muted else p.btnInk)
+                    Text("  " + last.muscles.joinToString(" · "), fontSize = 13.sp, color = (if (applied) p.muted else p.btnInk).copy(alpha = 0.7f), maxLines = 1, modifier = Modifier.weight(1f))
+                }
+            }
             Rise(0) {
                 Card {
                     Text("Muscles", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted)

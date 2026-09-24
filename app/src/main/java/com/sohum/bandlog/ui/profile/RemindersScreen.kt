@@ -147,7 +147,7 @@ fun RemindersScreen(vm: AppViewModel, onBack: () -> Unit) {
                             Switch(
                                 pref.on,
                                 { set(slot.key, pref.copy(on = it)) },
-                                colors = SwitchDefaults.colors(checkedTrackColor = p.btn, checkedThumbColor = p.btnInk),
+                                colors = SwitchDefaults.colors(checkedTrackColor = p.btn, checkedThumbColor = p.btnInk, uncheckedTrackColor = p.track, uncheckedThumbColor = p.muted, uncheckedBorderColor = p.hair),
                             )
                         }
                     }
