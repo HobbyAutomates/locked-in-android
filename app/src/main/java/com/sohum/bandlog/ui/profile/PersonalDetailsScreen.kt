@@ -27,6 +27,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sohum.bandlog.data.Profile
+import com.sohum.bandlog.data.Session
+import com.sohum.bandlog.util.Names
 import com.sohum.bandlog.ui.AppViewModel
 import com.sohum.bandlog.ui.components.Card
 import com.sohum.bandlog.ui.components.ErrorNote
@@ -60,6 +62,7 @@ fun PersonalDetailsScreen(vm: AppViewModel, onBack: () -> Unit, onChangeGoal: ()
     val scope = rememberCoroutineScope()
     val prof = vm.profile
 
+    var name by remember(prof) { mutableStateOf(prof.name) }
     var weight by remember(prof) { mutableStateOf(prof.weightKg?.let { fmt(it) } ?: "") }
     var height by remember(prof) { mutableStateOf(prof.heightCm?.let { fmt(it) } ?: "") }
     var dob by remember(prof) { mutableStateOf(prof.dob) }
@@ -69,6 +72,7 @@ fun PersonalDetailsScreen(vm: AppViewModel, onBack: () -> Unit, onChangeGoal: ()
     var saved by remember { mutableStateOf(false) }
 
     fun edited(): Profile = prof.copy(
+        name = name.trim().take(40),
         weightKg = weight.toDoubleOrNull(),
         heightCm = height.toDoubleOrNull(),
         dob = dob,
@@ -105,12 +109,35 @@ fun PersonalDetailsScreen(vm: AppViewModel, onBack: () -> Unit, onChangeGoal: ()
         Rise(1) {
             Card(padding = 0.dp) {
                 Column(Modifier.padding(horizontal = 16.dp)) {
+                    // v2.2: the display name lives here too (squads and the Profile header show it).
+                    Column(Modifier.padding(vertical = 12.dp)) {
+                        Text("Name", fontSize = 13.sp, fontWeight = FontWeight(500), color = p.muted)
+                        Spacer(Modifier.height(6.dp))
+                        val focus = androidx.compose.ui.platform.LocalFocusManager.current
+                        Box(Modifier.fillMaxWidth().height(44.dp).background(p.card2, androidx.compose.foundation.shape.RoundedCornerShape(12.dp)).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
+                            androidx.compose.foundation.text.BasicTextField(
+                                name, { name = it.take(40) }, Modifier.fillMaxWidth(), singleLine = true,
+                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                    capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Words,
+                                    imeAction = androidx.compose.ui.text.input.ImeAction.Done,
+                                ),
+                                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { focus.clearFocus() }),
+                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 16.sp, fontWeight = FontWeight(600), color = p.ink),
+                                cursorBrush = androidx.compose.ui.graphics.SolidColor(p.ink),
+                                decorationBox = { inner ->
+                                    if (name.isEmpty()) Text(Names.nameFromEmail(Session.email).ifBlank { "Your name" }, fontSize = 16.sp, color = p.muted)
+                                    inner()
+                                },
+                            )
+                        }
+                    }
+                    Hair()
                     SettingRow(ScaleIcon, p.ink, "Current weight") { NumberField(weight, { weight = it.filter { c -> c.isDigit() || c == '.' } }, "kg", imeAction = androidx.compose.ui.text.input.ImeAction.Next) }
                     Hair()
                     SettingRow(RulerIcon, p.ink, "Height") { NumberField(height, { height = it.filter { c -> c.isDigit() || c == '.' } }, "cm", imeAction = androidx.compose.ui.text.input.ImeAction.Next) }
                     Hair()
                     SettingRow(TargetIcon, p.ink, "Date of birth", onClick = {
-                        val start = runCatching { LocalDate.parse(dob) }.getOrDefault(LocalDate.now().minusYears(17))
+                        val start = runCatching { LocalDate.parse(dob) }.getOrDefault(LocalDate.now(com.sohum.bandlog.util.Dates.ZONE).minusYears(17))
                         runCatching {
                             DatePickerDialog(
                                 ctx,
@@ -119,8 +146,11 @@ fun PersonalDetailsScreen(vm: AppViewModel, onBack: () -> Unit, onChangeGoal: ()
                             ).apply { datePicker.maxDate = System.currentTimeMillis() }.show()
                         }
                     }) {
+                        // "12 Mar 2009 · 17 yrs" — the age is derived, never stored.
+                        val age = prof.copy(dob = dob).age
                         Text(
-                            dob?.let { runCatching { LocalDate.parse(it).format(DateTimeFormatter.ofPattern("d MMM yyyy", Locale.ENGLISH)) }.getOrDefault(it) } ?: "Set",
+                            (dob?.let { runCatching { LocalDate.parse(it).format(DateTimeFormatter.ofPattern("d MMM yyyy", Locale.ENGLISH)) }.getOrDefault(it) } ?: "Set") +
+                                (age?.let { " · $it yrs" } ?: ""),
                             fontSize = 14.sp, fontWeight = FontWeight(600), color = if (dob == null) p.muted else p.ink,
                         )
                     }

@@ -151,6 +151,7 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit, onLogExerci
                 }
             }
         }
+        item(key = "streak") { Rise(1) { DayStreakRow(vm.dayStreak, vm.notice) { vm.dismissNotice() } } }
         item { Rise(1) { WeekStrip(today, selected, trained) { selected = it } } }
         item {
             Rise(2) {
@@ -234,6 +235,37 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit, onLogExerci
         items(todayWorkouts, key = { "w" + it.id }) { w -> Rise(5) { WorkoutRow(w, burnKcal = workoutBurn[w.id]) { onOpenWorkout(w) } } }
         items(todayExercises, key = { "e" + it.id }) { e -> Rise(5) { ExerciseRow(e) { vm.launch { vm.deleteExercise(e.id) } } } }
         items(todayMeals, key = { "m" + it.id }) { m -> Rise(6) { MealRow(m, onDelete = { vm.launch { vm.deleteMeal(m.id) } }, onFeedback = { r -> vm.launch { runCatching { com.sohum.bandlog.data.Api.feedback(r, m.rawText, m.id) } } }) } }
+    }
+}
+
+/**
+ * v2.2: the day streak (any log — workout, exercise or meal — on consecutive India days) as a
+ * small flame pill, with a short save confirmation beside it that fades after a few seconds.
+ */
+@Composable
+private fun DayStreakRow(days: Int, notice: String?, onDismissNotice: () -> Unit) {
+    val p = palette
+    if (notice != null) androidx.compose.runtime.LaunchedEffect(notice) { kotlinx.coroutines.delay(if (notice.length > 20) 7000 else 3500); onDismissNotice() }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            Modifier.height(34.dp).background(if (days > 0) p.flame.copy(alpha = 0.14f) else p.card2, CircleShape).padding(start = 10.dp, end = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(FlameIcon, null, tint = if (days > 0) p.flame else p.muted, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(
+                if (days > 0) "$days-day streak" else "Start a streak today",
+                fontSize = 13.sp, fontWeight = FontWeight(700), color = if (days > 0) p.ink else p.muted, maxLines = 1,
+            )
+        }
+        if (notice != null) Row(
+            Modifier.weight(1f, fill = false).height(34.dp).background(p.btn, CircleShape).clickable(onClick = onDismissNotice).padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(com.sohum.bandlog.ui.components.CheckIcon, null, tint = p.btnInk, modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(notice, fontSize = 12.sp, fontWeight = FontWeight(600), color = p.btnInk, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+        }
     }
 }
 

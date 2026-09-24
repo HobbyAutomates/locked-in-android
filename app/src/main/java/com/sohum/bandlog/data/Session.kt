@@ -31,7 +31,9 @@ object Session {
             .putLong("expires_at", System.currentTimeMillis() / 1000 + expiresIn)
             .putString("user_id", userId)
             .putString("email", email)
-            .apply()
+            // commit, not apply: GoTrue has already rotated the refresh token, so losing this
+            // write (process killed right after) would leave a spent token on disk.
+            .commit()
     }
 
     fun clear() { prefs.edit().clear().apply() }

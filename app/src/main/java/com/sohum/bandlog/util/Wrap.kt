@@ -47,10 +47,10 @@ object Wrap {
     )
 
     /** 21:00 to 04:00 — the window the Wrap card is shown in. */
-    fun inWindow(now: LocalTime = LocalTime.now()): Boolean = now.hour >= 21 || now.hour < 4
+    fun inWindow(now: LocalTime = LocalTime.now(Dates.ZONE)): Boolean = now.hour >= 21 || now.hour < 4
 
     /** The day being wrapped: today, or yesterday once it is past midnight. */
-    fun wrapDate(now: LocalTime = LocalTime.now()): String = if (now.hour < 4) Dates.addDays(Dates.today(), -1) else Dates.today()
+    fun wrapDate(now: LocalTime = LocalTime.now(Dates.ZONE)): String = if (now.hour < 4) Dates.addDays(Dates.today(), -1) else Dates.today()
 
     /** The two most-rested muscle groups ("legs & core"), or "full body" with no history at all. */
     fun tomorrow(workouts: List<Workout>, date: String): String {

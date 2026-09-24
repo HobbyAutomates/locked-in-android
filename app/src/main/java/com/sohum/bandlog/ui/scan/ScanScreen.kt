@@ -102,6 +102,9 @@ import com.sohum.bandlog.ui.components.ScreenTitle
 import com.sohum.bandlog.ui.components.SmallChip
 import com.sohum.bandlog.ui.components.SpoonIcon
 import com.sohum.bandlog.ui.components.SubPage
+import com.sohum.bandlog.ui.components.TagIcon
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.text.style.TextOverflow
 import com.sohum.bandlog.ui.log.NumberField
 import com.sohum.bandlog.ui.theme.palette
 import com.sohum.bandlog.ui.today.fmt
@@ -232,6 +235,7 @@ private fun ScanForm(
                     }
                 }
                 onScanned()
+                storeThumb(vm, report, plate, bmp, onScanned)
             } catch (e: Exception) { error = e.message } finally { busy = false }
         }
     }
@@ -470,7 +474,7 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Uni
                 if (r.imageUrl != null) { RemoteImage(url = r.imageUrl, size = 56.dp, radius = 12.dp, fallback = BarcodeIcon); Spacer(Modifier.width(12.dp)) }
                 Column(Modifier.weight(1f)) {
                     // Long product names wrap (no maxLines) and never push the ring off the card.
-                    Text(r.product.ifBlank { "Unknown product" }, fontSize = 19.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink, lineHeight = 23.sp, softWrap = true)
+                    Text(if (ScanHistoryItem.isJunkName(r.product)) "Unnamed label" else r.product, fontSize = 19.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink, lineHeight = 23.sp, softWrap = true)
                     if (g.oneLiner.isNotBlank()) Text(g.oneLiner, fontSize = 13.sp, color = p.muted, lineHeight = 18.sp, modifier = Modifier.padding(top = 4.dp))
                 }
                 Spacer(Modifier.width(12.dp))
@@ -499,6 +503,10 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Uni
             }
         }
     }
+
+    // ---- v2.2: the numbers at a glance (2x2), then how it fits each way of eating ----
+    SummaryGrid(r)?.let { cells -> Rise(1) { cells() } }
+    if (r.fits.isNotEmpty()) Rise(1) { FitPills(r.fits) }
 
     if (food != null) Rise(2) {
         Column {
@@ -601,11 +609,16 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Uni
             if (r.concerns.isNotEmpty()) Card {
                 Text("Ingredients", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
                 r.concerns.forEach { (ing, issue, sev) ->
-                    val c = when (sev) { "high" -> p.red; "medium" -> p.orange; else -> p.green }
-                    Spacer(Modifier.height(10.dp))
-                    Box(Modifier.background(c.copy(alpha = 0.16f), CircleShape).padding(12.dp, 6.dp)) { Text(ing, fontSize = 13.sp, fontWeight = FontWeight(700), color = c) }
-                    Spacer(Modifier.height(4.dp))
-                    Text(issue, fontSize = 13.sp, color = p.muted, lineHeight = 18.sp)
+                    val (c, icon) = when (sev) { "high" -> p.red to CrossIcon; "medium" -> p.orange to QuestionIcon; else -> p.green to CheckIcon }
+                    Spacer(Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.Top) {
+                        Box(Modifier.size(20.dp).background(c.copy(alpha = 0.16f), CircleShape), contentAlignment = Alignment.Center) { Icon(icon, null, tint = c, modifier = Modifier.size(12.dp)) }
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(ing, fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink, lineHeight = 19.sp)
+                            if (issue.isNotBlank()) Text(issue, fontSize = 13.sp, color = p.muted, lineHeight = 18.sp)
+                        }
+                    }
                 }
             }
 
@@ -615,7 +628,7 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Uni
                     Spacer(Modifier.height(10.dp))
                     val (c, icon) = when (status) { "supported" -> p.green to CheckIcon; "misleading", "false" -> p.red to CrossIcon; else -> p.orange to QuestionIcon }
                     Row(verticalAlignment = Alignment.Top) {
-                        Box(Modifier.size(22.dp).background(c.copy(alpha = 0.16f), CircleShape), contentAlignment = Alignment.Center) { Icon(icon, null, tint = c, modifier = Modifier.size(13.dp)) }
+                        Box(Modifier.size(20.dp).background(c.copy(alpha = 0.16f), CircleShape), contentAlignment = Alignment.Center) { Icon(icon, null, tint = c, modifier = Modifier.size(12.dp)) }
                         Spacer(Modifier.width(10.dp))
                         Column {
                             Text("“$claim”", fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink, lineHeight = 19.sp)
@@ -659,6 +672,94 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Uni
                 }
             },
         )
+    }
+}
+
+/**
+ * Protein / Calories / Sugar / Fat as a clean 2x2: per serving (per-100 g × serving size) when the
+ * label gives a serving, else per 100 g (and it says so). Null when the report has no numbers.
+ */
+private fun SummaryGrid(r: LabelReport): (@Composable () -> Unit)? {
+    val keys = listOf("protein_g", "calories", "sugar_g", "fat_g")
+    if (keys.none { r.per100[it] != null }) return null
+    val serving = r.servingG?.takeIf { it > 0 }
+    val k = (serving ?: 100.0) / 100.0
+    fun v(key: String): String = r.per100[key]?.let { x ->
+        val y = x * k
+        if (key == "calories") "${y.roundToInt()}" else fmt(round1(y))
+    } ?: "—"
+    return {
+        val p = palette
+        Card(padding = 14.dp) {
+            Text(
+                if (serving != null) "Per serving · ${serving.roundToInt()} g" else "Per 100 g",
+                fontSize = 12.sp, fontWeight = FontWeight(600), color = p.muted,
+            )
+            Spacer(Modifier.height(10.dp))
+            val cells = listOf(
+                Triple(v("protein_g"), "g", "Protein") to p.red,
+                Triple(v("calories"), "kcal", "Calories") to p.ink,
+                Triple(v("sugar_g"), "g", "Sugar") to p.orange,
+                Triple(v("fat_g"), "g", "Fat") to p.blue,
+            )
+            cells.chunked(2).forEachIndexed { row, pair ->
+                if (row > 0) Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    pair.forEach { (t, c) ->
+                        Column(Modifier.weight(1f).background(p.card2, RoundedCornerShape(16.dp)).padding(horizontal = 14.dp, vertical = 12.dp)) {
+                            Row(verticalAlignment = Alignment.Bottom) {
+                                Text(t.first, fontSize = 24.sp, fontWeight = FontWeight(800), letterSpacing = (-0.8).sp, color = p.ink, maxLines = 1, lineHeight = 26.sp)
+                                if (t.first != "—") Text(" ${t.second}", fontSize = 12.sp, fontWeight = FontWeight(600), color = p.muted, modifier = Modifier.padding(bottom = 3.dp))
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
+                                Box(Modifier.size(6.dp).background(c, CircleShape))
+                                Text("  ${t.third}", fontSize = 11.sp, fontWeight = FontWeight(600), color = p.muted, maxLines = 1)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** How it fits each way of eating: small pills with a coloured dot (great green, ok amber, weak grey). */
+@Composable
+private fun FitPills(fits: Map<String, com.sohum.bandlog.data.Fit>) {
+    val p = palette
+    val ordered = LENSES.mapNotNull { (key, label) -> fits[key]?.let { label to it } }
+    if (ordered.isEmpty()) return
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        ordered.forEach { (label, f) ->
+            Row(
+                Modifier.weight(1f).background(p.card, CircleShape).padding(horizontal = 8.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center,
+            ) {
+                Box(Modifier.size(8.dp).background(fitColor(f.verdict), CircleShape))
+                Text(" $label", fontSize = 12.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1, overflow = TextOverflow.Ellipsis, softWrap = false)
+            }
+        }
+    }
+}
+
+/**
+ * Best-effort, after the report is already on screen: a ≤320 px JPEG of the captured photo to
+ * scan-photos/<uid>/<id>.jpg (label and plate scans, and barcode scans without an OFF picture),
+ * recorded as thumb_path; a barcode's OFF picture recorded as image_url. Never throws.
+ */
+private fun storeThumb(vm: AppViewModel, report: LabelReport?, plate: PlateEstimate?, bmp: Bitmap?, onDone: () -> Unit) {
+    val id = report?.id ?: plate?.id ?: return
+    val offImage = report?.takeIf { it.kind == "barcode" }?.imageUrl
+    vm.launch {
+        var changed = false
+        if (offImage != null) runCatching { Api.setScanImageUrl(id, offImage); changed = true }
+        if (bmp != null && offImage == null) {
+            runCatching {
+                val bytes = withContext(Dispatchers.Default) { com.sohum.bandlog.util.Images.jpeg(com.sohum.bandlog.util.Images.fitWithin(bmp, 320), 80) }
+                Api.uploadScanThumb(id, bytes); changed = true
+            }.onFailure { android.util.Log.w("LockedIn", "Scan thumbnail failed", it) }
+        }
+        if (changed) runCatching { onDone() }
     }
 }
 
@@ -832,29 +933,52 @@ private fun HistoryList(items: List<ScanHistoryItem>, onOpen: (ScanHistoryItem) 
     }
 }
 
+/** Short, single-line trust labels for the History chip. Null (no chip) when the verdict is blank. */
+@Composable
+private fun trustChip(verdict: String): Pair<Color, String>? {
+    val p = palette
+    return when (verdict.trim().lowercase()) {
+        "safe" -> p.green to "Trust"
+        "caution" -> p.orange to "Caution"
+        "unsafe" -> p.red to "Avoid"
+        "misleading" -> p.purple to "Misleading"
+        "fake" -> p.red to "Fake"
+        else -> null
+    }
+}
+
 @Composable
 private fun HistoryRow(it: ScanHistoryItem, onOpen: () -> Unit, onDelete: () -> Unit) {
     val p = palette
-    val kindIcon = when (it.kind) { "barcode" -> BarcodeIcon; "photo" -> CameraIcon; else -> ScanIcon }
-    val kindLabel = when (it.kind) { "barcode" -> "Barcode"; "photo" -> "Photo"; else -> "Label" }
-    val trust = when (it.verdict) { "safe" -> p.green to "Safe"; "caution" -> p.orange to "Caution"; "unsafe" -> p.red to "Unsafe"; "misleading" -> p.purple to "Misleading"; "fake" -> p.red to "Likely fake"; else -> null }
+    val kindIcon = when { it.kind == "barcode" -> BarcodeIcon; it.isPlate -> CameraIcon; else -> TagIcon }
+    val kindLabel = when { it.kind == "barcode" -> "Barcode"; it.isPlate -> "Plate"; else -> "Label" }
+    val trust = trustChip(it.verdict)
     Card(padding = 12.dp, onClick = onOpen) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            when {
-                it.imageUrl != null -> RemoteImage(url = it.imageUrl, size = 46.dp, radius = 12.dp, fallback = kindIcon)
-                it.imagePath != null -> RemoteImage(storagePath = it.imagePath, size = 46.dp, radius = 12.dp, fallback = kindIcon)
-                else -> Box(Modifier.size(46.dp).background(p.card2, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) { Icon(kindIcon, null, tint = p.muted, modifier = Modifier.size(20.dp)) }
-            }
+            // Own thumbnail (private bucket) → Open Food Facts picture → the plate's meal photo → kind icon.
+            RemoteImage(
+                privatePath = it.thumbPath, url = it.imageUrl, storagePath = if (it.isPlate) it.imagePath else null,
+                size = 48.dp, radius = 12.dp, fallback = kindIcon,
+            )
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(it.product.ifBlank { kindLabel }, fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1)
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("$kindLabel · ${dayOf(it.createdAt)}" + (it.score?.let { s -> " · $s/10" } ?: ""), fontSize = 11.sp, color = p.muted)
-                    if (it.kind != "photo") Box(Modifier.background(p.card2, CircleShape).padding(7.dp, 2.dp)) { Text(it.lens, fontSize = 10.sp, fontWeight = FontWeight(700), color = p.ink) }
-                    if (trust != null) Text(trust.second, fontSize = 11.sp, fontWeight = FontWeight(700), color = trust.first)
+                Text(it.displayName, fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (it.whatItIs.isNotBlank()) Text(it.whatItIs, fontSize = 12.sp, color = p.muted, maxLines = 1, overflow = TextOverflow.Ellipsis, lineHeight = 16.sp)
+                Text(
+                    "$kindLabel · ${dayOf(it.createdAt)}" + (it.score?.let { s -> " · $s/10" } ?: ""),
+                    fontSize = 11.sp, color = p.muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (trust != null) {
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    Modifier.widthIn(min = 64.dp).background(trust.first.copy(alpha = 0.14f), CircleShape).padding(horizontal = 10.dp, vertical = 5.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(trust.second, fontSize = 11.sp, fontWeight = FontWeight(700), color = trust.first, maxLines = 1, overflow = TextOverflow.Ellipsis, softWrap = false)
                 }
             }
-            IconButton(onClick = onDelete, Modifier.size(32.dp)) { Icon(Icons.Outlined.Delete, "Delete", tint = p.muted) }
+            IconButton(onClick = onDelete, Modifier.size(32.dp)) { Icon(Icons.Outlined.Delete, "Delete", tint = p.muted, modifier = Modifier.size(20.dp)) }
         }
     }
 }
@@ -866,12 +990,12 @@ private fun ScanDetailPage(item: ScanHistoryItem, onLogged: () -> Unit, onBack: 
     var json by remember(item.id) { mutableStateOf<org.json.JSONObject?>(null) }
     var error by remember(item.id) { mutableStateOf<String?>(null) }
     LaunchedEffect(item.id) { runCatching { Api.scanReport(item.id) }.onSuccess { json = it }.onFailure { error = it.message } }
-    SubPage(item.product.ifBlank { "Saved scan" }, onBack) {
+    SubPage(item.displayName, onBack) {
         val o = json
         when {
             error != null -> ErrorNote(error)
             o == null -> { LinearProgressIndicator(Modifier.fillMaxWidth(), color = p.ink, trackColor = p.track); Text("Opening…", fontSize = 12.sp, color = p.muted) }
-            item.kind == "photo" -> PhotoReview(PlateEstimate.from(o), null, readOnly = true)
+            item.isPlate -> PhotoReview(PlateEstimate.from(o), null, readOnly = true)
             else -> ReportView(LabelReport.from(o), onLogged = onLogged)
         }
     }

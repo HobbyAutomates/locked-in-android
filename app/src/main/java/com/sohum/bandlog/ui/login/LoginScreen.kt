@@ -19,6 +19,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -34,15 +35,17 @@ import com.sohum.bandlog.ui.components.ErrorNote
 import kotlinx.coroutines.launch
 
 @Composable
-fun LoginScreen(onSignedIn: () -> Unit) {
+fun LoginScreen(reason: String? = null, onSignedIn: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
     var email by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
+    var name by rememberSaveable { mutableStateOf("") }
     var creating by rememberSaveable { mutableStateOf(false) }
-    var busy by mutableStateOf(false)
-    var error by mutableStateOf<String?>(null)
-    var info by mutableStateOf<String?>(null)
+    var busy by remember { mutableStateOf(false) }
+    // Why we're here (e.g. the session expired mid-save) until the user acts.
+    var error by remember { mutableStateOf(reason) }
+    var info by remember { mutableStateOf<String?>(null) }
 
     fun submit() {
         if (busy) return
@@ -50,7 +53,7 @@ fun LoginScreen(onSignedIn: () -> Unit) {
             busy = true; error = null; info = null
             try {
                 if (creating) {
-                    val active = SupabaseAuth.signUp(email, password)
+                    val active = SupabaseAuth.signUp(email, password, name)
                     if (active) onSignedIn() else info = "Account created. Confirm the email we sent, then sign in."
                 } else {
                     SupabaseAuth.signIn(email, password); onSignedIn()
@@ -68,6 +71,14 @@ fun LoginScreen(onSignedIn: () -> Unit) {
         Text(if (creating) "Create account" else "Sign in", fontSize = 30.sp, fontWeight = FontWeight(800), letterSpacing = (-1).sp)
         Text("One sign-in on this phone. You'll stay logged in.", color = cs.onSurfaceVariant, fontSize = 13.sp)
         Spacer(Modifier.height(22.dp))
+        if (creating) {
+            OutlinedTextField(
+                name, { name = it }, Modifier.fillMaxWidth(), label = { Text("Your name (optional)") }, singleLine = true,
+                placeholder = { Text(com.sohum.bandlog.util.Names.nameFromEmail(email).ifBlank { "e.g. Ayaan" }) },
+                keyboardOptions = KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Words, imeAction = androidx.compose.ui.text.input.ImeAction.Next),
+            )
+            Spacer(Modifier.height(10.dp))
+        }
         OutlinedTextField(
             email, { email = it }, Modifier.fillMaxWidth(), label = { Text("Email") }, singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = androidx.compose.ui.text.input.ImeAction.Next),

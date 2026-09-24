@@ -82,7 +82,7 @@ import kotlinx.coroutines.launch
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private const val APK_URL = "https://evizkfvltacrfngsgbuu.supabase.co/storage/v1/object/public/app/LockedIn-13.apk"
+private const val APK_URL = "https://evizkfvltacrfngsgbuu.supabase.co/storage/v1/object/public/app/LockedIn-14.apk"
 private const val WEB_URL = "https://web-production-ff1cf.up.railway.app"
 
 fun squadInviteText(code: String) = "Join my Locked In squad: code $code — Android $APK_URL · iPhone $WEB_URL"
@@ -180,7 +180,7 @@ fun SquadScreen(vm: AppViewModel, onOpenProfile: () -> Unit) {
     val sq: SquadViewModel = viewModel()
     var adding by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { sq.load() }
-    val display = vm.profile.name.ifBlank { Session.email?.substringBefore('@') ?: "Member" }
+    val display = com.sohum.bandlog.util.Names.display(vm.profile.name, Session.email, "Member")
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(PaddingValues(16.dp, 12.dp, 16.dp, 110.dp)),
@@ -374,9 +374,7 @@ private fun Board(sq: SquadViewModel, squad: Squad, me: String, shareStats: Bool
             Card(padding = 14.dp) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(44.dp)) {
-                        Box(Modifier.size(44.dp).background(p.card2, CircleShape), contentAlignment = Alignment.Center) {
-                            Text(m.name.take(1).uppercase(), fontSize = 17.sp, fontWeight = FontWeight(700), color = p.ink)
-                        }
+                        com.sohum.bandlog.ui.components.Avatar(com.sohum.bandlog.data.Api.avatarUrl(m.avatarPath), com.sohum.bandlog.util.Names.initials(m.name), 44.dp)
                         Box(Modifier.align(Alignment.BottomEnd).size(13.dp).background(p.card, CircleShape).padding(2.dp).background(if (trainedToday) p.green else p.hair, CircleShape))
                     }
                     Spacer(Modifier.width(12.dp))

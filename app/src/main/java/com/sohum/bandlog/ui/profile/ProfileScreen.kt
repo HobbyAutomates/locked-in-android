@@ -64,13 +64,25 @@ import com.sohum.bandlog.ui.components.SettingRow
 import com.sohum.bandlog.ui.components.TargetIcon
 import com.sohum.bandlog.ui.theme.palette
 import com.sohum.bandlog.util.ThemeMode
+import com.sohum.bandlog.util.Images
+import com.sohum.bandlog.util.Names
+import com.sohum.bandlog.data.Api
+import com.sohum.bandlog.ui.components.Avatar
+import com.sohum.bandlog.ui.components.primeImageCache
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.draw.clip
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Where a Profile row can take you. Rendered as full-screen pages by MainActivity. */
 enum class ProfilePage { PERSONAL, GOALS, GOAL_WEIGHT, REMINDERS, WEIGHT_HISTORY }
 
 private const val INVITE_TEXT =
     "Locked In — workouts, meals by voice, label scanner. " +
-        "Android: https://evizkfvltacrfngsgbuu.supabase.co/storage/v1/object/public/app/LockedIn-13.apk · " +
+        "Android: https://evizkfvltacrfngsgbuu.supabase.co/storage/v1/object/public/app/LockedIn-14.apk · " +
         "iPhone: https://web-production-ff1cf.up.railway.app (Safari → Add to Home Screen)"
 
 /**
@@ -91,6 +103,33 @@ fun ProfileScreen(
     val prof = vm.profile
     var showRings by remember { mutableStateOf(false) }
     var showLens by remember { mutableStateOf(false) }
+    var avatarSheet by remember { mutableStateOf(false) }
+    var avatarBusy by remember { mutableStateOf(false) }
+    var avatarError by remember { mutableStateOf<String?>(null) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val displayName = Names.display(prof.name, Session.email)
+
+    // Avatar: center-crop square, <=512 px, JPEG q85 -> avatars/<uid>/avatar.jpg (upsert) ->
+    // profiles.avatar_path = "<uid>/avatar.jpg?v=<millis>" (the ?v busts every cache).
+    fun uploadAvatar(src: android.graphics.Bitmap?) {
+        if (src == null) { avatarError = "Couldn't open that photo"; return }
+        scope.launch {
+            avatarBusy = true; avatarError = null
+            try {
+                val square = withContext(Dispatchers.Default) { Images.squareCrop(src, 512) }
+                val bytes = withContext(Dispatchers.Default) { Images.jpeg(square, 85) }
+                val path = Api.uploadAvatar(bytes)
+                Api.avatarUrl(path)?.let { primeImageCache(it, square) }
+                if (!vm.saveProfile(vm.profile.copy(avatarPath = path))) avatarError = vm.error ?: "Couldn't save your photo"
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { android.util.Log.w("LockedIn", "Avatar upload failed", e); avatarError = e.message ?: "Upload failed" }
+            finally { avatarBusy = false }
+        }
+    }
+    val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) scope.launch { uploadAvatar(withContext(Dispatchers.IO) { runCatching { com.sohum.bandlog.ui.scan.decodeScaled(ctx, uri, 1400) }.getOrNull() }) }
+    }
+    val takePhoto = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bmp -> if (bmp != null) uploadAvatar(bmp) }
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(PaddingValues(16.dp, 12.dp, 16.dp, 110.dp)),
@@ -105,15 +144,20 @@ fun ProfileScreen(
             Card(padding = 0.dp) {
                 Column(Modifier.padding(horizontal = 16.dp)) {
                     Row(Modifier.padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(52.dp).background(p.card2, CircleShape), contentAlignment = Alignment.Center) {
-                            Text((prof.name.ifBlank { Session.email ?: "?" }).take(1).uppercase(), fontSize = 21.sp, fontWeight = FontWeight(700), color = p.ink)
+                        Box(Modifier.size(52.dp).clip(CircleShape).clickable(enabled = !avatarBusy) { avatarSheet = true }, contentAlignment = Alignment.Center) {
+                            Avatar(Api.avatarUrl(prof.avatarPath), Names.initials(displayName), 52.dp)
+                            if (avatarBusy) Box(Modifier.size(52.dp).background(Color.Black.copy(alpha = 0.35f), CircleShape), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = Color.White)
+                            }
                         }
                         Spacer(Modifier.width(14.dp))
                         Column(Modifier.weight(1f)) {
-                            NameField(prof.name) { newName -> vm.launch { vm.saveProfile(prof.copy(name = newName)) } }
-                            Text(prof.age?.let { "$it years old" } ?: (Session.email ?: "—"), fontSize = 13.sp, color = p.muted)
+                            NameField(prof.name, placeholder = Names.nameFromEmail(Session.email).ifBlank { "Enter your name" }) { newName -> vm.launch { vm.saveProfile(vm.profile.copy(name = newName)) } }
+                            Session.email?.let { Text(it, fontSize = 13.sp, color = p.muted, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
+                            prof.age?.let { Text("$it years old", fontSize = 12.sp, color = p.muted) }
                         }
                     }
+                    avatarError?.let { ErrorNote(it, Modifier.padding(bottom = 10.dp)) }
                     Hair()
                     SettingRow(Icons.Outlined.Person, p.ink, "Personal details", onClick = { onOpen(ProfilePage.PERSONAL) }) { Chevron() }
                     Hair()
@@ -192,6 +236,36 @@ fun ProfileScreen(
     }
 
     if (showRings) RingColoursSheet { showRings = false }
+    if (avatarSheet) BottomSheet(title = "Profile photo", subtitle = "Shows on your profile and your squads' boards", onDismiss = { avatarSheet = false }) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable {
+            avatarSheet = false
+            pickPhoto.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+        }, verticalAlignment = Alignment.CenterVertically) {
+            Icon(com.sohum.bandlog.ui.components.ScanIcon, null, tint = p.ink, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(14.dp))
+            Text("Choose photo", fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink)
+        }
+        Hair()
+        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable {
+            avatarSheet = false
+            runCatching { takePhoto.launch(null) }.onFailure { avatarError = "No camera app found - choose a photo instead." }
+        }, verticalAlignment = Alignment.CenterVertically) {
+            Icon(com.sohum.bandlog.ui.components.CameraIcon, null, tint = p.ink, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(14.dp))
+            Text("Take photo", fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink)
+        }
+        if (prof.avatarPath != null) {
+            Hair()
+            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable {
+                avatarSheet = false
+                vm.launch { if (!vm.saveProfile(vm.profile.copy(avatarPath = null))) avatarError = vm.error }
+            }, verticalAlignment = Alignment.CenterVertically) {
+                Icon(com.sohum.bandlog.ui.components.CrossIcon, null, tint = p.red, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(14.dp))
+                Text("Remove photo", fontSize = 15.sp, fontWeight = FontWeight(600), color = p.red)
+            }
+        }
+    }
     if (showLens) LensSheet(prof.lensDefault, onPick = { key -> showLens = false; vm.launch { vm.saveProfile(prof.copy(lensDefault = key)) } }) { showLens = false }
 }
 
@@ -285,7 +359,7 @@ private fun LensSheet(current: String, onPick: (String) -> Unit, onDismiss: () -
 
 /** Inline-editable display name, shown as "Enter your name ✏️" while empty. */
 @Composable
-private fun NameField(name: String, onCommit: (String) -> Unit) {
+private fun NameField(name: String, placeholder: String = "Enter your name", onCommit: (String) -> Unit) {
     val p = palette
     val focus = androidx.compose.ui.platform.LocalFocusManager.current
     var text by remember(name) { mutableStateOf(name) }
@@ -305,7 +379,7 @@ private fun NameField(name: String, onCommit: (String) -> Unit) {
                 hadFocus = st.isFocused
             },
             decorationBox = { inner ->
-                if (text.isEmpty()) Text("Enter your name", fontSize = 17.sp, fontWeight = FontWeight(700), color = p.muted)
+                if (text.isEmpty()) Text(placeholder, fontSize = 17.sp, fontWeight = FontWeight(700), color = p.muted)
                 inner()
             },
         )

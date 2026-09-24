@@ -316,3 +316,13 @@ val MoonStarIcon: ImageVector by lazy {
         moveTo(17f, 3f); verticalLineTo(7f); moveTo(15f, 5f); horizontalLineTo(19f)
     }
 }
+
+/** Price tag for label scans (a packaged food's ingredients / nutrition label). */
+val TagIcon: ImageVector by lazy {
+    stroke("Tag") {
+        moveTo(3f, 12f); verticalLineTo(5f); arcTo(2f, 2f, 0f, false, true, 5f, 3f); horizontalLineTo(12f)
+        lineTo(20.6f, 11.6f); arcTo(2f, 2f, 0f, false, true, 20.6f, 14.4f); lineTo(14.4f, 20.6f)
+        arcTo(2f, 2f, 0f, false, true, 11.6f, 20.6f); close()
+        moveTo(8f, 7.5f); arcTo(0.5f, 0.5f, 0f, true, true, 8f, 8.5f); arcTo(0.5f, 0.5f, 0f, true, true, 8f, 7.5f)
+    }
+}

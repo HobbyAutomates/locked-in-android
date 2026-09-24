@@ -48,7 +48,8 @@ class AppViewModel : ViewModel() {
     val workoutDates: List<String> get() = workouts.map { it.date }.distinct()
     val mealDates: List<String> get() = meals.map { it.date }.distinct()
     val weekStreak: Int get() = Streaks.workoutWeekStreak(workoutDates, profile.weeklyWorkoutTarget)
-    val dayStreak: Int get() = Streaks.dayStreak(workoutDates)
+    /** v2.2: consecutive (India) days with ANY log — a workout, an exercise_log row of any source, or a meal. */
+    val dayStreak: Int get() = Streaks.dayStreak(workouts.map { it.date } + exercises.map { it.date } + meals.map { it.date })
     val mealStreak: Int get() = Streaks.dayStreak(mealDates)
     val thisWeek: Int get() = Streaks.thisWeekCount(workoutDates)
 
@@ -61,6 +62,30 @@ class AppViewModel : ViewModel() {
     data class Celebration(val streakWeeks: Int, val thisWeek: Int, val target: Int, val hitTarget: Boolean)
 
     fun dismissCelebration() { celebrate = null }
+
+    /** A short, non-blocking message for Home ("Workout saved", or a burn row that failed to log). */
+    var notice by mutableStateOf<String?>(null); private set
+    fun dismissNotice() { notice = null }
+
+    /**
+     * v2.2: the refresh token was rejected while the user was mid-task. Instead of swapping the
+     * whole UI to the sign-in page (and silently discarding an open form), the form shows the
+     * error and the shell signs out once the form / page is closed ([finishAuthLost]).
+     */
+    var authLost by mutableStateOf(false); private set
+    /** Why the sign-in page is showing, when it wasn't the user's own sign-out. */
+    var signOutReason by mutableStateOf<String?>(null); private set
+
+    private fun onAuthLost(msg: String?) {
+        authLost = true
+        error = msg ?: "Your session expired — sign in again."
+    }
+
+    fun finishAuthLost() {
+        if (!authLost) return
+        signOutReason = error ?: "Your session expired — sign in again."
+        authLost = false; signedIn = false; loadedOnce = false; error = null
+    }
 
     // ---- first run ----
 
@@ -219,7 +244,7 @@ class AppViewModel : ViewModel() {
         }
     }
 
-    fun onSignedIn() { signedIn = true; refresh() }
+    fun onSignedIn() { signedIn = true; authLost = false; signOutReason = null; error = null; refresh() }
 
     fun refresh() {
         if (!signedIn) return
@@ -240,7 +265,7 @@ class AppViewModel : ViewModel() {
                 loadedOnce = true
                 pushRollup()
             } catch (e: AuthException) {
-                signedIn = false; error = e.message
+                onAuthLost(e.message)
             } catch (e: Exception) {
                 error = e.message ?: "Couldn't load"
             } finally { loading = false }
@@ -249,27 +274,38 @@ class AppViewModel : ViewModel() {
 
     fun clearError() { error = null }
 
-    /** Runs [block] then refreshes; surfaces failures in [error]. Returns true on success. */
-    private suspend fun mutate(block: suspend () -> Unit): Boolean = try {
+    /**
+     * Runs [block] then refreshes; surfaces failures in [error]. Returns true on success. An auth
+     * failure keeps the user where they are (see [authLost]) with [authMessage] as the error.
+     */
+    private suspend fun mutate(authMessage: String = "Your session expired — sign in again. This wasn't saved.", block: suspend () -> Unit): Boolean = try {
         block(); refresh(); true
-    } catch (e: AuthException) { signedIn = false; error = e.message; false }
-    catch (e: Exception) { error = e.message ?: "Something went wrong"; false }
+    } catch (e: AuthException) { android.util.Log.w("LockedIn", "Save blocked by auth: ${e.message}"); onAuthLost(authMessage); false }
+    catch (e: kotlinx.coroutines.CancellationException) { throw e }
+    catch (e: Exception) { android.util.Log.w("LockedIn", "Save failed", e); error = e.message ?: "Something went wrong"; false }
 
     suspend fun saveWorkout(
         id: String?, date: String, muscles: List<String>, band: String,
         kg: Double?, minutes: Int?, exercises: String, notes: String,
     ): Boolean {
         val before = thisWeek; val beforeStreak = weekStreak
-        val ok = mutate {
+        var burnError: String? = null
+        val ok = mutate("Your session expired — sign in again. This workout wasn't saved.") {
             val wid = Api.saveWorkout(id, date, muscles, band, kg, minutes, exercises, notes)
             // Auto-burn: one exercise_log row per workout, tagged with the workout id in `note`.
             // An edit replaces the row so minutes / band changes flow through to the burn.
+            // The workout itself is saved at this point, so a failure here is reported, not fatal.
             runCatching {
                 if (id != null) Api.deleteWorkoutBurn(wid)
                 val mins = (minutes ?: 30).coerceAtLeast(1)
                 Api.saveExercise(date, Burn.bandCode(band), "Bands: " + muscles.joinToString(", "), mins, Burn.bandIntensity(band), Burn.bandKcal(band, profile.weightKg, mins), "workout", wid)
+            }.onFailure { e ->
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                android.util.Log.w("LockedIn", "Workout burn row failed", e)
+                burnError = e.message ?: "unknown error"
             }
         }
+        if (ok) notice = burnError?.let { "Workout saved, but its calories burned didn't log ($it)." } ?: if (id == null) "Workout saved" else "Workout updated"
         // refresh() runs async inside mutate; wait for it so the counts below are fresh.
         if (ok && id == null) {
             kotlinx.coroutines.delay(50)

@@ -8,7 +8,9 @@ import java.util.Locale
 
 /** ISO yyyy-MM-dd helpers, mirroring the web app's dates.ts. */
 object Dates {
-    fun today(): String = LocalDate.now().toString()
+    /** Every "today" in the app is an India calendar date, whatever zone the phone is set to. */
+    val ZONE: java.time.ZoneId = java.time.ZoneId.of("Asia/Kolkata")
+    fun today(): String = LocalDate.now(ZONE).toString()
     fun parse(s: String): LocalDate = LocalDate.parse(s)
     fun addDays(s: String, n: Long): String = parse(s).plusDays(n).toString()
     fun daysBetween(a: String, b: String): Long = ChronoUnit.DAYS.between(parse(a), parse(b))

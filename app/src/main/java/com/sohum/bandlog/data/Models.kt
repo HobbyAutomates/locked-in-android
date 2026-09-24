@@ -145,6 +145,8 @@ data class Profile(
     val lensDefault: String = "protein",
     /** Squads: share protein & calories with squad-mates, or streaks only. */
     val shareStats: Boolean = true,
+    /** `<uid>/avatar.jpg?v=<millis>` in the public avatars bucket; null shows initials. */
+    val avatarPath: String? = null,
 ) {
     /** The lens a report opens on: `goal` follows the weight goal (lose → cutting, gain → bulking, else protein). */
     val initialLens: String
@@ -161,7 +163,7 @@ data class Profile(
     /** Whole years from [dob], or null when no birthday is set. */
     val age: Int?
         get() = dob?.let {
-            runCatching { java.time.Period.between(java.time.LocalDate.parse(it), java.time.LocalDate.now()).years }
+            runCatching { java.time.Period.between(java.time.LocalDate.parse(it), java.time.LocalDate.now(com.sohum.bandlog.util.Dates.ZONE)).years }
                 .getOrNull()?.takeIf { y -> y in 1..120 }
         }
 
@@ -187,6 +189,7 @@ data class Profile(
             remindersJson = if (o.isNull("reminders")) "" else o.opt("reminders")?.toString().orEmpty(),
             lensDefault = o.str("lens_default") ?: "protein",
             shareStats = if (o.isNull("share_stats")) true else o.optBoolean("share_stats", true),
+            avatarPath = o.str("avatar_path"),
         )
     }
 }
@@ -506,22 +509,50 @@ data class ScanHistoryItem(
     val verdict: String,
     val createdAt: String,
     val score: Int?,
-    /** Open Food Facts picture for barcode scans; Storage path (needs signing) for photo scans. */
+    /** Open Food Facts picture for barcode scans (column, else the one inside the report). */
     val imageUrl: String?,
+    /** meal-photos path for plate scans (needs signing). */
     val imagePath: String?,
+    /** scan-photos/<uid>/<id>.jpg thumbnail (private; fetched with the user's token). */
+    val thumbPath: String? = null,
+    /** The report's one-line "what it is". */
+    val whatItIs: String = "",
+    /** Never blank or "<UNKNOWN>": product → first ingredient / first food → "Unnamed label" / "Plate photo". */
+    val displayName: String = product,
 ) {
+    val isPlate: Boolean get() = kind == "photo" || kind == "plate"
+
     companion object {
-        fun from(o: JSONObject) = ScanHistoryItem(
-            id = o.getString("id"),
-            kind = o.optString("kind", "label").ifBlank { "label" },
-            lens = o.optString("lens", "protein").ifBlank { "protein" },
-            product = o.optString("product"),
-            verdict = o.optString("verdict"),
-            createdAt = o.optString("created_at"),
-            score = if (o.isNull("score")) null else o.optString("score").toIntOrNull(),
-            imageUrl = if (o.isNull("image_url")) null else o.optString("image_url").ifBlank { null },
-            imagePath = if (o.isNull("image_path")) null else o.optString("image_path").ifBlank { null },
-        )
+        private fun JSONObject.s(k: String): String? = if (!has(k) || isNull(k)) null else optString(k).trim().ifBlank { null }
+
+        /** Model placeholders that must never reach the list. */
+        fun isJunkName(n: String?): Boolean {
+            val t = n?.trim()?.lowercase().orEmpty()
+            return t.isEmpty() || t == "<unknown>" || t == "unknown" || t == "n/a" || t == "na" || t == "null" || t == "unnamed"
+        }
+
+        fun from(o: JSONObject): ScanHistoryItem {
+            val kind = o.optString("kind", "label").ifBlank { "label" }
+            val product = o.optString("product")
+            val plate = kind == "photo" || kind == "plate"
+            val name = listOf(product, o.s("first_ingredient").takeIf { !plate }, o.s("first_item").takeIf { plate })
+                .firstOrNull { !isJunkName(it) }?.trim()
+                ?: if (plate) "Plate photo" else "Unnamed label"
+            return ScanHistoryItem(
+                id = o.getString("id"),
+                kind = kind,
+                lens = o.optString("lens", "protein").ifBlank { "protein" },
+                product = product,
+                verdict = o.optString("verdict"),
+                createdAt = o.optString("created_at"),
+                score = o.s("score")?.toIntOrNull(),
+                imageUrl = o.s("image_url") ?: o.s("report_image_url"),
+                imagePath = o.s("image_path"),
+                thumbPath = o.s("thumb_path"),
+                whatItIs = o.s("what_it_is").orEmpty(),
+                displayName = name.replaceFirstChar { it.uppercase() },
+            )
+        }
     }
 }
 
@@ -654,6 +685,8 @@ data class SquadMember(
     val shareStats: Boolean,
     val isOwner: Boolean,
     val days: List<SquadDay>,
+    /** Same format as profiles.avatar_path; null shows initials. */
+    val avatarPath: String? = null,
 ) {
     /** The streak from their newest rollup (0 when they haven't opened the app this week). */
     val weekStreak: Int get() = days.maxByOrNull { it.date }?.weekStreak ?: 0
@@ -668,6 +701,7 @@ data class SquadMember(
                 shareStats = if (o.isNull("share_stats")) true else o.optBoolean("share_stats", true),
                 isOwner = o.optBoolean("is_owner", false),
                 days = (0 until arr.length()).map { SquadDay.from(arr.getJSONObject(it)) },
+                avatarPath = if (!o.has("avatar_path") || o.isNull("avatar_path")) null else o.optString("avatar_path").ifBlank { null },
             )
         }
     }

@@ -114,7 +114,7 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(Unit) { updateVm.checkOnce(); vm.addBurnedBack = ThemePrefs.burned(this@MainActivity); if (vm.signedIn) { vm.refresh(); vm.refreshHealth(this@MainActivity) } }
                 Surface(Modifier.fillMaxSize(), color = palette.bg) {
                     when {
-                        !vm.signedIn -> LoginScreen(onSignedIn = { vm.onSignedIn() })
+                        !vm.signedIn -> LoginScreen(reason = vm.signOutReason, onSignedIn = { vm.onSignedIn() })
                         // Hold the mark up for the moment between sign-in and the first profile read,
                         // so a brand-new account never flashes the empty tab shell.
                         !vm.loadedOnce && vm.error == null -> BootSplash()
@@ -175,6 +175,11 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
     // v2.0: Squad takes Calendar's slot; since v2.1 Calendar is an icon in Home's header, pushed as a page.
     val tabs = listOf(Tab("Home", Icons.Outlined.Home), Tab("Squad", com.sohum.bandlog.ui.components.PeopleIcon), Tab("Scan", com.sohum.bandlog.ui.components.ScanIcon), Tab("Progress", Icons.Outlined.SignalCellularAlt), Tab("Profile", Icons.Outlined.Person))
 
+    // v2.2: a rejected refresh token signs out only once no form or page is open, so an open
+    // workout form keeps its fields and shows why the save failed instead of vanishing.
+    LaunchedEffect(vm.authLost, log, page) {
+        if (vm.authLost && log == null && page == null) vm.finishAuthLost()
+    }
     // A tapped meal reminder lands straight on the Meal form.
     LaunchedEffect(openMealTick) {
         if (openMealTick > 0) { page = null; log = LogRequest(null, Dates.today(), true) }

@@ -48,7 +48,7 @@ object Health {
     /** Push a saved band session so it shows up in Samsung Health / Fit. Ends now, starts [minutes] ago. */
     suspend fun writeSession(context: Context, title: String, minutes: Int, date: String) = runCatching {
         val zone = ZoneId.systemDefault()
-        val isToday = date == LocalDate.now().toString()
+        val isToday = date == Dates.today()
         val end = if (isToday) Instant.now() else LocalDate.parse(date).atTime(19, 0).atZone(zone).toInstant()
         val start = end.minusSeconds(minutes.coerceAtLeast(5) * 60L)
         client(context).insertRecords(

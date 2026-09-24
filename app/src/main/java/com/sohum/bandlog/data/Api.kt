@@ -37,7 +37,8 @@ object Api {
     private fun run(r: Request, label: String): String = client.newCall(r).execute().use { res ->
         val body = res.body?.string().orEmpty()
         if (!res.isSuccessful) {
-            val msg = runCatching { JSONObject(body).optString("message") }.getOrNull().orEmpty()
+            android.util.Log.w("LockedIn", "$label failed (${res.code}) ${r.method} ${r.url.encodedPath}: ${body.take(800)}")
+            val msg = runCatching { JSONObject(body).optString("message").ifBlank { JSONObject(body).optString("error") } }.getOrNull().orEmpty()
             throw ApiException("$label failed (${res.code})${if (msg.isNotBlank()) ": $msg" else ""}")
         }
         body
@@ -47,7 +48,7 @@ object Api {
 
     private const val PROFILE_COLS =
         "weekly_workout_target,protein_target_g,calorie_target,name,dob,gender,height_cm,weight_kg," +
-            "goal_weight_kg,goal_type,goal_speed_kg_wk,step_goal,carb_target_g,fat_target_g,reminders,lens_default,share_stats"
+            "goal_weight_kg,goal_type,goal_speed_kg_wk,step_goal,carb_target_g,fat_target_g,reminders,lens_default,share_stats,avatar_path"
 
     suspend fun profile(): Profile = withContext(Dispatchers.IO) {
         val body = run(rest("profiles?select=$PROFILE_COLS&limit=1").get().build(), "Load profile")
@@ -76,6 +77,7 @@ object Api {
             .put("reminders", if (p.remindersJson.isBlank()) JSONObject.NULL else JSONObject(p.remindersJson))
             .put("lens_default", p.lensDefault.ifBlank { "protein" })
             .put("share_stats", p.shareStats)
+            .put("avatar_path", p.avatarPath ?: JSONObject.NULL)
             .toString()
         run(rest("profiles").header("Prefer", "resolution=merge-duplicates").post(json(payload)).build(), "Save profile")
         Unit
@@ -266,6 +268,7 @@ object Api {
         val body = c.newCall(r).execute().use { res ->
             val b = res.body?.string().orEmpty()
             if (!res.isSuccessful) {
+                android.util.Log.w("LockedIn", "$label failed (${res.code}) /api/$path: ${b.take(800)}")
                 val msg = runCatching { JSONObject(b).optString("error") }.getOrNull().orEmpty()
                 throw ApiException(if (msg.isNotBlank()) msg else "$label failed (${res.code})")
             }
@@ -283,6 +286,7 @@ object Api {
         val body = client.newCall(r).execute().use { res ->
             val b = res.body?.string().orEmpty()
             if (!res.isSuccessful) {
+                android.util.Log.w("LockedIn", "$label failed (${res.code}) /api/$path: ${b.take(800)}")
                 val msg = runCatching { JSONObject(b).optString("error") }.getOrNull().orEmpty()
                 throw ApiException(if (msg.isNotBlank()) msg else "$label failed (${res.code})")
             }
@@ -336,9 +340,14 @@ object Api {
 
     // ---- scan history ----
 
-    /** Latest scans, newest first. The score and OFF image come straight out of the report JSON. */
+    /**
+     * Latest scans, newest first. The score, one-liner and name fallbacks come straight out of the
+     * report JSON (first flagged ingredient for labels, first recognised food for plates).
+     */
     suspend fun scanHistory(limit: Int = 30): List<ScanHistoryItem> = withContext(Dispatchers.IO) {
-        val sel = "id,kind,lens,product,verdict,created_at,image_path,score:report->infographic->>score_out_of_10,image_url:report->>image_url"
+        val sel = "id,kind,lens,product,verdict,created_at,image_path,thumb_path,image_url,report_image_url:report->>image_url," +
+            "score:report->infographic->>score_out_of_10,what_it_is:report->>what_it_is," +
+            "first_ingredient:report->concerns->0->>ingredient,first_item:report->items->0->>name"
         val body = run(rest("label_scans?select=$sel&order=created_at.desc&limit=$limit").get().build(), "Load scan history")
         val arr = JSONArray(body)
         (0 until arr.length()).map { ScanHistoryItem.from(arr.getJSONObject(it)) }
@@ -367,6 +376,58 @@ object Api {
         run(req, "Upload photo")
         path
     }
+
+    // ---- scan thumbnails (private bucket scan-photos/<uid>/<scan id>.jpg) ----
+
+    /** Uploads a ≤320 px JPEG for a scan and records it on the row. Callers wrap this in runCatching. */
+    suspend fun uploadScanThumb(scanId: String, jpeg: ByteArray): String = withContext(Dispatchers.IO) {
+        SupabaseAuth.ensureFresh()
+        val token = Session.accessToken ?: throw AuthException("Not signed in")
+        val uid = Session.userId ?: throw AuthException("Not signed in")
+        val path = "$uid/$scanId.jpg"
+        val req = Request.Builder().url("$base/storage/v1/object/scan-photos/$path")
+            .header("apikey", key).header("Authorization", "Bearer $token").header("x-upsert", "true")
+            .post(jpeg.toRequestBody("image/jpeg".toMediaType())).build()
+        run(req, "Upload scan thumbnail")
+        run(rest("label_scans?id=eq.$scanId").header("Prefer", "return=minimal").patch(json(JSONObject().put("thumb_path", path).toString())).build(), "Save scan thumbnail")
+        path
+    }
+
+    /** Records the Open Food Facts picture of a barcode scan on its row (the web server does this too). */
+    suspend fun setScanImageUrl(scanId: String, url: String) = withContext(Dispatchers.IO) {
+        run(rest("label_scans?id=eq.$scanId").header("Prefer", "return=minimal").patch(json(JSONObject().put("image_url", url).toString())).build(), "Save scan image"); Unit
+    }
+
+    /** A private Storage object fetched with the user's token (authenticated endpoint); null on any failure. */
+    suspend fun fetchStorageBitmap(bucket: String, path: String): android.graphics.Bitmap? = withContext(Dispatchers.IO) {
+        runCatching {
+            SupabaseAuth.ensureFresh()
+            val token = Session.accessToken ?: return@runCatching null
+            val req = Request.Builder().url("$base/storage/v1/object/authenticated/$bucket/$path")
+                .header("apikey", key).header("Authorization", "Bearer $token").get().build()
+            client.newCall(req).execute().use { res ->
+                if (!res.isSuccessful) { android.util.Log.w("LockedIn", "Storage read $bucket/$path failed (${res.code})"); null }
+                else res.body?.bytes()?.let { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size) }
+            }
+        }.getOrNull()
+    }
+
+    // ---- avatars (public bucket avatars/<uid>/avatar.jpg) ----
+
+    /** Uploads (upserts) the profile picture; returns the path with a cache-busting `?v=` suffix for profiles.avatar_path. */
+    suspend fun uploadAvatar(jpeg: ByteArray): String = withContext(Dispatchers.IO) {
+        SupabaseAuth.ensureFresh()
+        val token = Session.accessToken ?: throw AuthException("Not signed in")
+        val uid = Session.userId ?: throw AuthException("Not signed in")
+        val req = Request.Builder().url("$base/storage/v1/object/avatars/$uid/avatar.jpg")
+            .header("apikey", key).header("Authorization", "Bearer $token").header("x-upsert", "true")
+            .post(jpeg.toRequestBody("image/jpeg".toMediaType())).build()
+        run(req, "Upload photo")
+        "$uid/avatar.jpg?v=${System.currentTimeMillis()}"
+    }
+
+    /** Public URL for a profiles.avatar_path / squad_board.avatar_path value; null when unset. */
+    fun avatarUrl(path: String?): String? = path?.trim()?.trimStart('/')?.ifBlank { null }?.let { "$base/storage/v1/object/public/avatars/$it" }
 
     /** A 1-hour signed URL for a meal-photos path, or null when signing fails. */
     suspend fun signedPhotoUrl(path: String): String? = withContext(Dispatchers.IO) {

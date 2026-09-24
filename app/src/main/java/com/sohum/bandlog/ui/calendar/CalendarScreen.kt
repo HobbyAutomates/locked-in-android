@@ -52,7 +52,7 @@ import java.util.Locale
 @Composable
 fun CalendarScreen(vm: AppViewModel, onOpenWorkout: (Workout?, String) -> Unit) {
     val p = palette
-    var month by remember { mutableStateOf(YearMonth.now()) }
+    var month by remember { mutableStateOf(YearMonth.now(com.sohum.bandlog.util.Dates.ZONE)) }
     var selected by remember { mutableStateOf(Dates.today()) }
     val byDate = remember(vm.workouts) { vm.workouts.groupBy { it.date } }
     val mealDates = remember(vm.meals) { vm.meals.map { it.date }.toSet() }

@@ -33,8 +33,12 @@ object SupabaseAuth {
     }
 
     /** Returns true when the account is created AND signed in; false when email confirmation is pending. */
-    suspend fun signUp(email: String, password: String): Boolean = withContext(Dispatchers.IO) {
-        val body = JSONObject().put("email", email.trim()).put("password", password).toString()
+    suspend fun signUp(email: String, password: String, name: String = ""): Boolean = withContext(Dispatchers.IO) {
+        // The signup trigger copies data.name into profiles.name; the confirmation email greets with it.
+        val display = name.trim().ifBlank { com.sohum.bandlog.util.Names.nameFromEmail(email.trim()) }
+        val body = JSONObject().put("email", email.trim()).put("password", password)
+            .apply { if (display.isNotBlank()) put("data", JSONObject().put("name", display)) }
+            .toString()
         val r = req("signup").post(json(body)).build()
         client.newCall(r).execute().use { res ->
             val text = res.body?.string().orEmpty()
@@ -51,17 +55,39 @@ object SupabaseAuth {
         refresh()
     }
 
+    /**
+     * Rotates the refresh token. Serialised: several requests fire at once on every refresh of
+     * Home, and each would otherwise spend the same (single-use) refresh token. Inside the lock we
+     * re-check expiry, so callers queued behind a refresh that just succeeded return straight away.
+     * The session is only cleared when GoTrue says the refresh token itself is invalid; a network
+     * blip, a 5xx or a rate limit throws without logging the user out.
+     */
     suspend fun refresh() = refreshLock.withLock {
         withContext(Dispatchers.IO) {
+            if (Session.signedIn && Session.expiresAt - System.currentTimeMillis() / 1000 > 60) return@withContext
             val rt = Session.refreshToken ?: throw AuthException("Not signed in")
             val body = JSONObject().put("refresh_token", rt).toString()
             val r = req("token?grant_type=refresh_token").post(json(body)).build()
             client.newCall(r).execute().use { res ->
                 val text = res.body?.string().orEmpty()
-                if (res.code == 400 || res.code == 401) { Session.clear(); throw AuthException("Session expired, sign in again") }
+                if (!res.isSuccessful) {
+                    android.util.Log.w("LockedIn", "Token refresh failed (${res.code}): ${text.take(500)}")
+                    if (invalidGrant(res.code, text)) { Session.clear(); throw AuthException("Your session expired — sign in again.") }
+                    throw java.io.IOException("Couldn't refresh your session (${res.code}). Check your connection and try again.")
+                }
                 storeSession(res.code, text)
             }
         }
+    }
+
+    /** True when GoTrue rejected the refresh token itself (revoked, reused, unknown), not a transient failure. */
+    private fun invalidGrant(code: Int, text: String): Boolean {
+        if (code == 401 || code == 403) return true
+        if (code != 400) return false
+        val o = runCatching { JSONObject(text) }.getOrNull() ?: return true
+        val err = o.optString("error") + " " + o.optString("error_code") + " " + o.optString("code") + " " + o.optString("msg") + " " + o.optString("error_description")
+        val e = err.lowercase()
+        return "invalid_grant" in e || "refresh_token" in e || "refresh token" in e || "session_not_found" in e || "user_not_found" in e
     }
 
     suspend fun signOut() = withContext(Dispatchers.IO) {

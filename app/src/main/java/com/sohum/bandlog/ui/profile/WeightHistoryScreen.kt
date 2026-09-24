@@ -158,7 +158,7 @@ private fun LogWeightDialog(vm: AppViewModel, onDismiss: () -> Unit) {
                 Text("Date", fontSize = 15.sp, fontWeight = FontWeight(500), color = p.ink)
                 Box(
                     Modifier.background(p.card2, RoundedCornerShape(10.dp)).clickable {
-                        val d = runCatching { LocalDate.parse(date) }.getOrDefault(LocalDate.now())
+                        val d = runCatching { LocalDate.parse(date) }.getOrDefault(LocalDate.now(com.sohum.bandlog.util.Dates.ZONE))
                         runCatching {
                             DatePickerDialog(ctx, { _, y, m, dd -> date = LocalDate.of(y, m + 1, dd).toString() }, d.year, d.monthValue - 1, d.dayOfMonth)
                                 .apply { datePicker.maxDate = System.currentTimeMillis() }.show()

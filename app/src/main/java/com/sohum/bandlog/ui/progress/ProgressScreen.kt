@@ -261,9 +261,12 @@ private fun WeeklyEnergyCard(
             val i = days.indexOf(today)
             if (i >= 0) vm.healthToday?.let { h -> if (h.activeKcal > 0) list[i] = h.activeKcal }
         }
-    // Health Connect active kcal (where we have it) + logged exercise; band-workout rows are
-    // skipped while Health Connect is connected since the session is already in there.
-    val burned = days.mapIndexed { i, d -> health[i] + vm.exerciseKcal(d) }
+    // Health Connect active kcal (where we have it) + every exercise_log row, band-workout
+    // (source='workout') rows included. Those are skipped only on days Health Connect actually
+    // reported a burn, since the session we wrote into it is already counted there.
+    val burned = days.mapIndexed { i, d ->
+        health[i] + vm.exercises.filter { it.date == d && !(vm.healthConnected && health[i] > 0 && it.source == "workout") }.sumOf { it.kcal }
+    }
     val periodExercise = vm.exercises.filter { it.date in days }.sortedWith(compareByDescending<com.sohum.bandlog.data.ExerciseEntry> { it.date }.thenByDescending { it.createdAt })
     val totalIn = consumed.sum()
     val totalOut = burned.sum()
