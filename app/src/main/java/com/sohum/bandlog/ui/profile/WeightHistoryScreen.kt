@@ -58,12 +58,14 @@ import java.util.Locale
 
 private val monthFmt = DateTimeFormatter.ofPattern("MMM yyyy", Locale.ENGLISH)
 
-/** Big current number, the movement since the first weigh-in, and the full log. */
+/** Big current number, the movement since the first weigh-in, and the full log. v2.8: tap a weigh-in to edit or delete it. */
 @Composable
 fun WeightHistoryScreen(vm: AppViewModel, onBack: () -> Unit, openLog: Boolean = false) {
     val p = palette
     val rows = vm.weights
     var showLog by remember { mutableStateOf(openLog) }
+    var editing by remember { mutableStateOf<com.sohum.bandlog.data.WeightEntry?>(null) }
+    var pendingDeletes by remember { mutableStateOf(setOf<String>()) }
 
     LaunchedEffect(Unit) { vm.loadWeights() }
 
@@ -105,7 +107,12 @@ fun WeightHistoryScreen(vm: AppViewModel, onBack: () -> Unit, openLog: Boolean =
                     Column(Modifier.padding(horizontal = 14.dp)) {
                         rows.forEachIndexed { i, r ->
                             if (i > 0) Hair()
-                            Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            androidx.compose.runtime.key(r.id) {
+                            if (r.id in pendingDeletes) com.sohum.bandlog.ui.log.DeletedRow(
+                                onUndo = { pendingDeletes = pendingDeletes - r.id },
+                                onExpire = { pendingDeletes = pendingDeletes - r.id; vm.deleteWeightLater(r.id) },
+                            ) else
+                            Row(Modifier.fillMaxWidth().clickable(onClickLabel = "Edit") { editing = r }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                                 IconTile(ScaleIcon, p.ink, p.card2)
                                 Spacer(Modifier.width(12.dp))
                                 Column(Modifier.weight(1f)) {
@@ -124,9 +131,8 @@ fun WeightHistoryScreen(vm: AppViewModel, onBack: () -> Unit, openLog: Boolean =
                                         color = when { d > 0.05 -> p.green; d < -0.05 -> p.blue; else -> p.muted },
                                     )
                                 }
-                                IconButton(onClick = { vm.launch { vm.deleteWeight(r.id) } }, Modifier.size(32.dp)) {
-                                    Icon(Icons.Outlined.Delete, "Delete", tint = p.muted, modifier = Modifier.size(18.dp))
-                                }
+                                Text("  ›", fontSize = 18.sp, color = p.muted)
+                            }
                             }
                         }
                     }
@@ -137,22 +143,24 @@ fun WeightHistoryScreen(vm: AppViewModel, onBack: () -> Unit, openLog: Boolean =
     }
 
     if (showLog) LogWeightDialog(vm) { showLog = false }
+    editing?.let { e -> LogWeightDialog(vm, entry = e, onDelete = { editing = null; pendingDeletes = pendingDeletes + e.id }) { editing = null } }
 }
 
+/** Log a weigh-in, or (v2.8, with [entry]) edit one: kg, date, note, and Delete (Undo shows in the list). */
 @Composable
-private fun LogWeightDialog(vm: AppViewModel, onDismiss: () -> Unit) {
+private fun LogWeightDialog(vm: AppViewModel, entry: com.sohum.bandlog.data.WeightEntry? = null, onDelete: (() -> Unit)? = null, onDismiss: () -> Unit) {
     val p = palette
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val focus = androidx.compose.ui.platform.LocalFocusManager.current
-    var date by remember { mutableStateOf(Dates.today()) }
-    var kg by remember { mutableStateOf(vm.profile.weightKg?.let { fmt(it) } ?: "") }
-    var note by remember { mutableStateOf("") }
+    var date by remember { mutableStateOf(entry?.date ?: Dates.today()) }
+    var kg by remember { mutableStateOf((entry?.weightKg ?: vm.profile.weightKg)?.let { fmt(it) } ?: "") }
+    var note by remember { mutableStateOf(entry?.note ?: "") }
     var busy by remember { mutableStateOf(false) }
 
     Dialog(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().background(p.card, RoundedCornerShape(28.dp)).padding(22.dp)) {
-            Text("Log weight", fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.5).sp, color = p.ink)
+            Text(if (entry != null) "Edit weigh-in" else "Log weight", fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.5).sp, color = p.ink)
             Spacer(Modifier.height(14.dp))
             RowSpaceBetween {
                 Text("Date", fontSize = 15.sp, fontWeight = FontWeight(500), color = p.ink)
@@ -182,16 +190,17 @@ private fun LogWeightDialog(vm: AppViewModel, onDismiss: () -> Unit) {
                 )
             }
             Spacer(Modifier.height(18.dp))
-            PillButton(if (busy) "Saving…" else "Save", enabled = !busy && kg.toDoubleOrNull() != null, onClick = {
+            PillButton(if (busy) "Saving…" else "Save", enabled = !busy && (kg.toDoubleOrNull() ?: 0.0) in 20.0..300.0, onClick = {
                 scope.launch {
                     busy = true
-                    val ok = vm.logWeight(date, kg.toDouble(), note.trim())
+                    val ok = if (entry != null) vm.updateWeight(entry.id, date, kg.toDouble(), note.trim()) else vm.logWeight(date, kg.toDouble(), note.trim())
                     busy = false
                     if (ok) onDismiss()
                 }
             })
             Spacer(Modifier.height(8.dp))
             PillButton("Cancel", onDismiss, height = 44.dp, bg = p.card2, fg = p.ink)
+            if (entry != null && onDelete != null) com.sohum.bandlog.ui.log.DeleteLink(enabled = !busy, onClick = onDelete)
         }
     }
 }

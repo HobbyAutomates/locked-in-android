@@ -81,28 +81,35 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
 
-/** Full-screen Log page: Workout / Meal / Exercise segments (opened from the + FAB or a workout row). */
+/**
+ * Full-screen Log page. v2.8: Food · Activity (the old Workout and Exercise segments are one "Log
+ * activity" flow, its type picked inline). A tapped workout or activity row opens here as its
+ * editor. [startOnExercise] is kept for older callers and just means Activity.
+ */
 @Composable
-fun LogScreen(vm: AppViewModel, existing: Workout?, initialDate: String, startOnMeal: Boolean, onClose: () -> Unit, startOnExercise: Boolean = false) {
+fun LogScreen(
+    vm: AppViewModel, existing: Workout?, initialDate: String, startOnMeal: Boolean, onClose: () -> Unit, startOnExercise: Boolean = false,
+    editingExercise: com.sohum.bandlog.data.ExerciseEntry? = null,
+) {
     val p = palette
-    var seg by rememberSaveable { mutableStateOf(if (startOnExercise) 2 else if (startOnMeal) 1 else 0) }
+    val editing = existing != null || editingExercise != null
+    var seg by rememberSaveable { mutableStateOf(if (startOnMeal && !editing && !startOnExercise) 0 else 1) }
     Column(Modifier.fillMaxSize().background(p.bg).statusBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(16.dp, 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier.size(40.dp).shadow(8.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow).background(p.card, CircleShape).clickable(onClick = onClose),
                 contentAlignment = Alignment.Center,
             ) { Icon(Icons.Outlined.ArrowBack, "Back", tint = p.ink, modifier = Modifier.size(18.dp)) }
-            Text(if (existing != null) "Edit workout" else "Log", Modifier.weight(1f), textAlign = TextAlign.Center, fontSize = 17.sp, fontWeight = FontWeight(700), color = p.ink)
+            Text(if (existing != null) "Edit workout" else if (editingExercise != null) "Edit activity" else if (seg == 0) "Log food" else "Log activity", Modifier.weight(1f), textAlign = TextAlign.Center, fontSize = 17.sp, fontWeight = FontWeight(700), color = p.ink)
             Spacer(Modifier.width(40.dp))
         }
-        if (existing == null) {
-            Box(Modifier.padding(16.dp, 8.dp)) { Segmented(listOf("Workout", "Meal", "Exercise"), seg, { seg = it }) }
+        if (!editing) {
+            Box(Modifier.padding(16.dp, 8.dp)) { Segmented(listOf("Food", "Activity"), seg, { seg = it }) }
         }
         when {
-            // v2.5: the Workout segment is a type picker first; Bands keeps the band form below.
-            existing != null || seg == 0 -> WorkoutTab(vm, existing, initialDate, onClose) { WorkoutForm(vm, existing, initialDate, onClose) }
-            seg == 1 -> MealForm(vm, initialDate, onClose)
-            else -> ExerciseForm(vm, initialDate, onClose)
+            // v2.8: Activity picks its type inline; Bands keeps the band form below.
+            editing || seg == 1 -> WorkoutTab(vm, existing, initialDate, onClose, editingExercise = editingExercise) { WorkoutForm(vm, existing, initialDate, onClose) }
+            else -> MealForm(vm, initialDate, onClose)
         }
     }
 }
@@ -122,37 +129,21 @@ private fun WorkoutForm(vm: AppViewModel, existing: Workout?, initialDate: Strin
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var pickDate by remember { mutableStateOf(false) }
-    var pendingDelete by remember { mutableStateOf(false) }
-    var deleteJob by remember { mutableStateOf<Job?>(null) }
+    var more by rememberSaveable { mutableStateOf(false) }
+    var copied by remember { mutableStateOf(false) }
     val ctx = androidx.compose.ui.platform.LocalContext.current
-
-    // If the editor leaves composition (Back, navigation) before the undo window runs out, the local
-    // job is cancelled with the screen — finish the delete on the ViewModel's own scope instead of
-    // silently dropping it.
-    DisposableEffect(existing?.id) {
-        onDispose { if (pendingDelete && !busy) { deleteJob?.cancel(); existing?.let { vm.deleteWorkoutLater(it.id) } } }
-    }
+    // Delete lives here with the v2.7 undo; leaving early still deletes.
+    val del = rememberEditorDelete(existing?.id) { existing?.let { vm.deleteWorkoutLater(it.id) } }
 
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp, 6.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            // v2.1: one tap repeats the last session; everything stays editable.
-            val last = vm.lastWorkout
-            if (existing == null && last != null) Rise(0) {
-                val applied = muscles == last.muscles.toSet() && band == last.bandLevel && exercises == last.exercises
-                Row(
-                    Modifier.fillMaxWidth().heightIn(min = 48.dp).pressable().background(if (applied) p.card2 else p.btn, CircleShape)
-                        .clickable(enabled = !applied) {
-                            muscles = last.muscles.toSet(); band = last.bandLevel
-                            last.resistanceKg?.let { kg = fmt(it) }; last.minutes?.let { minutes = it.toString() }
-                            exercises = last.exercises; error = null
-                        }
-                        .padding(horizontal = 18.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(com.sohum.bandlog.ui.components.HistoryIcon, null, tint = if (applied) p.muted else p.btnInk, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(if (applied) "Same as last time · filled in" else "Same as last time", fontSize = 14.sp, fontWeight = FontWeight(700), color = if (applied) p.muted else p.btnInk)
-                    Text("  " + last.muscles.joinToString(" · "), fontSize = 13.sp, color = (if (applied) p.muted else p.btnInk).copy(alpha = 0.7f), maxLines = 1, modifier = Modifier.weight(1f))
+            // One tap repeats the last band session; everything stays editable.
+            val last = vm.lastWorkout(Workout.BANDS, except = existing?.id)
+            if (existing == null && last != null) {
+                SameAsLastChip(copied) {
+                    muscles = last.muscles.toSet(); band = last.bandLevel
+                    last.resistanceKg?.let { kg = fmt(it) }; last.minutes?.let { minutes = it.toString() }
+                    exercises = last.exercises; copied = true; error = null
                 }
             }
             Rise(0) {
@@ -169,13 +160,6 @@ private fun WorkoutForm(vm: AppViewModel, existing: Workout?, initialDate: Strin
             Rise(1) {
                 Card(padding = 0.dp) {
                     Column(Modifier.padding(horizontal = 16.dp)) {
-                        SettingRow("Date") {
-                            Row(Modifier.clickable { pickDate = true }, verticalAlignment = Alignment.CenterVertically) {
-                                Text(if (date == Dates.today()) "Today, ${Dates.short(date).drop(4)}" else Dates.short(date), fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink)
-                                Text("  ›", fontSize = 15.sp, color = p.muted)
-                            }
-                        }
-                        Hair()
                         SettingRow("Band") {
                             Row(Modifier.background(p.card2, CircleShape).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Muscles.BAND_LEVELS.forEach { l ->
@@ -187,47 +171,38 @@ private fun WorkoutForm(vm: AppViewModel, existing: Workout?, initialDate: Strin
                             }
                         }
                         Hair()
-                        SettingRow("Resistance") { NumberField(kg, { kg = it.filter { c -> c.isDigit() || c == '.' } }, "kg", imeAction = ImeAction.Next) }
-                        Hair()
                         SettingRow("Duration") { NumberField(minutes, { minutes = it.filter(Char::isDigit) }, "min") }
+                        DurationChips(minutes) { minutes = it }
                     }
                 }
             }
-            Rise(2) {
-                Card {
+            MoreOptions(more, { more = !more }, "Resistance, exercises, date, notes") {
+                SettingRow("Resistance") { NumberField(kg, { kg = it.filter { c -> c.isDigit() || c == '.' } }, "kg", imeAction = ImeAction.Next) }
+                Hair()
+                Column(Modifier.padding(vertical = 12.dp)) {
                     Text("Exercises", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted)
                     Spacer(Modifier.height(6.dp))
                     PlainField(exercises, { exercises = it }, "Rows, chest press, lateral raise")
                 }
-            }
-            Rise(3) {
-                Card {
+                Hair()
+                SettingRow("Date") {
+                    Row(Modifier.clickable { pickDate = true }, verticalAlignment = Alignment.CenterVertically) {
+                        Text(if (date == Dates.today()) "Today, ${Dates.short(date).drop(4)}" else Dates.short(date), fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink)
+                        Text("  ›", fontSize = 15.sp, color = p.muted)
+                    }
+                }
+                Hair()
+                Column(Modifier.padding(vertical = 12.dp)) {
                     Text("Notes", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted)
                     Spacer(Modifier.height(6.dp))
                     PlainField(notes, { notes = it }, "Rows felt heavy, try heavy band next time")
                 }
             }
             ErrorNote(error)
-            if (existing != null) {
-                if (pendingDelete) {
-                    RowSpaceBetween {
-                        Text("Deleted", fontSize = 15.sp, fontWeight = FontWeight(500), color = p.muted)
-                        TextButton(onClick = { deleteJob?.cancel(); deleteJob = null; pendingDelete = false }) { Text("Undo", color = p.btn) }
-                    }
-                } else {
-                    TextButton(onClick = {
-                        pendingDelete = true
-                        deleteJob = scope.launch {
-                            delay(5000)
-                            busy = true
-                            if (vm.deleteWorkout(existing.id)) onClose() else { error = vm.error; busy = false; pendingDelete = false }
-                        }
-                    }, enabled = !busy) { Text("Delete workout", color = p.red) }
-                }
-            }
+            if (existing != null) EditorDelete("Delete workout", del, enabled = !busy, onDelete = { vm.deleteWorkout(existing.id).also { if (!it) error = vm.error } }, onDone = onClose)
         }
         Box(Modifier.padding(16.dp, 12.dp).navigationBarsPadding().imePadding()) {
-            PillButton(if (busy) "Saving…" else "Save workout", enabled = !busy, onClick = {
+            PillButton(if (busy) "Saving…" else "Save workout", enabled = !busy && !del.pending, onClick = {
                 if (muscles.isEmpty()) { error = "Pick at least one muscle"; return@PillButton }
                 scope.launch {
                     busy = true; error = null

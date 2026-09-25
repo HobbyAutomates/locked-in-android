@@ -90,6 +90,7 @@ import com.sohum.bandlog.ui.today.TodayScreen
 import com.sohum.bandlog.util.Dates
 import com.sohum.bandlog.util.ThemeMode
 import com.sohum.bandlog.util.ThemePrefs
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -175,8 +176,8 @@ private fun BootSplash() {
     }
 }
 
-/** What the Log page was opened with. */
-private data class LogRequest(val workout: Workout?, val date: String, val meal: Boolean, val exercise: Boolean = false)
+/** What the Log page was opened with. v2.8: [entry] opens a logged run / activity in its editor. */
+private data class LogRequest(val workout: Workout?, val date: String, val meal: Boolean, val exercise: Boolean = false, val entry: com.sohum.bandlog.data.ExerciseEntry? = null)
 
 private data class Tab(val label: String, val icon: ImageVector)
 
@@ -190,8 +191,8 @@ private fun parentOf(page: Page, fromPrefs: Boolean): Page? = when (page) {
     else -> null
 }
 
-/** v2.3: the + button's speed-dial entries. */
-private enum class DialItem(val label: String) { MEAL("Meal"), WORKOUT("Workout"), EXERCISE("Exercise"), WATER("Water"), WEIGHT("Weight") }
+/** v2.8: the + button's speed-dial entries. Water adds a glass in one tap (long-press or › for the page). */
+private enum class DialItem(val label: String) { FOOD("Food"), ACTIVITY("Activity"), WATER("Water +1 glass"), WEIGHT("Weight") }
 
 @Composable
 private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: ThemeMode, openMealTick: Int, openWrapTick: Int, openWaterTick: Int, joinCode: String?, onJoinHandled: () -> Unit, onThemeMode: (ThemeMode) -> Unit) {
@@ -205,6 +206,22 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
     var fromPrefs by remember { mutableStateOf(false) }
     var dial by remember { mutableStateOf(false) }
     var waterParty by remember { mutableStateOf(false) }
+    // v2.8: the FAB's one-tap glass and its Undo snackbar (a new tick restarts the 5 s timer).
+    val shellScope = androidx.compose.runtime.rememberCoroutineScope()
+    var snack by remember { mutableStateOf<String?>(null) }
+    var snackUndo by remember { mutableStateOf(false) }
+    var snackTick by remember { mutableIntStateOf(0) }
+    var glassBusy by remember { mutableStateOf(false) }
+    LaunchedEffect(snackTick) { if (snackTick > 0) { kotlinx.coroutines.delay(5000); snack = null } }
+    fun addGlass() {
+        val glass = vm.profile.waterGlassMl.coerceAtLeast(50)
+        shellScope.launch {
+            glassBusy = true
+            snack = "+1 glass of water ($glass mL)"; snackUndo = true; snackTick++
+            if (!vm.logWater(glass, vessel = "glass", quiet = true)) { snack = vm.error ?: "Couldn't log water"; snackUndo = false; snackTick++ }
+            glassBusy = false
+        }
+    }
     // v2.0: Squad takes Calendar's slot; since v2.1 Calendar is an icon in Home's header, pushed as a page.
     val tabs = listOf(Tab("Home", Icons.Outlined.Home), Tab("Squad", com.sohum.bandlog.ui.components.PeopleIcon), Tab("Scan", com.sohum.bandlog.ui.components.ScanFilledIcon), Tab("Progress", Icons.Outlined.SignalCellularAlt), Tab("Profile", Icons.Outlined.Person))
 
@@ -299,14 +316,13 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
             enter = fadeIn(Motion.effects()) + slideInVertically(Motion.spatial()) { it / 4 },
             exit = fadeOut(Motion.effectsFast()) + slideOutVertically(Motion.spatialFast()) { it / 4 },
         ) {
-            SpeedDial(Modifier.navigationBarsPadding().padding(end = 20.dp, bottom = 104.dp)) { item ->
+            SpeedDial(Modifier.navigationBarsPadding().padding(end = 20.dp, bottom = 104.dp), onOpenWater = { dial = false; log = null; page = Page.WATER }) { item ->
                 dial = false
                 val today = Dates.today()
                 when (item) {
-                    DialItem.MEAL -> log = LogRequest(null, today, true)
-                    DialItem.WORKOUT -> log = LogRequest(null, today, false)
-                    DialItem.EXERCISE -> log = LogRequest(null, today, false, exercise = true)
-                    DialItem.WATER -> page = Page.WATER
+                    DialItem.FOOD -> log = LogRequest(null, today, true)
+                    DialItem.ACTIVITY -> log = LogRequest(null, today, false, exercise = true)
+                    DialItem.WATER -> addGlass()
                     DialItem.WEIGHT -> page = Page.WEIGHT_LOG
                 }
             }
@@ -327,9 +343,21 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
                         }
                     }
                 }
-                // Tap opens the dial; long-press keeps the old straight-to-Log behaviour.
-                Fab(Modifier.align(Alignment.TopEnd).offset(x = (-20).dp, y = (-30).dp), open = dial, onLongClick = { dial = false; log = LogRequest(null, Dates.today(), false) }) { dial = !dial }
+                // Tap opens the dial; long-press goes straight to Log activity.
+                Fab(Modifier.align(Alignment.TopEnd).offset(x = (-20).dp, y = (-30).dp), open = dial, onLongClick = { dial = false; log = LogRequest(null, Dates.today(), false, exercise = true) }) { dial = !dial }
             }
+        }
+
+        // v2.8: the one-tap glass's snackbar, above the tab bar.
+        androidx.compose.animation.AnimatedVisibility(
+            snack != null && page == null && log == null, modifier = Modifier.align(Alignment.BottomCenter),
+            enter = fadeIn(Motion.effects()) + slideInVertically(Motion.spatial()) { it / 2 },
+            exit = fadeOut(Motion.effectsFast()),
+        ) {
+            com.sohum.bandlog.ui.log.UndoSnackbar(
+                snack ?: "", Modifier.navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 96.dp), undoEnabled = !glassBusy,
+                onUndo = if (snackUndo) ({ snack = null; shellScope.launch { vm.undoWater() } }) else null,
+            )
         }
 
         vm.celebrate?.let { c -> CelebrationModal(c) { vm.dismissCelebration() } }
@@ -376,7 +404,7 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
         ) { req ->
             if (req != null) {
                 BackHandler { log = null }
-                LogScreen(vm, req.workout, req.date, req.meal, onClose = { log = null }, startOnExercise = req.exercise)
+                LogScreen(vm, req.workout, req.date, req.meal, onClose = { log = null }, startOnExercise = req.exercise, editingExercise = req.entry)
             }
         }
 
@@ -450,29 +478,46 @@ private fun Fab(modifier: Modifier, open: Boolean, onLongClick: () -> Unit, onCl
     ) { Icon(Icons.Outlined.Add, if (open) "Close" else "Log", tint = p.btnInk, modifier = Modifier.size(28.dp).graphicsLayer { rotationZ = turn }) }
 }
 
-/** The five speed-dial actions: a label pill beside a round icon, right-aligned above the + button. */
+/**
+ * v2.8 speed dial — Food · Activity · Water · Weight: a label pill beside a round icon, right-aligned
+ * above the + button. Water adds a glass on tap; long-press it (or tap the small › beside it) for
+ * the Water page.
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun SpeedDial(modifier: Modifier, onPick: (DialItem) -> Unit) {
+private fun SpeedDial(modifier: Modifier, onOpenWater: () -> Unit, onPick: (DialItem) -> Unit) {
     val p = palette
     Column(modifier, horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         DialItem.entries.forEach { item ->
             val icon = when (item) {
-                DialItem.MEAL -> com.sohum.bandlog.ui.components.BowlIcon
-                DialItem.WORKOUT -> com.sohum.bandlog.ui.components.BandIcon
-                DialItem.EXERCISE -> com.sohum.bandlog.ui.components.RunIcon
+                DialItem.FOOD -> com.sohum.bandlog.ui.components.BowlIcon
+                DialItem.ACTIVITY -> com.sohum.bandlog.ui.components.RunIcon
                 DialItem.WATER -> com.sohum.bandlog.ui.components.GlassIcon
                 DialItem.WEIGHT -> com.sohum.bandlog.ui.components.ScaleIcon
             }
-            Row(
-                Modifier.clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { onPick(item) },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(Modifier.height(36.dp).background(p.card, CircleShape).padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
-                    Text(item.label, fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (item == DialItem.WATER) {
+                    Box(
+                        Modifier.size(40.dp).shadow(8.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow).background(p.card, CircleShape)
+                            .clickable(onClickLabel = "Open the Water page", onClick = onOpenWater),
+                        contentAlignment = Alignment.Center,
+                    ) { Text("›", fontSize = 20.sp, fontWeight = FontWeight(600), color = p.ink) }
+                    Spacer(Modifier.width(8.dp))
                 }
-                Spacer(Modifier.width(10.dp))
-                Box(Modifier.size(48.dp).shadow(8.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow).background(p.card, CircleShape), contentAlignment = Alignment.Center) {
-                    Icon(icon, null, tint = p.ink, modifier = Modifier.size(22.dp))
+                Row(
+                    Modifier.combinedClickable(
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null,
+                        onLongClick = if (item == DialItem.WATER) onOpenWater else null, onLongClickLabel = if (item == DialItem.WATER) "Open the Water page" else null,
+                    ) { onPick(item) },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.height(36.dp).background(p.card, CircleShape).padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
+                        Text(item.label, fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1)
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Box(Modifier.size(48.dp).shadow(8.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow).background(p.card, CircleShape), contentAlignment = Alignment.Center) {
+                        Icon(icon, null, tint = p.ink, modifier = Modifier.size(22.dp))
+                    }
                 }
             }
         }
