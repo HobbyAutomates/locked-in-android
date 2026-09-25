@@ -10,7 +10,11 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import com.sohum.bandlog.ui.motion.PremiumMotion
+import com.sohum.bandlog.ui.motion.drawPathTrimmed
+import com.sohum.bandlog.ui.motion.rememberMotion
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
@@ -122,11 +126,8 @@ fun BarChart(
 ) {
     val p = palette
     val measurer = rememberTextMeasurer()
-    val grow = remember(values) { Animatable(0f) }
-    LaunchedEffect(values) {
-        delay(120)
-        grow.animateTo(1f, Motion.spatialSlow())
-    }
+    // v2.12: bars grow up from the baseline with a small overshoot (m-growy), once per screen visit.
+    val grow = rememberMotion("bars-${values.hashCode()}", 200, PremiumMotion.GROW_Y_MS)
     val style = TextStyle(fontSize = 10.sp, color = p.muted)
     val bold = TextStyle(fontSize = 10.sp, color = p.ink, fontWeight = FontWeight(700))
     val valueStyle = TextStyle(fontSize = 10.sp, color = p.muted, fontWeight = FontWeight(600))
@@ -138,7 +139,7 @@ fun BarChart(
 
     Canvas(modifier) {
         if (values.isEmpty()) return@Canvas
-        val f = grow.value
+        val f = PremiumMotion.growY(grow.value)
         val axisMax = axisMaxFor(maxOf(values.maxOrNull() ?: 0.0, target, 1.0), axisStep)
         val plot = drawGrid(measurer, axisMax, unit, style, hair, xLabels.any { it.isNotEmpty() }, 16.dp.toPx())
         val n = values.size
@@ -355,5 +356,147 @@ private fun DrawScope.drawXLabels(
         if (x + lay.size.width > limit) continue
         drawText(lay, topLeft = Offset(x, plot.bottom + 5.dp.toPx()))
         limit = x - 3.dp.toPx()
+    }
+}
+
+// ---------------------------------------------------------------- v2.12 smooth line charts
+
+/**
+ * A smooth curve through [pts] (Catmull-Rom converted to cubic Béziers, control points clamped
+ * vertically so the curve never overshoots its neighbours: a trend line shouldn't invent peaks).
+ */
+fun smoothPath(pts: List<Offset>): Path {
+    val path = Path()
+    if (pts.isEmpty()) return path
+    path.moveTo(pts[0].x, pts[0].y)
+    if (pts.size == 1) return path
+    for (i in 0 until pts.size - 1) {
+        val p0 = pts[max(i - 1, 0)]
+        val p1 = pts[i]
+        val p2 = pts[i + 1]
+        val p3 = pts[min(i + 2, pts.size - 1)]
+        val lo = min(p1.y, p2.y)
+        val hi = max(p1.y, p2.y)
+        val c1 = Offset(p1.x + (p2.x - p0.x) / 6f, (p1.y + (p2.y - p0.y) / 6f).coerceIn(lo, hi))
+        val c2 = Offset(p2.x - (p3.x - p1.x) / 6f, (p2.y - (p3.y - p1.y) / 6f).coerceIn(lo, hi))
+        path.cubicTo(c1.x, c1.y, c2.x, c2.y, p2.x, p2.y)
+    }
+    return path
+}
+
+/**
+ * v2.12 weight trend: a smooth 7-day-average line drawn in like a pen, a soft fill that fades in
+ * after it, and a ringed dot on today's end that pops. [xs] are 0..1 positions (by date), [ys]
+ * the values. Motion hangs off the enclosing card's Entrance (see ui/motion).
+ */
+@Composable
+fun WeightTrendLine(xs: List<Float>, ys: List<Double>, color: Color, motionKey: String, modifier: Modifier = Modifier) {
+    val p = palette
+    val draw = rememberMotion("$motionKey-draw", 300, PremiumMotion.DRAW_MS)
+    val fill = rememberMotion("$motionKey-fill", 1500, PremiumMotion.FADE_MS)
+    val dot = rememberMotion("$motionKey-dot", 2100, PremiumMotion.POP_MS)
+    val card = p.card
+    Canvas(modifier) {
+        if (ys.size < 2) return@Canvas
+        val lo = ys.min()
+        val hi = ys.max()
+        val span = maxOf(hi - lo, 0.6)
+        val mid = (hi + lo) / 2
+        val top = 10.dp.toPx()
+        val bottom = size.height * 0.74f
+        val r = 5.dp.toPx()
+        val pts = ys.indices.map { i ->
+            val x = r + (size.width - 2 * r) * xs[i].coerceIn(0f, 1f)
+            val f = ((ys[i] - (mid - span / 2)) / span).toFloat().coerceIn(0f, 1f)
+            Offset(x, top + (bottom - top) * (1f - f))
+        }
+        val line = smoothPath(pts)
+        val fa = PremiumMotion.eased(fill.value, PremiumMotion.Ease)
+        if (fa > 0f) {
+            val area = Path().apply {
+                addPath(line)
+                lineTo(pts.last().x, size.height); lineTo(pts.first().x, size.height); close()
+            }
+            drawPath(area, Brush.verticalGradient(listOf(color.copy(alpha = 0.20f * fa), color.copy(alpha = 0.03f * fa)), startY = top, endY = size.height))
+        }
+        drawPathTrimmed(line, PremiumMotion.eased(draw.value, PremiumMotion.EasePen), color, Stroke(width = 2.4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+        val d = dot.value
+        if (d > 0f) {
+            val s = PremiumMotion.popScale(d)
+            val a = PremiumMotion.popAlpha(d)
+            drawCircle(card, (r + 2.dp.toPx()) * s, pts.last(), alpha = a)
+            drawCircle(color, r * s, pts.last(), alpha = a)
+        }
+    }
+}
+
+/**
+ * v2.12 energy: calories per slot as a smooth line (pen draw-in) against a flat dashed target,
+ * with one dot per logged slot that pops in sequence: green within ±5% of target, orange over,
+ * blue under. Null values are unlogged slots (no dot; the line joins the logged ones).
+ */
+@Composable
+fun EnergyTargetLine(values: List<Double?>, target: Double, xLabels: List<String>, motionKey: String, modifier: Modifier = Modifier) {
+    val p = palette
+    val measurer = rememberTextMeasurer()
+    val draw = rememberMotion("$motionKey-draw", 500, PremiumMotion.DRAW_MS)
+    // One pop per slot; long ranges share the same overall window so the run never drags.
+    val step = if (values.size <= 8) 230 else (1600 / values.size.coerceAtLeast(1))
+    val dots = values.indices.map { i -> rememberMotion("$motionKey-dot$i", 930 + i * step, PremiumMotion.POP_MS) }
+    val style = TextStyle(fontSize = 11.sp, color = p.muted, fontWeight = FontWeight(600))
+    val tStyle = TextStyle(fontSize = 10.sp, color = p.green, fontWeight = FontWeight(600))
+    val ink = p.ink
+    val green = p.green; val orange = p.orange; val blue = p.blue; val card = p.card
+    Canvas(modifier) {
+        val n = values.size
+        if (n == 0) return@Canvas
+        val labelH = measurer.measure("M", style).size.height.toFloat()
+        val plotBottom = size.height - labelH - 10.dp.toPx()
+        val plotTop = 10.dp.toPx()
+        val logged = values.filterNotNull()
+        val maxV = maxOf(logged.maxOrNull() ?: 0.0, target) * 1.08
+        val minV = minOf(logged.minOrNull() ?: target, target) * 0.85
+        val span = (maxV - minV).coerceAtLeast(1.0)
+        fun y(v: Double) = plotBottom - (plotBottom - plotTop) * ((v - minV) / span).toFloat()
+        val pad = 6.dp.toPx()
+        fun x(i: Int) = if (n == 1) size.width / 2 else pad + (size.width - 2 * pad) * i / (n - 1)
+        if (target > 0) {
+            val ty = y(target)
+            drawLine(green, Offset(0f, ty), Offset(size.width, ty), strokeWidth = 1.5.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 4.dp.toPx())))
+            val lay = measurer.measure("target", tStyle)
+            drawText(lay, topLeft = Offset(size.width - lay.size.width, (ty - lay.size.height - 2.dp.toPx()).coerceAtLeast(0f)))
+        }
+        val pts = values.indices.mapNotNull { i -> values[i]?.let { Offset(x(i), y(it)) } }
+        if (pts.size >= 2) {
+            drawPathTrimmed(smoothPath(pts), PremiumMotion.eased(draw.value, PremiumMotion.EasePen), ink, Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+        }
+        val r = if (n > 14) 3.dp.toPx() else 4.dp.toPx()
+        values.forEachIndexed { i, v ->
+            if (v == null) return@forEachIndexed
+            val t = dots[i].value
+            if (t <= 0f) return@forEachIndexed
+            val c = when {
+                target <= 0 -> ink
+                v > target * 1.05 -> orange
+                v < target * 0.95 -> blue
+                else -> green
+            }
+            val s = PremiumMotion.popScale(t)
+            val a = PremiumMotion.popAlpha(t)
+            val o = Offset(x(i), y(v))
+            drawCircle(card, (r + 2.dp.toPx()) * s, o, alpha = a)
+            drawCircle(c, r * s, o, alpha = a)
+        }
+        // X labels; walking right to left, the newest wins when two would collide.
+        var limit = size.width
+        for (i in xLabels.indices.reversed()) {
+            val l = xLabels[i]
+            if (l.isEmpty() || i >= n) continue
+            val lay = measurer.measure(l, style)
+            val lx = (x(i) - lay.size.width / 2f).coerceIn(0f, (size.width - lay.size.width).coerceAtLeast(0f))
+            if (lx + lay.size.width > limit) continue
+            drawText(lay, topLeft = Offset(lx, size.height - labelH))
+            limit = lx - 4.dp.toPx()
+        }
     }
 }

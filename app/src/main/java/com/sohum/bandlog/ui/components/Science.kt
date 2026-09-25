@@ -255,7 +255,7 @@ fun BmiCard(vm: AppViewModel, weightKg: Double?, waist: Boolean = false) {
 
 /** Optional waist entry and the waist-to-height ratio. */
 @Composable
-private fun WaistRow(vm: AppViewModel) {
+internal fun WaistRow(vm: AppViewModel) {
     val p = palette
     val scope = rememberCoroutineScope()
     val prof = vm.profile

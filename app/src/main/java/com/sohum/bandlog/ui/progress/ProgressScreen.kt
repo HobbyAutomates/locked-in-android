@@ -54,7 +54,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sohum.bandlog.data.totalsFor
 import com.sohum.bandlog.ui.AppViewModel
-import com.sohum.bandlog.ui.components.BmiCard
 import com.sohum.bandlog.ui.components.SafetyNote
 import com.sohum.bandlog.ui.components.TeenGoalMigration
 import com.sohum.bandlog.util.Goals
@@ -71,7 +70,11 @@ import com.sohum.bandlog.ui.components.Hair
 import com.sohum.bandlog.ui.components.MacroDot
 import com.sohum.bandlog.ui.components.Motion
 import com.sohum.bandlog.ui.components.RemoteImage
-import com.sohum.bandlog.ui.components.Rise
+import com.sohum.bandlog.ui.components.Segmented
+import com.sohum.bandlog.ui.motion.Entrance
+import com.sohum.bandlog.ui.motion.MotionScreen
+import com.sohum.bandlog.ui.motion.PremiumMotion
+import com.sohum.bandlog.ui.motion.rememberMotion
 import com.sohum.bandlog.ui.components.RowSpaceBetween
 import com.sohum.bandlog.ui.components.ScanIcon
 import com.sohum.bandlog.ui.components.ScreenTitle
@@ -104,17 +107,19 @@ private val FATS = Color(0xFF5B8DEF)
 private val PERIODS = listOf("3 day" to 3L, "7 day" to 7L, "14 day" to 14L, "30 day" to 30L, "90 day" to 90L, "All time" to null)
 
 /**
- * v2.8 Progress, cut to 4 cards: weight trend (chart + 7-entry moving average, current & goal),
- * this week's energy (eaten vs target vs burned), streak (day + week) and macros this week.
- * Everything else that used to sit on this screen — weight changes, daily average calories, the
- * detailed weekly energy breakdown, expenditure changes, BMI, progress photos, badges and sessions
- * per week — moves under a collapsed "More stats" section so nothing is lost.
+ * v2.12 Progress (design canvas3 "ProgressFinal"): a Week / Month / 3 months switch, then Weight →
+ * Streak → Energy → Macros → BMI → Meal times, choreographed by ui/motion (cards rise out of a
+ * blur one after another; lines draw, numbers count, dots pop). Everything the v2.8 screen had
+ * that doesn't map onto those six cards (weight changes, daily calories, the weekly energy
+ * breakdown, expenditure changes, this week's eaten/target/burned, the macro split, progress
+ * photos, badges, week streak and sessions per week) stays below them under "More stats".
  */
 @Composable
 fun ProgressScreen(vm: AppViewModel, onOpenBadges: () -> Unit, onLogWeight: () -> Unit) {
     val p = palette
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val today = Dates.today()
+    var range by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(ProgressRange.WEEK) }
     var week by remember { mutableIntStateOf(0) }
     val ws = Dates.addDays(Dates.weekStart(today), -7L * week)
     val days = (0..6).map { Dates.addDays(ws, it.toLong()) }
@@ -129,194 +134,104 @@ fun ProgressScreen(vm: AppViewModel, onOpenBadges: () -> Unit, onLogWeight: () -
     val flags = Goals.edFlags(Goals.screenInput(vm.profile.copy(weightKg = bodyKg), weights = vm.weights.map { Goals.WeighIn(it.date, it.weightKg) }))
     var safetyClosed by remember { mutableStateOf(false) }
 
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 110.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        item(key = "title") { Rise(0) { ScreenTitle("Progress") } }
-        item(key = "teenGoal") { TeenGoalMigration(vm) }
-        item(key = "weightTrend") { Rise(1) { WeightTrendCard(vm, onLogWeight) } }
-        if (flags.isNotEmpty() && !safetyClosed) item(key = "safety") { Rise(1) { SafetyNote(vm, flags, onClose = { safetyClosed = true }) } }
-        item(key = "energy") { Rise(2) { ThisWeeksEnergyCard(vm, ctx) } }
-        item(key = "streak") { Rise(3) { StreakCard(vm) } }
-        item(key = "macros") { Rise(4) { MacrosWeekCard(vm) } }
-        item(key = "moreToggle") {
-            Rise(5) {
-                Box(
-                    Modifier.fillMaxWidth().heightIn(min = 44.dp).pressable().background(p.card2, RoundedCornerShape(16.dp))
-                        .clickable { showMore = !showMore }.padding(horizontal = 16.dp),
-                    contentAlignment = Alignment.CenterStart,
-                ) {
-                    RowSpaceBetween {
-                        Text("More stats", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink)
-                        Icon(
-                            ChevronDownIcon, null, tint = p.ink, modifier = Modifier.size(16.dp)
-                                .graphicsLayer { rotationZ = if (showMore) 180f else 0f },
-                        )
+    MotionScreen {
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 110.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            item(key = "title") { Entrance(0, key = "title") { ScreenTitle("Progress") } }
+            item(key = "range") {
+                Entrance(1, key = "range") {
+                    Segmented(ProgressRange.entries.map { it.label }, range.ordinal, { range = ProgressRange.entries[it] })
+                }
+            }
+            item(key = "teenGoal") { TeenGoalMigration(vm) }
+            if (flags.isNotEmpty() && !safetyClosed) item(key = "safety") { Entrance(2, key = "safety") { SafetyNote(vm, flags, onClose = { safetyClosed = true }) } }
+            item(key = "weight") { Entrance(2, key = "weight") { WeightCardV2(vm, range, onLogWeight) } }
+            item(key = "streak") { Entrance(3, key = "streak") { StreakCardV2(vm) } }
+            item(key = "energy") { Entrance(4, key = "energy") { EnergyCardV2(vm, range) } }
+            item(key = "macros") { Entrance(5, key = "macros") { MacrosCardV2(vm, range) } }
+            item(key = "bmi") { Entrance(6, key = "bmi") { BmiCardV2(vm, bodyKg) } }
+            item(key = "mealTimes") { Entrance(7, key = "mealTimes") { MealTimesCard(vm) } }
+            item(key = "moreToggle") {
+                Entrance(8, key = "moreToggle") {
+                    Box(
+                        Modifier.fillMaxWidth().heightIn(min = 48.dp).pressable().background(p.card2, RoundedCornerShape(16.dp))
+                            .clickable(onClickLabel = if (showMore) "Hide more stats" else "Show more stats") { showMore = !showMore }.padding(horizontal = 16.dp),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        RowSpaceBetween {
+                            Text("More stats", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink)
+                            Icon(
+                                ChevronDownIcon, null, tint = p.ink, modifier = Modifier.size(16.dp)
+                                    .graphicsLayer { rotationZ = if (showMore) 180f else 0f },
+                            )
+                        }
                     }
                 }
             }
-        }
-        if (showMore) {
-            item(key = "weightChanges") { Rise(0) { WeightChangesCard(vm) } }
-            item(key = "weekPick") {
-                Rise(1) { Segmented4(listOf("This wk", "Last wk", "2 wk ago", "3 wk ago"), week) { week = it } }
-            }
-            item(key = "calories") { Rise(1) { DailyCaloriesCard(vm, days) } }
-            // v2.10 "Hide calorie numbers": the kcal-by-day breakdown is left out entirely.
-            if (vm.profile.hideNumbers != true) item(key = "energyDetail") { Rise(2) { WeeklyEnergyCard(vm, days, days.map { Dates.parse(it).format(NARROW_FMT) }, false, ctx) } }
-            item(key = "expenditure") { Rise(2) { ExpenditureChangesCard(vm, ctx) } }
-            item(key = "bmi") { Rise(3) { BmiCard(vm, bodyKg, waist = true) } }
-            item(key = "photos") { Rise(3) { PhotosCard(vm) } }
-            item(key = "badges") { Rise(4) { BadgesCard(vm, onOpenBadges) } }
-            item(key = "week") {
-                Rise(4) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Card(Modifier.weight(1f)) {
-                            Text("This week", fontSize = 13.sp, fontWeight = FontWeight(500), color = p.muted)
-                            Spacer(Modifier.height(6.dp))
-                            Row(verticalAlignment = Alignment.Bottom) {
-                                Text("${vm.thisWeek}", fontSize = 30.sp, fontWeight = FontWeight(800), letterSpacing = (-1).sp, color = p.ink, lineHeight = 30.sp)
-                                Text(" / $target", fontSize = 16.sp, fontWeight = FontWeight(600), color = p.muted)
+            if (showMore) {
+                item(key = "weightChanges") { Entrance(0, key = "more-weightChanges") { WeightChangesCard(vm) } }
+                item(key = "weekPick") {
+                    Entrance(1, key = "more-weekPick") { Segmented4(listOf("This wk", "Last wk", "2 wk ago", "3 wk ago"), week) { week = it } }
+                }
+                item(key = "calories") { Entrance(1, key = "more-calories") { DailyCaloriesCard(vm, days) } }
+                // v2.10 "Hide calorie numbers": the kcal-by-day breakdown is left out entirely.
+                if (vm.profile.hideNumbers != true) item(key = "energyDetail") { Entrance(2, key = "more-energyDetail") { WeeklyEnergyCard(vm, days, days.map { Dates.parse(it).format(NARROW_FMT) }, false, ctx) } }
+                item(key = "thisWeekEnergy") { Entrance(2, key = "more-thisWeekEnergy") { ThisWeeksEnergyCard(vm, ctx) } }
+                item(key = "expenditure") { Entrance(3, key = "more-expenditure") { ExpenditureChangesCard(vm, ctx) } }
+                item(key = "macroSplit") { Entrance(3, key = "more-macroSplit") { MacrosWeekCard(vm) } }
+                item(key = "photos") { Entrance(4, key = "more-photos") { PhotosCard(vm) } }
+                item(key = "badges") { Entrance(4, key = "more-badges") { BadgesCard(vm, onOpenBadges) } }
+                item(key = "week") {
+                    Entrance(5, key = "more-week") {
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Card(Modifier.weight(1f)) {
+                                Text("This week", fontSize = 13.sp, fontWeight = FontWeight(500), color = p.muted)
+                                Spacer(Modifier.height(6.dp))
+                                Row(verticalAlignment = Alignment.Bottom) {
+                                    Text("${vm.thisWeek}", fontSize = 30.sp, fontWeight = FontWeight(800), letterSpacing = (-1).sp, color = p.ink, lineHeight = 30.sp)
+                                    Text(" / $target", fontSize = 16.sp, fontWeight = FontWeight(600), color = p.muted)
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                Progress(vm.thisWeek.toFloat() / target.coerceAtLeast(1), p.ink)
+                                Spacer(Modifier.height(6.dp))
+                                val left = (target - vm.thisWeek).coerceAtLeast(0)
+                                Text(if (left == 0) "Target hit — streak safe" else "$left more to keep the streak", fontSize = 12.sp, color = p.muted)
                             }
-                            Spacer(Modifier.height(8.dp))
-                            Progress(vm.thisWeek.toFloat() / target.coerceAtLeast(1), p.ink)
-                            Spacer(Modifier.height(6.dp))
-                            val left = (target - vm.thisWeek).coerceAtLeast(0)
-                            Text(if (left == 0) "Target hit — streak safe" else "$left more to keep the streak", fontSize = 12.sp, color = p.muted)
-                        }
-                        Card(Modifier.weight(1f)) {
-                            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Flame(p.flame, 40.dp)
-                                Text("${vm.weekStreak}", fontSize = 26.sp, fontWeight = FontWeight(800), letterSpacing = (-0.8).sp, color = p.flame, lineHeight = 26.sp)
-                                Text("Week streak", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.ink)
-                                Row(horizontalArrangement = Arrangement.spacedBy(5.dp), modifier = Modifier.padding(top = 4.dp)) {
-                                    repeat(4) { i -> Box(Modifier.size(8.dp).let { m -> if (i < vm.weekStreak.coerceAtMost(4)) m.background(p.flame, CircleShape) else m.border(1.5.dp, p.flame, CircleShape) }) }
+                            Card(Modifier.weight(1f)) {
+                                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Flame(p.flame, 40.dp)
+                                    Text("${vm.weekStreak}", fontSize = 26.sp, fontWeight = FontWeight(800), letterSpacing = (-0.8).sp, color = p.flame, lineHeight = 26.sp)
+                                    Text("Week streak", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.ink)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp), modifier = Modifier.padding(top = 4.dp)) {
+                                        repeat(4) { i -> Box(Modifier.size(8.dp).let { m -> if (i < vm.weekStreak.coerceAtMost(4)) m.background(p.flame, CircleShape) else m.border(1.5.dp, p.flame, CircleShape) }) }
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
-            item(key = "sessions") {
-                Rise(5) {
-                    Card {
-                        RowSpaceBetween {
-                            Text("Sessions per week", fontSize = 17.sp, fontWeight = FontWeight(700), color = p.ink)
-                            Text("target $target", fontSize = 12.sp, color = p.muted)
-                        }
-                        Spacer(Modifier.height(12.dp))
-                        SessionBars(
-                            counts = weeks.map { perWeek[it] ?: 0 },
-                            target = target,
-                            xLabels = weeks.map { Dates.parse(it).format(WEEK_FMT) },
-                            modifier = Modifier.fillMaxWidth().height(120.dp),
-                        )
-                        Spacer(Modifier.height(10.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            rest.forEach { r -> MacroDot("${r.muscle} ${if (r.days == 0L) "today" else "${r.days} d rest"}", if (r.days >= 7) Muscles.color(r.muscle) else p.muted) }
+                item(key = "sessions") {
+                    Entrance(5, key = "more-sessions") {
+                        Card {
+                            RowSpaceBetween {
+                                Text("Sessions per week", fontSize = 17.sp, fontWeight = FontWeight(700), color = p.ink)
+                                Text("target $target", fontSize = 12.sp, color = p.muted)
+                            }
+                            Spacer(Modifier.height(12.dp))
+                            SessionBars(
+                                counts = weeks.map { perWeek[it] ?: 0 },
+                                target = target,
+                                xLabels = weeks.map { Dates.parse(it).format(WEEK_FMT) },
+                                modifier = Modifier.fillMaxWidth().height(120.dp),
+                            )
+                            Spacer(Modifier.height(10.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                rest.forEach { r -> MacroDot("${r.muscle} ${if (r.days == 0L) "today" else "${r.days} d rest"}", if (r.days >= 7) Muscles.color(r.muscle) else p.muted) }
+                            }
                         }
                     }
                 }
             }
         }
-    }
-}
-
-// ---------------------------------------------------------------- card 1: weight trend
-
-/** A trailing moving average over [window] entries — the first ones average over what's so far. */
-private fun movingAverage(values: List<Double>, window: Int = 7): List<Double> {
-    val out = ArrayList<Double>(values.size)
-    var sum = 0.0
-    values.forEachIndexed { i, v ->
-        sum += v
-        if (i >= window) sum -= values[i - window]
-        val n = minOf(i + 1, window)
-        out.add(sum / n)
-    }
-    return out
-}
-
-@Composable
-private fun WeightTrendCard(vm: AppViewModel, onLogWeight: () -> Unit) {
-    val p = palette
-    val rows = vm.weights // newest first
-    val today = Dates.today()
-    val current = rows.firstOrNull()?.weightKg ?: vm.profile.weightKg
-    val goal = vm.profile.goalWeightKg
-    val start = rows.lastOrNull()?.weightKg ?: current
-    val last = rows.firstOrNull()?.date
-    val nextIn = last?.let { 7 - Dates.daysBetween(it, today) }
-    val asc = rows.sortedBy { it.date }.map { it.weightKg }
-
-    Card(padding = 20.dp) {
-        RowSpaceBetween {
-            Text("Weight trend", fontSize = 13.sp, fontWeight = FontWeight(500), color = p.muted)
-            Box(
-                Modifier.background(p.card2, CircleShape).pressable().clickable { onLogWeight() }
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
-            ) {
-                Text(
-                    when { nextIn == null -> "Log your first weigh-in"; nextIn <= 0 -> "Weigh-in due today"; else -> "Next weigh-in: ${nextIn}d" },
-                    fontSize = 12.sp, fontWeight = FontWeight(700), color = if (nextIn != null && nextIn <= 0) p.flame else p.ink, maxLines = 1,
-                )
-            }
-        }
-        Spacer(Modifier.height(4.dp))
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(current?.let { fmt(it) } ?: "—", fontSize = 40.sp, fontWeight = FontWeight(800), letterSpacing = (-1.5).sp, color = p.ink, lineHeight = 42.sp)
-            Text(" kg", fontSize = 16.sp, fontWeight = FontWeight(600), color = p.muted, modifier = Modifier.padding(bottom = 6.dp))
-        }
-        if (asc.size >= 2) {
-            Spacer(Modifier.height(10.dp))
-            WeightTrendChart(asc, goal, Modifier.fillMaxWidth().height(90.dp))
-        } else {
-            Spacer(Modifier.height(6.dp))
-            Text("Log a few weigh-ins to see your trend.", fontSize = 12.sp, color = p.muted)
-        }
-        if (goal != null && current != null && start != null) {
-            val span = start - goal
-            val frac = if (abs(span) < 0.05) (if (abs(current - goal) < 0.05) 1f else 0f) else ((start - current) / span).toFloat().coerceIn(0f, 1f)
-            Spacer(Modifier.height(12.dp))
-            Progress(frac, p.ink)
-            Spacer(Modifier.height(6.dp))
-            RowSpaceBetween {
-                Text("Start ${fmt(start)} kg", fontSize = 12.sp, fontWeight = FontWeight(600), color = p.muted)
-                Text("${(frac * 100).roundToInt()}%", fontSize = 12.sp, fontWeight = FontWeight(700), color = p.ink)
-                Text("Goal ${fmt(goal)} kg", fontSize = 12.sp, fontWeight = FontWeight(600), color = p.muted)
-            }
-        } else {
-            Spacer(Modifier.height(6.dp))
-            Text(if (goal == null) "Set a goal weight in Profile → Goal & weight." else "Log a weigh-in from + → Weight.", fontSize = 12.sp, color = p.muted)
-        }
-    }
-}
-
-/** The raw weigh-ins (faint) plus their 7-entry moving average (bold), with a dashed goal line. */
-@Composable
-private fun WeightTrendChart(values: List<Double>, goal: Double?, modifier: Modifier) {
-    val p = palette
-    val avg = remember(values) { movingAverage(values, 7) }
-    val track = p.track
-    val ink = p.ink
-    val hair = p.hair
-    Canvas(modifier) {
-        val all = if (goal != null) values + goal else values
-        val lo = all.min()
-        val hi = all.max()
-        val span = (hi - lo).takeIf { it > 0.001 } ?: 1.0
-        val pad = span * 0.12
-        fun y(v: Double) = size.height - (size.height * ((v - (lo - pad)) / (span + pad * 2))).toFloat()
-        fun x(i: Int) = if (values.size <= 1) size.width / 2 else size.width * i / (values.size - 1)
-
-        if (goal != null) {
-            val gy = y(goal)
-            drawLine(hair, Offset(0f, gy), Offset(size.width, gy), strokeWidth = 2f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f)))
-        }
-        fun path(vs: List<Double>): Path = Path().apply {
-            vs.forEachIndexed { i, v -> val px = x(i); val py = y(v); if (i == 0) moveTo(px, py) else lineTo(px, py) }
-        }
-        drawPath(path(values), track, style = Stroke(width = 2f, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
-        drawPath(path(avg), ink, style = Stroke(width = 2.6f, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
-        drawCircle(ink, 4f, Offset(x(values.lastIndex), y(values.last())))
     }
 }
 
@@ -369,29 +284,6 @@ private fun ThisWeeksEnergyCard(vm: AppViewModel, ctx: android.content.Context) 
     }
 }
 
-// ---------------------------------------------------------------- card 3: streak
-
-@Composable
-private fun StreakCard(vm: AppViewModel) {
-    val p = palette
-    Card {
-        Text("Streak", fontSize = 17.sp, fontWeight = FontWeight(700), color = p.ink)
-        Spacer(Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Flame(p.flame, 40.dp)
-                Text("${vm.dayStreak}", fontSize = 26.sp, fontWeight = FontWeight(800), letterSpacing = (-0.8).sp, color = p.flame, lineHeight = 26.sp)
-                Text("Day streak", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.ink)
-            }
-            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Flame(p.flame, 40.dp)
-                Text("${vm.weekStreak}", fontSize = 26.sp, fontWeight = FontWeight(800), letterSpacing = (-0.8).sp, color = p.flame, lineHeight = 26.sp)
-                Text("Week streak", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.ink)
-            }
-        }
-    }
-}
-
 // ---------------------------------------------------------------- card 4: macros this week
 
 @Composable
@@ -409,7 +301,7 @@ private fun MacrosWeekCard(vm: AppViewModel) {
     val sum = (pk + ck + fk).coerceAtLeast(1.0)
 
     Card {
-        Text("Macros this week", fontSize = 17.sp, fontWeight = FontWeight(700), color = p.ink)
+        Text("Macro split this week", fontSize = 17.sp, fontWeight = FontWeight(700), color = p.ink)
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth().height(12.dp).background(p.track, RoundedCornerShape(6.dp))) {
             Box(Modifier.weight((pk / sum).toFloat().coerceAtLeast(0.001f)).fillMaxSize().background(PROTEIN, RoundedCornerShape(6.dp)))
@@ -713,7 +605,7 @@ private fun BadgesCard(vm: AppViewModel, onOpen: () -> Unit) {
     LaunchedEffect(Unit) { vm.loadBadgeTotals() }
     Card(onClick = onOpen, padding = 14.dp) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            HexMedal(earned, earned > 0, 48.dp)
+            BadgeSummaryMedal(progress, 48.dp)
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text("Badges", fontSize = 16.sp, fontWeight = FontWeight(700), color = p.ink)
@@ -828,25 +720,17 @@ private fun Sparkline(values: List<Double>, color: Color, modifier: Modifier) {
     }
 }
 
-/**
- * Pill progress bar. The first composition runs 0 -> value (gated by [started]); after that every
- * new [fraction] animates from wherever the bar currently is.
- */
+/** Pill progress bar that grows in from the left on the first visit. */
 @Composable
 private fun Progress(fraction: Float, color: Color) {
     val p = palette
-    var started by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { delay(150); started = true }
-    val f by animateFloatAsState(
-        targetValue = if (started) fraction.coerceIn(0f, 1f) else 0f,
-        animationSpec = Motion.spatialSlow(),
-        label = "progress",
-    )
+    // v2.12: grows in from the left (m-growx) once per screen visit.
+    val grow = rememberMotion("progress-bar", 150, PremiumMotion.GROW_X_MS)
     val track = p.track
     Canvas(Modifier.fillMaxWidth().height(6.dp)) {
         val r = CornerRadius(size.height / 2f)
         drawRoundRect(track, cornerRadius = r)
-        val w = size.width * f.coerceIn(0f, 1f)
+        val w = size.width * fraction.coerceIn(0f, 1f) * PremiumMotion.growX(grow.value)
         if (w > 0.5f) drawRoundRect(color, size = Size(maxOf(w, size.height), size.height), cornerRadius = r)
     }
 }
