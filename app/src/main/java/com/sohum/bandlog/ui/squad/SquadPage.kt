@@ -67,10 +67,12 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.sohum.bandlog.data.Api
 import com.sohum.bandlog.data.GroupPost
+import com.sohum.bandlog.data.LeaderRow
 import com.sohum.bandlog.data.Session
 import com.sohum.bandlog.data.Squad
 import com.sohum.bandlog.ui.AppViewModel
 import com.sohum.bandlog.ui.components.Avatar
+import com.sohum.bandlog.ui.components.BottomSheet
 import com.sohum.bandlog.ui.components.CameraIcon
 import com.sohum.bandlog.ui.components.CheckIcon
 import com.sohum.bandlog.ui.components.CopyIcon
@@ -125,30 +127,50 @@ val FEED_KINDS = listOf("meal", "workout", "pr", "photo", "challenge", "battle")
 @Composable
 fun SquadPage(sq: SquadViewModel, squad: Squad, initialTab: Int? = null, proteinGoal: Int? = null, vm: AppViewModel? = null) {
     val p = palette
+    val ctx = LocalContext.current
     val tabs = if (sq.feedSupported == false) listOf(SquadTab.BOARD) else SquadTab.entries.filter { it != SquadTab.BATTLE || sq.battleEnabled }
+    val prefs = remember { ctx.getSharedPreferences("squad_tabs", android.content.Context.MODE_PRIVATE) }
+    // A remembered tab (this device's last choice on this squad) wins over the Challenges/Leaderboard
+    // default, but a deep link ([initialTab], a notification) always wins over both.
+    val remembered = remember(squad.id) { prefs.getString("tab_${squad.id}", null)?.let { name -> runCatching { SquadTab.valueOf(name) }.getOrNull() } }
+    var userPicked by remember(squad.id) { mutableStateOf(initialTab != null || remembered != null) }
     // Remembered by tab, not index: Battle appears once loadBattle has read battle_enabled, which
     // would otherwise shift every later index and jump the user to a different tab.
-    var tab by remember(squad.id) { mutableStateOf(initialTab?.let { tabs.getOrNull(it) } ?: if (sq.feedSupported == false) SquadTab.BOARD else SquadTab.FEED) }
+    var tab by remember(squad.id) { mutableStateOf(initialTab?.let { tabs.getOrNull(it) } ?: remembered ?: SquadTab.BOARD) }
+    // v2.8: with no deep link and no remembered tab, the squad opens on Challenges once one is
+    // known to be active, otherwise the Leaderboard (group_challenge_list answers asynchronously).
+    LaunchedEffect(squad.id, sq.challenges) {
+        if (userPicked) return@LaunchedEffect
+        val challenges = sq.challenges ?: return@LaunchedEffect
+        tab = if (challenges.any { it.status == "active" }) SquadTab.CHALLENGES else SquadTab.BOARD
+    }
     val current = if (tab in tabs) tab else tabs.firstOrNull { it == SquadTab.FEED } ?: tabs.last()
+    fun selectTab(t: SquadTab) {
+        tab = t
+        userPicked = true
+        prefs.edit().putString("tab_${squad.id}", t.name).apply()
+    }
     Column(Modifier.fillMaxSize().background(p.bg).statusBarsPadding()) {
         Column(Modifier.background(p.card)) {
             Row(Modifier.fillMaxWidth().padding(8.dp, 8.dp, 12.dp, 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(48.dp).clip(CircleShape).clickable { sq.close() }, contentAlignment = Alignment.Center) {
                     Icon(Icons.Outlined.ArrowBack, "Back", tint = p.ink, modifier = Modifier.size(24.dp))
                 }
+                // A single entry point to Members and invite: the name row and the people icon used to
+                // be two separate taps to the same place, so they're now one clickable row.
                 Row(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).clickable { sq.infoOpen = true }.padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
                     SquadIconView(squad.icon, squad.name, 40.dp, cover = squad.coverUrl)
                     Spacer(Modifier.width(12.dp))
-                    Text(squad.name, fontSize = 20.sp, fontWeight = FontWeight(800), color = p.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                Box(Modifier.size(48.dp).clip(CircleShape).clickable { sq.infoOpen = true }, contentAlignment = Alignment.Center) {
-                    Icon(PeopleIcon, "Members and invite", tint = p.ink, modifier = Modifier.size(22.dp))
+                    Text(squad.name, fontSize = 20.sp, fontWeight = FontWeight(800), color = p.ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                        Icon(PeopleIcon, "Members and invite", tint = p.ink, modifier = Modifier.size(22.dp))
+                    }
                 }
             }
             Row(Modifier.fillMaxWidth()) {
                 tabs.forEach { t ->
                     val sel = t == current
-                    Column(Modifier.weight(t.weight).clickable { tab = t }, horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(Modifier.weight(t.weight).clickable { selectTab(t) }, horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(t.label, fontSize = 15.sp, fontWeight = if (sel) FontWeight(800) else FontWeight(500), color = if (sel) p.ink else p.muted, modifier = Modifier.padding(vertical = 12.dp), maxLines = 1, softWrap = false)
                         Box(Modifier.fillMaxWidth().height(3.dp).background(if (sel) p.ink else Color.Transparent))
                     }
@@ -343,11 +365,12 @@ private fun FeedCard(post: GroupPost, onClick: (() -> Unit)? = null) {
     }
 }
 
-/** Leaderboard: #rank, avatar, name, @username, flames — from group_leaderboard (or the v2.0 board). */
+/** Leaderboard: #rank, avatar, name, @username, flames, a nudge button — from group_leaderboard (or the v2.0 board). */
 @Composable
 private fun LeaderboardTab(sq: SquadViewModel) {
     val p = palette
     val me = Session.userId
+    var sheetRow by remember(sq.openId) { mutableStateOf<LeaderRowWithRank?>(null) }
     if (sq.leaders.isEmpty()) {
         if (sq.pageLoading) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = p.muted) }
         else EmptyState("No one ranked yet", "Log a workout to light your first flame.")
@@ -355,11 +378,58 @@ private fun LeaderboardTab(sq: SquadViewModel) {
     }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 14.dp, 16.dp, 40.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         items(sq.leaders.withIndex().toList(), key = { it.value.userId }) { (i, r) ->
-            RankRow(i + 1, r.name, r.username, r.avatarPath, isMe = r.userId == me) {
+            val isMe = r.userId == me
+            val already = r.userId in sq.sent
+            RankRow(i + 1, r.name, r.username, r.avatarPath, isMe = isMe, onClick = { sheetRow = LeaderRowWithRank(r, i + 1) }) {
                 Flame(if (r.flames > 0) p.flame else p.muted, 20.dp)
                 Text(" ${r.flames}", fontSize = 17.sp, fontWeight = FontWeight(800), color = p.ink)
+                if (!isMe) {
+                    Spacer(Modifier.width(8.dp))
+                    Row(
+                        Modifier.height(30.dp).pressable().background(if (already) p.card2 else p.btn, CircleShape)
+                            .clickable(enabled = !already) { sq.nudge(r.userId) }.padding(horizontal = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(FistIcon, "Nudge", tint = if (already) p.muted else p.btnInk, modifier = Modifier.size(12.dp))
+                        Text(if (already) " Nudged" else " Nudge", fontSize = 12.sp, fontWeight = FontWeight(700), color = if (already) p.muted else p.btnInk)
+                    }
+                }
             }
         }
+    }
+    sheetRow?.let { (row, rank) ->
+        BottomSheet(title = "Member", onDismiss = { sheetRow = null }) {
+            Column(Modifier.fillMaxWidth().padding(bottom = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Avatar(Api.avatarUrl(row.avatarPath), Names.initials(row.name), 72.dp)
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(row.name, fontSize = 19.sp, fontWeight = FontWeight(800), color = p.ink)
+                    if (row.isOwner) {
+                        Spacer(Modifier.width(6.dp))
+                        Box(Modifier.background(p.card2, RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 3.dp)) { Text("Owner", fontSize = 11.sp, fontWeight = FontWeight(600), color = p.ink) }
+                    }
+                }
+                row.username?.let { Text("@$it", fontSize = 13.sp, color = p.muted) }
+                Spacer(Modifier.height(16.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    ProfileStat(Modifier.weight(1f), "${row.flames}", "day streak")
+                    ProfileStat(Modifier.weight(1f), "#$rank", "rank")
+                    ProfileStat(Modifier.weight(1f), "${row.points}", "pts this wk")
+                }
+            }
+        }
+    }
+}
+
+/** A leaderboard row plus the rank it's shown at (v2.0 boards carry rank = 0). */
+private data class LeaderRowWithRank(val row: LeaderRow, val rank: Int)
+
+@Composable
+private fun ProfileStat(modifier: Modifier, value: String, label: String) {
+    val p = palette
+    Column(modifier.background(p.card2, RoundedCornerShape(16.dp)).padding(vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, fontSize = 20.sp, fontWeight = FontWeight(800), color = p.ink)
+        Text(label, fontSize = 11.sp, color = p.muted)
     }
 }
 
@@ -371,13 +441,17 @@ private fun LeaderboardTab(sq: SquadViewModel) {
 internal fun RankRow(
     rank: Int, name: String, username: String?, avatarPath: String?, isMe: Boolean,
     below: (@Composable () -> Unit)? = null,
+    /** Leaderboard rows are tappable (opens the member's mini profile); challenge-board rows leave this unset. */
+    onClick: (() -> Unit)? = null,
     trailing: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit,
 ) {
     val p = palette
     val gold = Color(0xFFFFC53D)
     Row(
         Modifier.fillMaxWidth().shadow(6.dp, RoundedCornerShape(22.dp), ambientColor = p.shadow, spotColor = p.shadow).background(p.card, RoundedCornerShape(22.dp))
-            .then(if (isMe) Modifier.border(1.5.dp, p.ink.copy(alpha = 0.25f), RoundedCornerShape(22.dp)) else Modifier).padding(horizontal = 16.dp, vertical = 14.dp),
+            .then(if (isMe) Modifier.border(1.5.dp, p.ink.copy(alpha = 0.25f), RoundedCornerShape(22.dp)) else Modifier)
+            .then(if (onClick != null) Modifier.pressable().clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("#$rank", fontSize = 17.sp, fontWeight = FontWeight(800), color = if (rank == 1) gold else p.muted, modifier = Modifier.width(40.dp))
