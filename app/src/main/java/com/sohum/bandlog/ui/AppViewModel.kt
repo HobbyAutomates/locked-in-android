@@ -23,6 +23,7 @@ import com.sohum.bandlog.util.Streaks
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 /** One source of truth for the whole app: profile + last 120 days of workouts and meals. */
 class AppViewModel : ViewModel() {
@@ -739,6 +740,23 @@ class AppViewModel : ViewModel() {
         refresh()
     }
     suspend fun saveTargets(p: Profile) = mutate { Api.saveProfile(p) }
+
+    /** v2.10 opt-in "Hide calorie numbers" (profiles.hide_numbers, schema_v34). Reverts if the save fails. */
+    fun setHideNumbers(on: Boolean) {
+        val before = profile
+        profile = profile.copy(hideNumbers = on)
+        viewModelScope.launch {
+            if (!Api.patchProfile(org.json.JSONObject().put("hide_numbers", on))) { profile = before; error = "Couldn't save that. Try again." }
+        }
+    }
+
+    /** v2.10 optional waist (profiles.waist_cm, schema_v34); null clears it. */
+    suspend fun saveWaist(cm: Double?): Boolean {
+        val v = cm?.takeIf { it > 0 }?.let { (it.coerceIn(30.0, 250.0) * 10).roundToInt() / 10.0 }
+        val ok = Api.patchProfile(org.json.JSONObject().put("waist_cm", v ?: org.json.JSONObject.NULL))
+        if (ok) profile = profile.copy(waistCm = v) else error = "Couldn't save your waist. Try again."
+        return ok
+    }
 
     /** Saves the whole profile (Personal details, goals, reminders all go through here). */
     suspend fun saveProfile(p: Profile): Boolean {

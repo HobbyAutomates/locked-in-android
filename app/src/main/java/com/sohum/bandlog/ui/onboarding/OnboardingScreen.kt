@@ -78,7 +78,11 @@ import com.sohum.bandlog.ui.components.Rise
 import com.sohum.bandlog.ui.components.pressable
 import com.sohum.bandlog.ui.theme.palette
 import com.sohum.bandlog.ui.today.fmt
+import com.sohum.bandlog.util.Bmi
 import com.sohum.bandlog.util.Goals
+import com.sohum.bandlog.ui.components.SafetyNote
+import com.sohum.bandlog.ui.components.ScienceButton
+import com.sohum.bandlog.ui.components.TeenNote
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -105,7 +109,9 @@ private data class Answers(
     val maintaining: Boolean get() = goalType == "maintain"
 }
 
-private enum class Step { GENDER, WORKOUTS, GOAL, BODY, DOB, DESIRED, SPEED, OBSTACLES, BUILDING, READY }
+// v2.10: birthday and body come before the goal, so the goal list can branch by age (no "lose"
+// under 18) and the pace slider can stop at the safe max for this body weight.
+private enum class Step { GENDER, WORKOUTS, DOB, BODY, GOAL, DESIRED, SPEED, OBSTACLES, BUILDING, READY }
 
 private val OBSTACLES = listOf(
     "Lack of consistency" to "We'll keep the streak front and centre",
@@ -118,8 +124,9 @@ private val OBSTACLES = listOf(
 private val PLAN_CHECKS = listOf("Calories", "Carbs", "Protein", "Fats", "Health score")
 
 /**
- * The Cal AI-shaped first run: gender → workouts → goal → body → birthday → target weight →
- * pace → obstacles → a plan being built → the plan itself. Nothing is written until the last
+ * The Cal AI-shaped first run: gender → workouts → birthday → body → goal → target weight →
+ * pace → obstacles → a plan being built → the plan itself. Under 18 the goal step offers only
+ * maintain / grow stronger and gain / build muscle, and target weight and pace drop out. Nothing is written until the last
  * screen, where the whole profile (details plus the Auto Generate targets) is saved in one go.
  */
 @Composable
@@ -130,9 +137,15 @@ fun OnboardingScreen(vm: AppViewModel, onDone: () -> Unit, onSkip: () -> Unit) {
     var index by remember { mutableStateOf(0) }
     var busy by remember { mutableStateOf(false) }
 
-    // Maintaining needs no target weight and no pace, so those two drop out of the flow.
-    val steps = remember(a.maintaining, a.goalType) {
-        Step.entries.filter { !(a.maintaining && (it == Step.DESIRED || it == Step.SPEED)) }
+    val age = Goals.ageYears(a.dob)
+    val teen = Goals.isTeen(age)
+    // A "lose" picked before the birthday was changed doesn't count for an under-18.
+    val goalType = a.goalType?.let { Goals.effectiveGoal(it, age) }
+    val goalPicked = a.goalType != null && !(teen && a.goalType == "lose")
+
+    // Maintaining (and anyone under 18) needs no target weight and no pace, so those two drop out.
+    val steps = remember(a.maintaining, a.goalType, teen) {
+        Step.entries.filter { !((a.maintaining || teen) && (it == Step.DESIRED || it == Step.SPEED)) }
     }
     val step = steps[index.coerceIn(0, steps.lastIndex)]
     val back = { if (index > 0) index-- }
@@ -145,16 +158,18 @@ fun OnboardingScreen(vm: AppViewModel, onDone: () -> Unit, onSkip: () -> Unit) {
         vm.profile.copy(
             gender = a.gender ?: "other",
             weeklyWorkoutTarget = a.workouts ?: 3,
-            goalType = a.goalType ?: "maintain",
+            goalType = goalType ?: "maintain",
             heightCm = a.height,
             weightKg = a.weight,
             dob = a.dob,
-            goalWeightKg = if (a.maintaining) a.weight else a.goalWeightKg,
+            goalWeightKg = if (teen) vm.profile.goalWeightKg else if (a.maintaining) a.weight else a.goalWeightKg,
             // Kept even when maintaining, so switching to lose/gain later starts from a sane pace.
-            goalSpeedKgWk = (a.speed * 10).roundToInt() / 10.0,
+            goalSpeedKgWk = Goals.roundSpeed(a.speed.toDouble(), Goals.speedMax(if (goalType == "gain") "gain" else "lose", a.weight)),
         )
     }
-    val targets = remember(draft) { Goals.generate(draft) }
+    val built = remember(draft) { Goals.plan(draft) }
+    val targets = built?.targets
+    val flags = remember(draft) { Goals.edFlags(Goals.screenInput(draft)) }
 
     AnimatedContent(
         targetState = step,
@@ -192,13 +207,14 @@ fun OnboardingScreen(vm: AppViewModel, onDone: () -> Unit, onSkip: () -> Unit) {
 
             Step.GOAL -> Chassis(
                 progress, back, "What is your goal?",
-                ctaEnabled = a.goalType != null, onCta = next,
+                ctaEnabled = goalPicked, onCta = next,
             ) {
-                listOf("lose" to "Lose weight", "maintain" to "Maintain", "gain" to "Gain weight").forEach { (key, label) ->
-                    OptionCard(label, selected = a.goalType == key) {
-                        a = a.copy(goalType = key, goalWeightKg = if (key == "maintain") a.weight else a.goalWeightKg)
+                Goals.goalOptions(age).forEach { o ->
+                    OptionCard(o.label, o.sub, selected = a.goalType == o.key) {
+                        a = a.copy(goalType = o.key, goalWeightKg = if (o.key == "maintain") a.weight else a.goalWeightKg)
                     }
                 }
+                if (teen) TeenNote()
             }
 
             Step.BODY -> Chassis(
@@ -241,6 +257,10 @@ fun OnboardingScreen(vm: AppViewModel, onDone: () -> Unit, onSkip: () -> Unit) {
                     TickRuler(goal, (now - 30).coerceAtLeast(25.0), now + 30, 0.5) { a = a.copy(goalWeightKg = it) }
                     Spacer(Modifier.height(8.dp))
                     Text("Drag the ruler", fontSize = 12.sp, color = p.muted, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+                    a.height?.let { h ->
+                        val r = Bmi.healthyRange(h)
+                        Text("Healthy range for your height: ${fmt(r.min)}–${fmt(r.max)} kg", fontSize = 12.sp, color = p.muted, modifier = Modifier.fillMaxWidth().padding(top = 6.dp), textAlign = TextAlign.Center)
+                    }
                 }
             }
 
@@ -249,7 +269,7 @@ fun OnboardingScreen(vm: AppViewModel, onDone: () -> Unit, onSkip: () -> Unit) {
                 sub = "This changes how many calories we add or subtract each day.",
                 ctaEnabled = true, onCta = next,
             ) {
-                GoalSpeedPicker(a.speed) { a = a.copy(speed = it) }
+                GoalSpeedPicker(a.speed, if (goalType == "gain") "gain" else "lose", a.weight) { a = a.copy(speed = it) }
             }
 
             Step.OBSTACLES -> Chassis(
@@ -267,8 +287,10 @@ fun OnboardingScreen(vm: AppViewModel, onDone: () -> Unit, onSkip: () -> Unit) {
             Step.BUILDING -> BuildingScreen(progress) { next() }
 
             Step.READY -> PlanScreen(
+                vm = vm,
                 a = a,
-                targets = targets,
+                built = built,
+                flags = flags,
                 error = vm.error,
                 busy = busy,
                 onBack = back,
@@ -535,20 +557,24 @@ private fun BuildingScreen(progress: Float, onDone: () -> Unit) {
 /** "Your custom plan is ready": the goal chip, the four daily targets, then into the app. */
 @Composable
 private fun PlanScreen(
+    vm: AppViewModel,
     a: Answers,
-    targets: Goals.Targets?,
+    built: Goals.Plan?,
+    flags: List<String>,
     error: String?,
     busy: Boolean,
     onBack: () -> Unit,
     onStart: () -> Unit,
 ) {
     val p = palette
+    val targets = built?.targets
     val current = a.weight ?: 60.0
     val goal = if (a.maintaining) current else (a.goalWeightKg ?: current)
-    val chip = remember(a) {
+    val chip = remember(a, built) {
         val delta = abs(goal - current)
-        val pace = ((a.speed * 10).roundToInt() / 10.0).coerceAtLeast(0.1)
+        val pace = (built?.speed?.takeIf { it > 0 } ?: ((a.speed * 10).roundToInt() / 10.0)).coerceAtLeast(0.1)
         when {
+            built?.teen == true -> if (built.goal == "gain") "Build muscle, fuel growth" else "Grow stronger"
             a.maintaining || delta < 0.25 -> "Maintain ${fmt(current)} kg"
             else -> {
                 val days = ceil(delta / pace * 7.0).toLong().coerceIn(7, 3650)
@@ -591,8 +617,15 @@ private fun PlanScreen(
             }
             Rise(1) {
                 Column {
-                    Text("Daily recommendation", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
-                    Text("You can edit this anytime.", fontSize = 12.sp, color = p.muted)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Daily recommendation", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
+                        Spacer(Modifier.width(6.dp))
+                        ScienceButton()
+                    }
+                    Text(
+                        (if (built?.speedCapped == true) "Paced at ${fmt(built.speed)} kg a week, the safe max for your body. " else "") + "You can edit this anytime.",
+                        fontSize = 12.sp, color = p.muted,
+                    )
                 }
             }
             if (targets == null) {
@@ -612,6 +645,9 @@ private fun PlanScreen(
                         TargetCard("Fats", targets.fat, "g", p.blue, Modifier.weight(1f))
                     }
                 }
+            }
+            if (flags.isNotEmpty()) {
+                Rise(4) { SafetyNote(vm, flags, if (built?.floorApplied == true) built.targets.calories else null) }
             }
             if (obstacleLine != null) {
                 Rise(4) {

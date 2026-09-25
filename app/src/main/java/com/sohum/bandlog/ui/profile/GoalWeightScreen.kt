@@ -27,7 +27,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sohum.bandlog.data.Profile
 import com.sohum.bandlog.ui.AppViewModel
+import com.sohum.bandlog.ui.components.BmiCard
 import com.sohum.bandlog.ui.components.Card
+import com.sohum.bandlog.ui.components.SafetyNote
+import com.sohum.bandlog.ui.components.TeenGoalMigration
+import com.sohum.bandlog.ui.components.TeenNote
 import com.sohum.bandlog.ui.components.ErrorNote
 import com.sohum.bandlog.ui.components.GoalSpeedPicker
 import com.sohum.bandlog.ui.components.Hair
@@ -42,47 +46,62 @@ import com.sohum.bandlog.ui.log.NumberField
 import com.sohum.bandlog.ui.theme.palette
 import com.sohum.bandlog.ui.today.fmt
 import com.sohum.bandlog.util.Goals
+import com.sohum.bandlog.util.TargetEdits
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
-private val GOAL_TYPES = listOf("lose", "maintain", "gain")
-
-/** Lose / Maintain / Gain, the two weights, and how fast to get there. */
+/**
+ * Lose / Maintain / Gain, the two weights, and how fast to get there. v2.10: the goal choices
+ * follow age (no "lose" under 18), the pace slider stops at the safe max for this body weight,
+ * the BMI card sits underneath, and a safety flag shows a kind note without blocking the save.
+ */
 @Composable
 fun GoalWeightScreen(vm: AppViewModel, onBack: () -> Unit) {
     val p = palette
     val scope = rememberCoroutineScope()
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     val prof = vm.profile
+    val age = Goals.ageYears(prof.dob)
+    val teen = Goals.isTeen(age)
+    val options = Goals.goalOptions(age)
+    androidx.compose.runtime.LaunchedEffect(Unit) { if (vm.weights.isEmpty()) vm.loadWeights() }
 
-    var goalType by remember(prof) { mutableStateOf(prof.goalType) }
+    var goalType by remember(prof) { mutableStateOf(Goals.effectiveGoal(prof.goalType, age)) }
     var current by remember(prof) { mutableStateOf(prof.weightKg?.let { fmt(it) } ?: "") }
     var goal by remember(prof) { mutableStateOf(prof.goalWeightKg?.let { fmt(it) } ?: "") }
-    var speed by remember(prof) { mutableStateOf(prof.goalSpeedKgWk.toFloat().coerceIn(0.1f, 1.5f)) }
+    var speed by remember(prof) { mutableStateOf(Goals.roundSpeed(prof.goalSpeedKgWk, Goals.speedMax(prof.goalType, prof.weightKg)).toFloat()) }
     var regenerate by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var saved by remember { mutableStateOf(false) }
+    var flags by remember { mutableStateOf(emptyList<String>()) }
 
+    val kgNow = current.toDoubleOrNull() ?: prof.weightKg
+    val maintaining = goalType == "maintain"
+    val max = Goals.speedMax(if (maintaining) "lose" else goalType, kgNow)
     // Slider steps every 0.1 kg; round so the label and the saved value always agree.
-    val speedKg = (speed * 10).roundToInt() / 10.0
+    val speedKg = Goals.roundSpeed(speed.toDouble(), max)
     fun edited(): Profile = prof.copy(
         goalType = goalType,
-        weightKg = current.toDoubleOrNull() ?: prof.weightKg,
-        goalWeightKg = goal.toDoubleOrNull(),
+        weightKg = kgNow,
+        // Teens don't set a target weight; whatever was saved before stays untouched.
+        goalWeightKg = if (teen) prof.goalWeightKg else goal.toDoubleOrNull(),
         goalSpeedKgWk = speedKg,
     )
     val dirty = edited() != prof
-    val maintaining = goalType == "maintain"
 
     SubPage("Goal & current weight", onBack) {
+        TeenGoalMigration(vm)
         Rise(0) {
             Card {
                 Text("I want to", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted)
                 Spacer(Modifier.height(10.dp))
                 Segmented(
-                    listOf("Lose", "Maintain", "Gain"),
-                    GOAL_TYPES.indexOf(goalType).coerceAtLeast(1),
-                    { goalType = GOAL_TYPES[it] },
+                    options.map { it.label.substringBefore(" ") },
+                    options.indexOfFirst { it.key == goalType }.coerceAtLeast(0),
+                    { goalType = options[it].key },
                 )
+                Text(options.firstOrNull { it.key == goalType }?.sub.orEmpty(), fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(top = 8.dp))
+                if (teen) { Spacer(Modifier.height(10.dp)); TeenNote() }
             }
         }
 
@@ -90,8 +109,10 @@ fun GoalWeightScreen(vm: AppViewModel, onBack: () -> Unit) {
             Card(padding = 0.dp) {
                 Column(Modifier.padding(horizontal = 16.dp)) {
                     SettingRow(ScaleIcon, p.ink, "Current weight") { NumberField(current, { current = it.filter { c -> c.isDigit() || c == '.' } }, "kg", imeAction = androidx.compose.ui.text.input.ImeAction.Next) }
-                    Hair()
-                    SettingRow(TargetIcon, p.ink, "Goal weight") { NumberField(goal, { goal = it.filter { c -> c.isDigit() || c == '.' } }, "kg") }
+                    if (!teen) {
+                        Hair()
+                        SettingRow(TargetIcon, p.ink, "Goal weight") { NumberField(goal, { goal = it.filter { c -> c.isDigit() || c == '.' } }, "kg") }
+                    }
                 }
             }
         }
@@ -99,14 +120,24 @@ fun GoalWeightScreen(vm: AppViewModel, onBack: () -> Unit) {
         // ---- speed ----
         Rise(2) {
             Card {
-                Text(if (maintaining) "Weekly pace" else "How fast?", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    if (maintaining) "Only used if you switch to lose or gain." else "Changes how many calories we add or subtract each day.",
-                    fontSize = 12.sp, color = p.muted,
-                )
-                Spacer(Modifier.height(14.dp))
-                GoalSpeedPicker(speed) { speed = it }
+                if (teen) {
+                    Text("Your pace", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        if (goalType == "gain") "We add a small extra (about 10%) on top of what your body needs to grow and train. No speed to pick."
+                        else "Your calories match what your body needs to grow and train.",
+                        fontSize = 12.sp, color = p.muted, lineHeight = 17.sp,
+                    )
+                } else {
+                    Text(if (maintaining) "Weekly pace" else "How fast?", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        if (maintaining) "Only used if you switch to lose or gain." else "Changes how many calories we add or subtract each day.",
+                        fontSize = 12.sp, color = p.muted,
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    GoalSpeedPicker(speed, if (maintaining) "lose" else goalType, kgNow) { speed = it }
+                }
             }
         }
 
@@ -138,11 +169,19 @@ fun GoalWeightScreen(vm: AppViewModel, onBack: () -> Unit) {
                         busy = true; saved = false
                         val next = edited().let { if (regenerate) Goals.applyTo(it) else it }
                         saved = vm.saveProfile(next)
+                        if (saved) {
+                            var edits = TargetEdits.record(ctx, "goal_weight", prof.goalWeightKg, next.goalWeightKg)
+                            if (regenerate) edits = TargetEdits.record(ctx, "calories", prof.calorieTarget.toDouble(), next.calorieTarget.toDouble())
+                            flags = Goals.edFlags(Goals.screenInput(next, weights = vm.weights.map { Goals.WeighIn(it.date, it.weightKg) }, edits = edits))
+                            regenerate = false
+                        }
                         busy = false
                     }
                 },
             )
         }
+        if (flags.isNotEmpty()) Rise(5) { SafetyNote(vm, flags, onClose = { flags = emptyList() }) }
+        Rise(5) { BmiCard(vm, prof.weightKg, waist = true) }
         Spacer(Modifier.height(4.dp))
     }
 }

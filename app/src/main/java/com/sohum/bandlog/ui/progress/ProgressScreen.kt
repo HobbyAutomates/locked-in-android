@@ -54,6 +54,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sohum.bandlog.data.totalsFor
 import com.sohum.bandlog.ui.AppViewModel
+import com.sohum.bandlog.ui.components.BmiCard
+import com.sohum.bandlog.ui.components.SafetyNote
+import com.sohum.bandlog.ui.components.TeenGoalMigration
+import com.sohum.bandlog.util.Goals
 import com.sohum.bandlog.ui.components.ArrowDownIcon
 import com.sohum.bandlog.ui.components.ArrowFlatIcon
 import com.sohum.bandlog.ui.components.ArrowUpIcon
@@ -95,10 +99,6 @@ private val PROTEIN = Color(0xFFE9636B)
 private val CARBS = Color(0xFFE5A15B)
 private val FATS = Color(0xFF5B8DEF)
 
-private val BMI_UNDER = Color(0xFF5B8DEF)
-private val BMI_HEALTHY = Color(0xFF2FB35E)
-private val BMI_OVER = Color(0xFFE5A15B)
-private val BMI_OBESE = Color(0xFFE9636B)
 
 /** Change-table periods: label to days back (null = all time). */
 private val PERIODS = listOf("3 day" to 3L, "7 day" to 7L, "14 day" to 14L, "30 day" to 30L, "90 day" to 90L, "All time" to null)
@@ -124,10 +124,16 @@ fun ProgressScreen(vm: AppViewModel, onOpenBadges: () -> Unit, onLogWeight: () -
     val target = vm.profile.weeklyWorkoutTarget
     var showMore by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { vm.loadProgressPhotos() }
+    // v2.10: low BMI / rapid loss show the kind note with helplines (never a popup; closable).
+    val bodyKg = vm.weights.firstOrNull()?.weightKg ?: vm.profile.weightKg
+    val flags = Goals.edFlags(Goals.screenInput(vm.profile.copy(weightKg = bodyKg), weights = vm.weights.map { Goals.WeighIn(it.date, it.weightKg) }))
+    var safetyClosed by remember { mutableStateOf(false) }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 110.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item(key = "title") { Rise(0) { ScreenTitle("Progress") } }
+        item(key = "teenGoal") { TeenGoalMigration(vm) }
         item(key = "weightTrend") { Rise(1) { WeightTrendCard(vm, onLogWeight) } }
+        if (flags.isNotEmpty() && !safetyClosed) item(key = "safety") { Rise(1) { SafetyNote(vm, flags, onClose = { safetyClosed = true }) } }
         item(key = "energy") { Rise(2) { ThisWeeksEnergyCard(vm, ctx) } }
         item(key = "streak") { Rise(3) { StreakCard(vm) } }
         item(key = "macros") { Rise(4) { MacrosWeekCard(vm) } }
@@ -154,9 +160,10 @@ fun ProgressScreen(vm: AppViewModel, onOpenBadges: () -> Unit, onLogWeight: () -
                 Rise(1) { Segmented4(listOf("This wk", "Last wk", "2 wk ago", "3 wk ago"), week) { week = it } }
             }
             item(key = "calories") { Rise(1) { DailyCaloriesCard(vm, days) } }
-            item(key = "energyDetail") { Rise(2) { WeeklyEnergyCard(vm, days, days.map { Dates.parse(it).format(NARROW_FMT) }, false, ctx) } }
+            // v2.10 "Hide calorie numbers": the kcal-by-day breakdown is left out entirely.
+            if (vm.profile.hideNumbers != true) item(key = "energyDetail") { Rise(2) { WeeklyEnergyCard(vm, days, days.map { Dates.parse(it).format(NARROW_FMT) }, false, ctx) } }
             item(key = "expenditure") { Rise(2) { ExpenditureChangesCard(vm, ctx) } }
-            item(key = "bmi") { Rise(3) { BmiCard(vm) } }
+            item(key = "bmi") { Rise(3) { BmiCard(vm, bodyKg, waist = true) } }
             item(key = "photos") { Rise(3) { PhotosCard(vm) } }
             item(key = "badges") { Rise(4) { BadgesCard(vm, onOpenBadges) } }
             item(key = "week") {
@@ -327,6 +334,21 @@ private fun ThisWeeksEnergyCard(vm: AppViewModel, ctx: android.content.Context) 
     val target = vm.profile.calorieTarget.toDouble() * daysSoFar
     val net = eaten - burned
     val frac = if (target > 0) (net / target).toFloat() else 0f
+
+    // v2.10 "Hide calorie numbers": the bar and words, no kcal anywhere on the card.
+    if (vm.profile.hideNumbers == true) {
+        Card {
+            Text("This week's energy", fontSize = 17.sp, fontWeight = FontWeight(700), color = p.ink)
+            Text("Since ${Dates.parse(ws).format(DAY_FMT)}, ${Dates.parse(ws).format(WEEK_FMT)}", fontSize = 12.sp, color = p.muted)
+            Spacer(Modifier.height(12.dp))
+            Text(Goals.calorieWords(net, target), fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
+            Spacer(Modifier.height(8.dp))
+            Progress(frac, p.ink)
+            Spacer(Modifier.height(6.dp))
+            Text(if (burned > 0) "Includes the exercise you logged." else "Numbers are hidden. You can turn them back on in Tracking.", fontSize = 12.sp, color = p.muted)
+        }
+        return
+    }
 
     Card {
         Text("This week's energy", fontSize = 17.sp, fontWeight = FontWeight(700), color = p.ink)
@@ -523,10 +545,15 @@ private fun DailyCaloriesCard(vm: AppViewModel, days: List<String>) {
     val ink = p.ink
 
     Card {
-        Text("Daily average calories", fontSize = 13.sp, fontWeight = FontWeight(500), color = p.muted)
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(String.format(Locale.US, "%,d", avg.roundToInt()), fontSize = 30.sp, fontWeight = FontWeight(800), letterSpacing = (-1).sp, color = p.ink, lineHeight = 32.sp)
-            Text(" kcal · target ${String.format(Locale.US, "%,d", target.roundToInt())}", fontSize = 13.sp, color = p.muted, modifier = Modifier.padding(bottom = 4.dp))
+        if (vm.profile.hideNumbers == true) {
+            Text("Daily average", fontSize = 13.sp, fontWeight = FontWeight(500), color = p.muted)
+            Text(if (logged.isEmpty()) "Nothing logged yet" else Goals.calorieWords(avg, target), fontSize = 17.sp, fontWeight = FontWeight(700), color = p.ink)
+        } else {
+            Text("Daily average calories", fontSize = 13.sp, fontWeight = FontWeight(500), color = p.muted)
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(String.format(Locale.US, "%,d", avg.roundToInt()), fontSize = 30.sp, fontWeight = FontWeight(800), letterSpacing = (-1).sp, color = p.ink, lineHeight = 32.sp)
+                Text(" kcal · target ${String.format(Locale.US, "%,d", target.roundToInt())}", fontSize = 13.sp, color = p.muted, modifier = Modifier.padding(bottom = 4.dp))
+            }
         }
         Spacer(Modifier.height(14.dp))
         // Stacked bars: protein at the bottom, then carbs, then fats; the dashed line is the target.
@@ -578,60 +605,6 @@ private fun DailyCaloriesCard(vm: AppViewModel, days: List<String>) {
             MacroDot("Fats ${avgF.roundToInt()}g", FATS)
         }
         if (logged.isEmpty()) Text("No meals logged this week.", fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(top = 8.dp))
-    }
-}
-
-// ---------------------------------------------------------------- (e) BMI
-
-@Composable
-private fun BmiCard(vm: AppViewModel) {
-    val p = palette
-    val w = vm.weights.firstOrNull()?.weightKg ?: vm.profile.weightKg
-    val h = vm.profile.heightCm
-    Card {
-        Text("Your BMI", fontSize = 13.sp, fontWeight = FontWeight(500), color = p.muted)
-        if (w == null || h == null || h < 50) {
-            Spacer(Modifier.height(6.dp))
-            Text("Add your height and weight in Personal details.", fontSize = 13.sp, color = p.ink)
-            return@Card
-        }
-        val bmi = w / ((h / 100.0) * (h / 100.0))
-        val (cat, color) = when { bmi < 18.5 -> "Underweight" to BMI_UNDER; bmi < 25 -> "Healthy" to BMI_HEALTHY; bmi < 30 -> "Overweight" to BMI_OVER; else -> "Obese" to BMI_OBESE }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(String.format(Locale.US, "%.1f", bmi), fontSize = 34.sp, fontWeight = FontWeight(800), letterSpacing = (-1.2).sp, color = p.ink, lineHeight = 36.sp)
-            Spacer(Modifier.width(10.dp))
-            Box(Modifier.background(color.copy(alpha = 0.16f), CircleShape).padding(horizontal = 10.dp, vertical = 5.dp)) {
-                Text("Your weight is $cat", fontSize = 12.sp, fontWeight = FontWeight(700), color = color, maxLines = 1)
-            }
-        }
-        Spacer(Modifier.height(14.dp))
-        // 15 → 40 on the bar; the category edges sit at 18.5, 25 and 30.
-        val pos = ((bmi - 15.0) / 25.0).toFloat().coerceIn(0f, 1f)
-        val ink = p.ink
-        val card = p.card
-        Canvas(Modifier.fillMaxWidth().height(18.dp)) {
-            val barH = 8.dp.toPx()
-            val top = (size.height - barH) / 2
-            drawRoundRect(
-                Brush.horizontalGradient(0f to BMI_UNDER, 0.14f to BMI_UNDER, 0.2f to BMI_HEALTHY, 0.4f to BMI_HEALTHY, 0.5f to BMI_OVER, 0.6f to BMI_OVER, 0.7f to BMI_OBESE, 1f to BMI_OBESE),
-                Offset(0f, top), Size(size.width, barH), cornerRadius = CornerRadius(barH / 2),
-            )
-            val x = (size.width * pos).coerceIn(size.height / 2, size.width - size.height / 2)
-            drawCircle(card, size.height / 2, Offset(x, size.height / 2))
-            drawCircle(ink, size.height / 2, Offset(x, size.height / 2), style = Stroke(3.dp.toPx()))
-        }
-        Spacer(Modifier.height(10.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            LegendDot("Underweight", BMI_UNDER); LegendDot("Healthy", BMI_HEALTHY); LegendDot("Overweight", BMI_OVER); LegendDot("Obese", BMI_OBESE)
-        }
-    }
-}
-
-@Composable
-private fun LegendDot(label: String, color: Color) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(7.dp).background(color, CircleShape))
-        Text(" $label", fontSize = 11.sp, fontWeight = FontWeight(600), color = palette.muted, maxLines = 1)
     }
 }
 

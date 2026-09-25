@@ -199,6 +199,14 @@ fun TrackingScreen(vm: AppViewModel, onBack: () -> Unit) {
                     SettingRow(Icons.Outlined.Refresh, p.ink, "Rollover calories", subtitle = "Up to 200 unused from yesterday") {
                         Switch(vm.rolloverOn, { vm.setRollover(ctx, it) }, colors = switchColors())
                     }
+                    Hair()
+                    // v2.10: opt-in only. hideNumbers null = schema_v34 not applied yet, so the switch waits.
+                    SettingRow(
+                        com.sohum.bandlog.ui.components.LockIcon, p.ink, "Hide calorie numbers",
+                        subtitle = if (vm.profile.hideNumbers == null) "Coming with the next update" else "Show progress bars and words instead of kcal",
+                    ) {
+                        Switch(vm.profile.hideNumbers == true, { vm.setHideNumbers(it) }, enabled = vm.profile.hideNumbers != null, colors = switchColors())
+                    }
                 }
             }
         }
