@@ -12,16 +12,20 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.clickable
@@ -30,6 +34,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -39,6 +44,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -57,21 +64,42 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -91,13 +119,17 @@ import com.sohum.bandlog.ui.components.CameraIcon
 import com.sohum.bandlog.ui.components.Card
 import com.sohum.bandlog.ui.components.CheckIcon
 import com.sohum.bandlog.ui.components.ChevronDownIcon
+import com.sohum.bandlog.ui.components.ClipboardListIcon
 import com.sohum.bandlog.ui.components.CrossIcon
+import com.sohum.bandlog.ui.components.EggIcon
 import com.sohum.bandlog.ui.components.ErrorNote
+import com.sohum.bandlog.ui.components.FlameIcon
 import com.sohum.bandlog.ui.components.Hair
 import com.sohum.bandlog.ui.components.HistoryIcon
 import com.sohum.bandlog.ui.components.MacroDonut
 import com.sohum.bandlog.ui.components.MacroDot
 import com.sohum.bandlog.ui.components.Motion
+import com.sohum.bandlog.ui.components.PencilIcon
 import com.sohum.bandlog.ui.components.PillButton
 import com.sohum.bandlog.ui.components.QuantitySheet
 import com.sohum.bandlog.ui.components.QuestionIcon
@@ -105,12 +137,11 @@ import com.sohum.bandlog.ui.components.RemoteImage
 import com.sohum.bandlog.ui.components.Ring
 import com.sohum.bandlog.ui.components.Rise
 import com.sohum.bandlog.ui.components.RowSpaceBetween
-import com.sohum.bandlog.ui.components.ScanIcon
-import com.sohum.bandlog.ui.components.ScreenTitle
 import com.sohum.bandlog.ui.components.SmallChip
 import com.sohum.bandlog.ui.components.SpoonIcon
 import com.sohum.bandlog.ui.components.SubPage
 import com.sohum.bandlog.ui.components.TagIcon
+import com.sohum.bandlog.ui.components.lucide
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.text.style.TextOverflow
 import com.sohum.bandlog.ui.log.NumberField
@@ -118,6 +149,7 @@ import com.sohum.bandlog.ui.theme.palette
 import com.sohum.bandlog.ui.today.fmt
 import com.sohum.bandlog.util.Dates
 import com.sohum.bandlog.util.LabelParse
+import com.sohum.bandlog.util.MealTypes
 import com.sohum.bandlog.util.QuantityFood
 import com.sohum.bandlog.util.applyFollowUpEffect
 import com.sohum.bandlog.util.totalKcalRange
@@ -138,26 +170,61 @@ private const val BACK_OF_PACK_HINT = "Flip the pack and scan the Nutrition Fact
 
 private val LENSES = listOf("protein" to "Protein", "snack" to "Snack", "cutting" to "Cutting", "bulking" to "Bulking")
 
+// v2.12: the camera stage is always dark (like a viewfinder), in light and dark theme alike.
+private val StageInk = Color(0xFFF5F5F7)
+private val StageGlass = Color(0xB81C1C1E)
+private val StageLine = Color(0x2EFFFFFF)
+private val GlassChipBg = Color(0xDBF5F5F7)
 
-/** Bottom-nav tab: title, the one-button scanner, and the History list. A tapped row opens its stored report. */
+private val UtensilsIcon: ImageVector by lazy { lucide("Utensils", listOf("M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2", "M7 2v20", "M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3zm0 0v7")) }
+private val GalleryIcon: ImageVector by lazy { lucide("Gallery", listOf("M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z", "M9 7a2 2 0 1 0 0 4a2 2 0 1 0 0-4z", "M21 15l-5-5L5 21")) }
+private val KeypadIcon: ImageVector by lazy {
+    lucide("Keypad", listOf("M20 5H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2z", "M6 9h.01", "M10 9h.01", "M14 9h.01", "M18 9h.01", "M8 13h8"))
+}
+private val CloseIcon: ImageVector by lazy { lucide("Close", listOf("M18 6L6 18", "M6 6l12 12")) }
+
+/** Scan modes on the camera stage: key, label, and the flow the photo is sent down (null = work it out). */
+private data class ScanMode(val key: String, val label: String, val forced: String?, val hint: String)
+
+private val MODES = listOf(
+    ScanMode("food", "Scan food", null, "Fit the whole plate in the frame"),
+    ScanMode("barcode", "Barcode", "barcode", "Line the bars up across the middle"),
+    ScanMode("label", "Food label", "label", "Get the front of the pack and its claims in shot"),
+    ScanMode("facts", "Nutrition facts", "label", "Fill the frame with the nutrition table"),
+)
+
+private fun modeIcon(key: String): ImageVector = when (key) {
+    "barcode" -> BarcodeIcon
+    "label" -> TagIcon
+    "facts" -> ClipboardListIcon
+    else -> UtensilsIcon
+}
+
+/** Bottom-nav tab: the camera stage (or a result over its photo), with History as a page on top. */
 @Composable
 fun ScanTab(vm: AppViewModel) {
-    val p = palette
     var history by remember { mutableStateOf<List<ScanHistoryItem>>(emptyList()) }
     var historyTick by remember { mutableIntStateOf(0) }
     var open by remember { mutableStateOf<ScanHistoryItem?>(null) }
+    var showHistory by remember { mutableStateOf(false) }
     LaunchedEffect(historyTick) { history = runCatching { Api.scanHistory() }.getOrDefault(history) }
 
     Box(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize()) {
-            Column(Modifier.padding(16.dp, 12.dp, 16.dp, 0.dp)) {
-                ScreenTitle("Scan")
-            }
-            Box(Modifier.weight(1f).padding(bottom = 96.dp)) {
-                ScanForm(vm, history, onScanned = { historyTick++ }, onOpen = { open = it }, onLogServing = { vm.openAddFood(listOf(it)) }, onDelete = { item ->
-                    history = history.filter { it.id != item.id }
-                    vm.launch { runCatching { Api.deleteScan(item.id) } }
-                })
+        ScanForm(vm, onScanned = { historyTick++ }, onOpenHistory = { showHistory = true }, onLogServing = { vm.openAddFood(listOf(it)) })
+        AnimatedContent(
+            targetState = showHistory, label = "scan-history",
+            transitionSpec = { (slideInVertically(Motion.spatial()) { it / 3 } + fadeIn(Motion.effects())).togetherWith(slideOutVertically(Motion.spatialFast()) { it / 3 } + fadeOut(Motion.effectsFast())) },
+        ) { shown ->
+            if (shown) {
+                BackHandler { showHistory = false }
+                SubPage("Scan history", { showHistory = false }) {
+                    if (history.isEmpty()) Text("Nothing scanned yet. Your scans land here.", fontSize = 14.sp, color = palette.muted)
+                    HistoryList(history, { open = it }, { item ->
+                        history = history.filter { it.id != item.id }
+                        vm.launch { runCatching { Api.deleteScan(item.id) } }
+                    })
+                    Spacer(Modifier.navigationBarsPadding().height(96.dp))
+                }
             }
         }
         AnimatedContent(
@@ -166,7 +233,7 @@ fun ScanTab(vm: AppViewModel) {
         ) { item ->
             if (item != null) {
                 BackHandler { open = null }
-                ScanDetailPage(item, onLogged = { vm.refresh() }, onLogServing = { open = null; vm.openAddFood(listOf(it)) }) { open = null }
+                ScanDetailPage(item, onLogged = { vm.refresh() }, onLogServing = { open = null; showHistory = false; vm.openAddFood(listOf(it)) }) { open = null }
             }
         }
     }
@@ -183,15 +250,15 @@ private val KINDS = listOf("barcode" to "Barcode", "label" to "Label", "plate" t
  * v2.1: one Scan button. The phone works out what the photo is — ML Kit barcode first, then ML Kit
  * OCR (≥120 characters that read like a nutrition panel → label), otherwise a plate — and runs
  * that flow straight away. A chip row ("Looks like a label — change?") overrides the guess.
+ * v2.12: a camera stage with mode buttons; "Scan food" keeps the automatic guess, the others run
+ * the same flow the override chip would.
  */
 @Composable
 private fun ScanForm(
     vm: AppViewModel,
-    history: List<ScanHistoryItem>,
     onScanned: () -> Unit,
-    onOpen: (ScanHistoryItem) -> Unit,
+    onOpenHistory: () -> Unit,
     onLogServing: (com.sohum.bandlog.data.MealItem) -> Unit,
-    onDelete: (ScanHistoryItem) -> Unit,
 ) {
     val p = palette
     val ctx = LocalContext.current
@@ -214,6 +281,10 @@ private fun ScanForm(
     var plate by remember { mutableStateOf<PlateEstimate?>(null) }
     var notFound by remember { mutableStateOf(false) }
     val target = remember { mutableStateOf<Uri?>(null) }
+    var mode by rememberSaveable { mutableStateOf("food") }
+    // The plate as edited in the review, for the floating totals over the photo.
+    var plateItems by remember { mutableStateOf<List<PlateItem>>(emptyList()) }
+    LaunchedEffect(plate) { plateItems = plate?.items ?: emptyList() }
 
     fun clearResults() { report = null; plate = null; notFound = false; error = null }
 
@@ -261,16 +332,17 @@ private fun ScanForm(
         }
     }
 
-    /** New photo → barcode? → label? → plate, then straight into that flow. */
+    /** New photo → barcode? → label? → plate (or the stage's chosen mode), then straight into that flow. */
     fun accept(bitmap: Bitmap?) {
         photo = bitmap; ocr = ""; barcode = ""; kind = null; clearResults(); showText = false
         val bmp = bitmap ?: run { error = "Couldn't open that photo"; return }
+        val forced = MODES.firstOrNull { it.key == mode }?.forced
         scope.launch {
             reading = true
             val code = runCatching { Barcode.read(bmp) }.getOrNull()
             if (code != null) barcode = code else ocr = runCatching { Ocr.read(bmp) }.getOrDefault("")
             reading = false
-            runKind(when { code != null -> "barcode"; looksLikeLabel(ocr) -> "label"; else -> "plate" })
+            runKind(forced ?: when { code != null -> "barcode"; looksLikeLabel(ocr) -> "label"; else -> "plate" })
         }
     }
 
@@ -286,45 +358,66 @@ private fun ScanForm(
         target.value = uri
         runCatching { camera.launch(uri) }.onFailure { error = "No camera app found — pick from gallery instead." }
     }
+    fun openGallery() = gallery.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
 
-    Column(Modifier.fillMaxSize()) {
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp, 6.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Rise(0) {
-                Card {
-                    val bmp = photo
-                    if (bmp == null) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(44.dp).background(p.btn, CircleShape), contentAlignment = Alignment.Center) { Icon(com.sohum.bandlog.ui.components.ScanFilledIcon, null, tint = p.btnInk, modifier = Modifier.size(20.dp)) }
-                            Spacer(Modifier.width(12.dp))
-                            Column {
-                                Text("Scan anything you eat", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
-                                Text("A barcode, a label or your plate — it works out which", fontSize = 12.sp, color = p.muted)
-                            }
-                        }
-                    } else {
-                        Image(bmp.asImageBitmap(), null, Modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape(14.dp)), contentScale = ContentScale.Crop)
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        PillButton(if (bmp == null) "Scan" else "Scan again", { openCamera() }, Modifier.weight(1f), enabled = !busy && !reading, height = 48.dp)
-                        PillButton("Gallery", { gallery.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, Modifier.weight(0.6f), enabled = !busy && !reading, height = 48.dp, bg = p.card2, fg = p.ink)
-                    }
+    /** Back to the camera stage (the note and mode stay). */
+    fun reset() { photo = null; ocr = ""; barcode = ""; kind = null; clearResults(); showText = false; digitsOpen = false }
 
-                    // What the phone thinks it is, with a one-tap override.
-                    val k = kind
-                    if (bmp != null && k != null) {
-                        Spacer(Modifier.height(10.dp))
-                        Text(
-                            "Looks like " + when (k) { "barcode" -> "a barcode"; "label" -> "a label"; else -> "a plate" } + " — change?",
-                            fontSize = 12.sp, fontWeight = FontWeight(600), color = p.muted,
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            KINDS.forEach { (key, label) -> SmallChip(label, { if (key != k && !busy) runKind(key) }, filled = key == k) }
-                        }
-                    }
-                    if (reading || busy) {
-                        Spacer(Modifier.height(8.dp))
-                        LinearProgressIndicator(Modifier.fillMaxWidth(), color = p.ink, trackColor = p.track)
+    val inResult = photo != null || reading || busy || report != null || plate != null || notFound || digitsOpen
+    if (!inResult) {
+        CameraStage(
+            mode = mode, onMode = { mode = it }, error = error,
+            onShutter = { error = null; openCamera() }, onGallery = { error = null; openGallery() },
+            onTypeCode = { error = null; digitsOpen = true }, onHistory = onOpenHistory,
+        )
+        return
+    }
+
+    BackHandler(enabled = !busy && !reading) { reset() }
+    val k = kind
+    BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
+        val bmp = photo
+        val fullH = maxHeight
+        val photoH = if (bmp != null) fullH * 0.46f else 132.dp
+        val sheetTop = photoH - 28.dp
+        val scroll = rememberScrollState()
+        val sheetTopPx = with(LocalDensity.current) { sheetTop.toPx() }
+        if (bmp != null) {
+            Image(
+                bmp.asImageBitmap(), "Your photo",
+                Modifier.fillMaxWidth().height(photoH).graphicsLayer { translationY = -scroll.value * 0.35f },
+                contentScale = ContentScale.Crop,
+            )
+        }
+        if (reading || busy) ScanLine(Modifier.fillMaxWidth().height(sheetTop), color = p.green)
+        Column(Modifier.fillMaxSize().verticalScroll(scroll)) {
+            Box(Modifier.fillMaxWidth().height(sheetTop)) {
+                // Scan 2: the plate's totals as glass chips floating over the photo.
+                if (plate != null && plateItems.isNotEmpty() && bmp != null) {
+                    val total = totalKcalRange(plateItems)
+                    val protein = fmt(round1(plateItems.sumOf { it.proteinG }))
+                    val toItems: () -> Unit = { scope.launch { scroll.animateScrollTo(sheetTopPx.roundToInt()) } }
+                    GlassChip(
+                        "Calories", "~${total.center}", FlameIcon, Color(0xFFF5DD7F),
+                        Modifier.align(Alignment.TopEnd).padding(top = 72.dp, end = 20.dp).scanEnter(1).rotate(-6f), toItems,
+                    )
+                    GlassChip(
+                        "Protein", "$protein g", EggIcon, Color(0xFFA898F5),
+                        Modifier.align(Alignment.BottomStart).padding(start = 22.dp, bottom = 40.dp).scanEnter(2).rotate(5f), toItems,
+                    )
+                }
+            }
+            Column(
+                Modifier.fillMaxWidth().defaultMinSize(minHeight = fullH - sheetTop)
+                    .shadow(20.dp, RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp), ambientColor = p.shadow, spotColor = p.shadow)
+                    .background(p.bg, RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+                    .padding(start = 16.dp, end = 16.dp, top = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Box(Modifier.align(Alignment.CenterHorizontally).size(40.dp, 5.dp).background(p.muted.copy(alpha = 0.35f), CircleShape))
+                if (reading || busy) {
+                    Column(Modifier.scanEnter(0)) {
+                        LinearProgressIndicator(Modifier.fillMaxWidth().clip(CircleShape), color = p.green, trackColor = p.track)
                         Text(
                             when {
                                 reading -> "Working out what it is…"
@@ -333,79 +426,219 @@ private fun ScanForm(
                                 ocr.trim().length < OCR_MIN_CHARS -> "Your phone couldn't read enough, so the photo is going up too — 20–45 s."
                                 else -> "Checking the brand and writing your report. About 8 seconds."
                             },
-                            fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(top = 6.dp),
+                            fontSize = 13.sp, color = p.muted, modifier = Modifier.padding(top = 8.dp),
                         )
                     }
-                    if (k == "label" && bmp != null && !reading) {
-                        Spacer(Modifier.height(10.dp))
-                        WhatIRead(ocr, false, showText, { showText = !showText }) { ocr = it }
-                    }
-
-                    // The quieter ways in: typed digits, a note for the analysis.
-                    if (digitsOpen) {
-                        Spacer(Modifier.height(10.dp))
+                }
+                if (digitsOpen) {
+                    Column(Modifier.scanEnter(0)) {
+                        Text("Type the digits under the bars", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted, modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Box(Modifier.weight(1f).height(48.dp).background(p.card2, RoundedCornerShape(12.dp)).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
+                            Box(Modifier.weight(1f).height(52.dp).background(p.card, RoundedCornerShape(16.dp)).padding(horizontal = 14.dp), contentAlignment = Alignment.CenterStart) {
                                 BasicTextField(
-                                    barcode, { barcode = it.filter(Char::isDigit).take(14) }, Modifier.fillMaxWidth(), singleLine = true,
+                                    barcode, { barcode = it.filter(Char::isDigit).take(14) }, Modifier.fillMaxWidth().semantics { contentDescription = "Barcode digits" }, singleLine = true,
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Go),
                                     keyboardActions = KeyboardActions(onGo = { focus.clearFocus(); runKind("barcode") }),
-                                    textStyle = TextStyle(fontSize = 16.sp, fontWeight = FontWeight(700), color = p.ink, letterSpacing = 1.sp), cursorBrush = SolidColor(p.ink),
-                                    decorationBox = { inner -> if (barcode.isEmpty()) Text("e.g. 8901058851298", fontSize = 14.sp, color = p.muted); inner() },
+                                    textStyle = TextStyle(fontSize = 17.sp, fontWeight = FontWeight(700), color = p.ink, letterSpacing = 1.sp), cursorBrush = SolidColor(p.ink),
+                                    decorationBox = { inner -> if (barcode.isEmpty()) Text("e.g. 8901058851298", fontSize = 15.sp, color = p.muted); inner() },
                                 )
                             }
-                            PillButton("Look up", { focus.clearFocus(); runKind("barcode") }, Modifier.width(96.dp), enabled = barcode.length >= 8 && !busy, height = 48.dp)
+                            PillButton("Look up", { focus.clearFocus(); runKind("barcode") }, Modifier.width(104.dp), enabled = barcode.length >= 8 && !busy, height = 52.dp)
                         }
-                    }
-                    if (noteOpen && bmp != null) {
-                        Spacer(Modifier.height(10.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Box(Modifier.weight(1f).height(48.dp).background(p.card2, RoundedCornerShape(12.dp)).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
-                                BasicTextField(
-                                    note, { note = it }, Modifier.fillMaxWidth(), singleLine = true,
-                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
-                                    textStyle = TextStyle(fontSize = 14.sp, color = p.ink), cursorBrush = SolidColor(p.ink),
-                                    decorationBox = { inner -> if (note.isEmpty()) Text(if (k == "plate") "e.g. the dal has ghee, two rotis" else "What is it / what do you want to know", fontSize = 14.sp, color = p.muted, maxLines = 1); inner() },
-                                )
-                            }
-                            PillButton("Redo", { focus.clearFocus(); k?.let { runKind(it) } }, Modifier.width(80.dp), enabled = k != null && !busy && !reading, height = 48.dp)
-                        }
-                    }
-                    if (!digitsOpen || (!noteOpen && bmp != null)) Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.Center) {
-                        if (!digitsOpen) TextLinkSmall("Type barcode digits") { digitsOpen = true }
-                        if (!noteOpen && bmp != null) TextLinkSmall("Add a note") { noteOpen = true }
                     }
                 }
-            }
-            ErrorNote(error)
-            if (notFound) Rise(2) {
-                Card {
+                ErrorNote(error)
+                if (notFound) Card(Modifier.scanEnter(0)) {
                     Text("Not in the database yet — photograph the label side instead.", fontSize = 14.sp, color = p.ink, lineHeight = 19.sp)
                     Spacer(Modifier.height(10.dp))
-                    PillButton("Scan again", { openCamera() }, height = 46.dp)
+                    PillButton("Scan again", { openCamera() }, height = 48.dp)
                 }
-            }
-            report?.let { ReportView(it, lens, onLogged = { vm.refresh() }, onLogServing = onLogServing) }
-            plate?.let { est ->
-                PhotoReview(est, photo, readOnly = false, onPickAnother = { list -> com.sohum.bandlog.data.Analytics.hintMealMethod("photo"); vm.openAddFood(list.map { it.toMealItem() }) }) { items, path ->
-                    scope.launch {
-                        busy = true
-                        val photoPath = path ?: photo?.let { b -> runCatching { Api.uploadMealPhoto(withContext(Dispatchers.IO) { toJpegBytes(b, 85) }) }.getOrNull() }
-                        val ok = vm.saveMeal(Dates.today(), est.plateNote.ifBlank { items.joinToString(", ") { it.name } }, items.map { it.toMealItem() }, photoPath, method = "photo")
-                        busy = false
-                        if (ok) { plate = null; photo = null; kind = null } else error = vm.error
+                report?.let { ReportView(it, lens, onLogged = { vm.refresh() }, onLogServing = onLogServing) }
+                plate?.let { est ->
+                    PhotoReview(
+                        est, photo, readOnly = false, showPhoto = false,
+                        saveLabel = "Log as " + MealTypes.label(MealTypes.default()).lowercase(),
+                        onItemsChanged = { plateItems = it },
+                        onPickAnother = { list -> com.sohum.bandlog.data.Analytics.hintMealMethod("photo"); vm.openAddFood(list.map { it.toMealItem() }) },
+                    ) { items, path ->
+                        scope.launch {
+                            busy = true
+                            val photoPath = path ?: photo?.let { b -> runCatching { Api.uploadMealPhoto(withContext(Dispatchers.IO) { toJpegBytes(b, 85) }) }.getOrNull() }
+                            val ok = vm.saveMeal(Dates.today(), est.plateNote.ifBlank { items.joinToString(", ") { it.name } }, items.map { it.toMealItem() }, photoPath, method = "photo")
+                            busy = false
+                            if (ok) { plate = null; photo = null; kind = null } else error = vm.error
+                        }
                     }
                 }
+
+                // Not right? What the phone thinks it is, with a one-tap override, and the quieter ways in.
+                if (bmp != null && k != null && !reading) {
+                    Column {
+                        Text(
+                            "Looks like " + when (k) { "barcode" -> "a barcode"; "label" -> "a label"; else -> "a plate" } + " — change?",
+                            fontSize = 12.sp, fontWeight = FontWeight(600), color = p.muted, modifier = Modifier.padding(start = 4.dp, bottom = 4.dp),
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            KINDS.forEach { (key, label) -> SmallChip(label, { if (key != k && !busy) runKind(key) }, filled = key == k) }
+                        }
+                    }
+                }
+                if (k == "label" && bmp != null && !reading) WhatIRead(ocr, false, showText, { showText = !showText }) { ocr = it }
+                if (noteOpen && bmp != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(Modifier.weight(1f).height(48.dp).background(p.card, RoundedCornerShape(14.dp)).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
+                            BasicTextField(
+                                note, { note = it }, Modifier.fillMaxWidth().semantics { contentDescription = "Note for the analysis" }, singleLine = true,
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
+                                textStyle = TextStyle(fontSize = 14.sp, color = p.ink), cursorBrush = SolidColor(p.ink),
+                                decorationBox = { inner -> if (note.isEmpty()) Text(if (k == "plate") "e.g. the dal has ghee, two rotis" else "What is it / what do you want to know", fontSize = 14.sp, color = p.muted, maxLines = 1); inner() },
+                            )
+                        }
+                        PillButton("Redo", { focus.clearFocus(); k?.let { runKind(it) } }, Modifier.width(80.dp), enabled = k != null && !busy && !reading, height = 48.dp)
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                    if (!busy && !reading) TextLinkSmall("Retake") { openCamera() }
+                    if (!digitsOpen) TextLinkSmall("Type barcode digits") { digitsOpen = true }
+                    if (!noteOpen && bmp != null) TextLinkSmall("Add a note") { noteOpen = true }
+                }
+                Spacer(Modifier.navigationBarsPadding().height(104.dp))
             }
-            HistoryList(history, onOpen, onDelete)
-            Spacer(Modifier.navigationBarsPadding().height(8.dp))
         }
+        // Top bar over the photo; the title fades as the sheet scrolls up over it.
+        val fade = (1f - scroll.value / sheetTopPx.coerceAtLeast(1f)).coerceIn(0f, 1f)
+        Box(Modifier.fillMaxWidth().height(96.dp).alpha(fade).background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.5f), Color.Transparent))))
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            StageButton(CloseIcon, "Close", enabled = !busy && !reading) { reset() }
+            Text(
+                when (k) { "barcode" -> "Barcode"; "label" -> "Label check"; "plate" -> "Your plate"; else -> if (digitsOpen) "Barcode" else "Scan" },
+                Modifier.weight(1f).alpha(fade).semantics { heading() }, textAlign = TextAlign.Center,
+                fontSize = 15.sp, fontWeight = FontWeight(700), color = StageInk,
+            )
+            Spacer(Modifier.size(48.dp))
+        }
+    }
+}
+
+/**
+ * Scan 1 · the camera stage, kept simple: corner brackets, one hint line, the four modes, and the
+ * shutter between Gallery and typed digits. The shutter opens the phone's camera app (no CAMERA
+ * permission, same as before), then the photo comes back here.
+ */
+@Composable
+private fun CameraStage(
+    mode: String, onMode: (String) -> Unit, error: String?,
+    onShutter: () -> Unit, onGallery: () -> Unit, onTypeCode: () -> Unit, onHistory: () -> Unit,
+) {
+    val current = MODES.firstOrNull { it.key == mode } ?: MODES.first()
+    Column(Modifier.fillMaxSize().background(Color.Black).navigationBarsPadding().padding(bottom = 100.dp)) {
+        Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 8.dp).scanEnter(0, riseDp = 16f), verticalAlignment = Alignment.CenterVertically) {
+            Text("Scan", Modifier.weight(1f).semantics { heading() }, fontSize = 30.sp, fontWeight = FontWeight(800), letterSpacing = (-1).sp, color = StageInk)
+            StageButton(HistoryIcon, "Scan history", onClick = onHistory)
+        }
+        Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 40.dp, vertical = 18.dp).scanEnter(1, riseDp = 16f)) {
+            CornerBrackets(color = StageInk.copy(alpha = 0.92f))
+            Icon(modeIcon(current.key), null, tint = StageInk.copy(alpha = 0.16f), modifier = Modifier.align(Alignment.Center).size(64.dp))
+        }
+        if (error != null) {
+            Text(
+                error, Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 6.dp), textAlign = TextAlign.Center,
+                fontSize = 13.sp, fontWeight = FontWeight(600), color = Color(0xFFFF8A80),
+            )
+        }
+        Text(
+            current.hint, Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 18.dp).scanEnter(2, riseDp = 16f),
+            textAlign = TextAlign.Center, fontSize = 14.sp, fontWeight = FontWeight(600), color = StageInk,
+        )
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp).selectableGroup().scanEnter(3, riseDp = 16f),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            MODES.forEach { m ->
+                val sel = m.key == mode
+                Column(
+                    Modifier.weight(1f).height(70.dp).clip(RoundedCornerShape(18.dp))
+                        .background(if (sel) StageInk else StageGlass)
+                        .border(1.dp, if (sel) Color.Transparent else StageLine, RoundedCornerShape(18.dp))
+                        .selectable(selected = sel, role = Role.Tab) { onMode(m.key) },
+                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
+                ) {
+                    Icon(modeIcon(m.key), null, tint = if (sel) Color.Black else StageInk, modifier = Modifier.size(22.dp))
+                    Spacer(Modifier.height(6.dp))
+                    Text(m.label, fontSize = 11.5.sp, lineHeight = 13.sp, fontWeight = FontWeight(600), color = if (sel) Color.Black else StageInk, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 4.dp))
+                }
+            }
+        }
+        Spacer(Modifier.height(20.dp))
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 24.dp).scanEnter(4, riseDp = 16f),
+            horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically,
+        ) {
+            StageAction(GalleryIcon, "Gallery", onGallery)
+            Box(
+                Modifier.size(78.dp).clip(CircleShape).border(4.dp, StageInk, CircleShape).clickable(onClick = onShutter)
+                    .semantics { contentDescription = "Take photo"; role = Role.Button },
+                contentAlignment = Alignment.Center,
+            ) { Box(Modifier.size(62.dp).background(StageInk, CircleShape)) }
+            StageAction(KeypadIcon, "Type code", onTypeCode)
+        }
+    }
+}
+
+/** A round glass icon button for the dark stage (48 dp target). */
+@Composable
+private fun StageButton(icon: ImageVector, label: String, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(
+        Modifier.size(48.dp).alpha(if (enabled) 1f else 0.4f).clip(CircleShape).clickable(enabled = enabled, onClick = onClick)
+            .semantics { contentDescription = label; role = Role.Button },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(Modifier.size(44.dp).background(StageGlass, CircleShape), contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = StageInk, modifier = Modifier.size(20.dp))
+        }
+    }
+}
+
+/** Glass circle with a caption under it (Gallery / Type code). */
+@Composable
+private fun StageAction(icon: ImageVector, label: String, onClick: () -> Unit) {
+    Column(
+        Modifier.widthIn(min = 64.dp).clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick).semantics(mergeDescendants = true) { role = Role.Button }.padding(4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(Modifier.size(44.dp).background(StageGlass, CircleShape), contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = StageInk, modifier = Modifier.size(20.dp))
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(label, fontSize = 12.sp, color = StageInk)
+    }
+}
+
+/** Scan 2 · a floating glass chip over the photo: icon tile, label, value, and an edit mark. */
+@Composable
+private fun GlassChip(label: String, value: String, icon: ImageVector, tile: Color, modifier: Modifier, onClick: () -> Unit) {
+    Row(
+        modifier.shadow(14.dp, RoundedCornerShape(22.dp)).clip(RoundedCornerShape(22.dp)).background(GlassChipBg)
+            .clickable(onClick = onClick).semantics(mergeDescendants = true) { contentDescription = "$label $value. Edit items"; role = Role.Button }
+            .padding(start = 8.dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(44.dp).background(tile, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = Color(0xFF111111), modifier = Modifier.size(22.dp))
+        }
+        Spacer(Modifier.width(10.dp))
+        Column {
+            Text(label, fontSize = 12.sp, fontWeight = FontWeight(600), color = Color(0xFF555555))
+            Text(value, fontSize = 22.sp, fontWeight = FontWeight(800), letterSpacing = (-0.5).sp, color = Color(0xFF111111), lineHeight = 24.sp)
+        }
+        Spacer(Modifier.width(8.dp))
+        Icon(PencilIcon, null, tint = Color(0xFF555555), modifier = Modifier.size(16.dp))
     }
 }
 
 @Composable
 private fun TextLinkSmall(label: String, onClick: () -> Unit) {
-    Box(Modifier.heightIn(min = 44.dp).clickable(onClick = onClick).padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick).semantics { role = Role.Button }.padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
         Text(label, fontSize = 12.sp, fontWeight = FontWeight(700), color = palette.muted)
     }
 }
@@ -464,15 +697,20 @@ private fun WhatIRead(text: String, reading: Boolean, expanded: Boolean, onToggl
 private fun fitColor(verdict: String): Color = when (verdict) { "great" -> palette.green; "ok" -> palette.orange; else -> palette.muted }
 private fun eatLabel(verdict: String) = when (verdict) { "great" -> "Eat it"; "ok" -> "Sometimes"; else -> "Skip for this" }
 
+/** The dial's words for the 0–10 score, on the same bands as its colour. */
+private fun scoreWords(score: Int) = when { score >= 7 -> "Good pick"; score >= 4 -> "Okay sometimes"; else -> "Not a great pick" }
+
 /**
- * v2.1 report: a hero (product, score ring, one-liner, the "Eat it?" pill for the lens and why,
- * lens chips), then "Log 1 serving", then everything else folded into one "Details" expander.
+ * v2.12 report. Barcode (Scan 3): a product card — picture, name, where the numbers came from,
+ * kcal / protein / carbs / fat, "Log 1 serving". Label (Scan 4): the score dial, then "Check this"
+ * warnings, traffic lights and the claims check. Both then show the fit for the chosen lens and
+ * fold everything else into one "Details" expander.
  */
 @Composable
 fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Unit = {}, onLogServing: ((com.sohum.bandlog.data.MealItem) -> Unit)? = null) {
     val p = palette
     if (!r.readable) {
-        Rise(1) { Card { Text("Couldn't read that as a food label", fontWeight = FontWeight(700), color = p.ink); Text(r.verdictReason, fontSize = 13.sp, color = p.muted) } }
+        Card(Modifier.scanEnter(0)) { Text("Couldn't read that as a food label", fontWeight = FontWeight(700), color = p.ink); Text(r.verdictReason, fontSize = 13.sp, color = p.muted) }
         return
     }
     val scope = rememberCoroutineScope()
@@ -482,33 +720,98 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Uni
     val fit = r.fits[lens]
     val score = g.score
     val scoreColor = when { score >= 7 -> p.green; score >= 4 -> p.orange; else -> p.muted }
+    val isBarcode = r.kind == "barcode"
     // "Log 1 serving": the report as a food the Quantity sheet can price.
     val food = remember(r) { QuantityFood.from(r) }
     var logFood by remember(r) { mutableStateOf<QuantityFood?>(null) }
     var logged by remember(r) { mutableStateOf<String?>(null) }
     var logError by remember(r) { mutableStateOf<String?>(null) }
+    val source = r.sourceInfo ?: Sources.forReport(r.nutritionSource, r.barcode)
+    val checked = r.nutritionSource == "openfoodfacts" || r.nutritionSource == "label"
+    val sourceLine = (if (r.nutritionSource == "openfoodfacts") "Found on ${source.label}" else source.label) + if (checked) " · checked" else ""
 
-    // ---- hero ----
-    Rise(1) {
-        Card(padding = 18.dp) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                if (r.imageUrl != null) { RemoteImage(url = r.imageUrl, size = 56.dp, radius = 12.dp, fallback = BarcodeIcon); Spacer(Modifier.width(12.dp)) }
-                Column(Modifier.weight(1f)) {
-                    // Long product names wrap (no maxLines) and never push the ring off the card.
-                    Text(if (ScanHistoryItem.isJunkName(r.product)) "Unnamed label" else r.product, fontSize = 19.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink, lineHeight = 23.sp, softWrap = true)
-                    if (g.oneLiner.isNotBlank()) Text(g.oneLiner, fontSize = 13.sp, color = p.muted, lineHeight = 18.sp, modifier = Modifier.padding(top = 4.dp))
-                }
-                Spacer(Modifier.width(12.dp))
-                Ring(score / 10f, scoreColor, 68.dp, 8.dp) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("$score", fontSize = 22.sp, fontWeight = FontWeight(800), letterSpacing = (-1).sp, color = p.ink, lineHeight = 24.sp)
-                        Text("/ 10", fontSize = 10.sp, fontWeight = FontWeight(600), color = p.muted)
-                    }
+    fun logOne() {
+        val go = onLogServing
+        val f = food ?: return
+        com.sohum.bandlog.data.Analytics.hintMealMethod(if (r.kind == "barcode") "barcode" else "label")
+        if (go == null) logFood = f
+        // v2.9: the plate's ⓘ shows where these numbers came from (the label, or Open Food Facts).
+        else go(f.item(if (f.servingGrams != null) com.sohum.bandlog.util.Quantity(com.sohum.bandlog.util.QUnit.SERVING, 1.0) else com.sohum.bandlog.util.Quantity(com.sohum.bandlog.util.QUnit.G, 100.0))
+            .copy(sourceInfo = r.sourceInfo ?: Sources.forReport(r.nutritionSource, r.barcode)))
+    }
+
+    // ---- hero: the product card (barcode) or the score dial (label) ----
+    Card(Modifier.scanEnter(0, r, riseDp = 96f), padding = 16.dp) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            if (r.imageUrl != null) { RemoteImage(url = r.imageUrl, size = 48.dp, radius = 12.dp, fallback = BarcodeIcon); Spacer(Modifier.width(12.dp)) }
+            Column(Modifier.weight(1f)) {
+                // Long product names wrap (no maxLines) and never push the score off the card.
+                Text(
+                    (if (ScanHistoryItem.isJunkName(r.product)) "Unnamed label" else r.product) + (r.servingG?.takeIf { it > 0 }?.let { " · ${it.roundToInt()} g" } ?: ""),
+                    fontSize = 16.sp, fontWeight = FontWeight(700), color = p.ink, lineHeight = 21.sp, softWrap = true, modifier = Modifier.semantics { heading() },
+                )
+                Text(sourceLine, fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(top = 2.dp))
+            }
+            if (isBarcode && score > 0) {
+                Spacer(Modifier.width(10.dp))
+                Ring(score / 10f, scoreColor, 52.dp, 6.dp, Modifier.semantics { contentDescription = "Score $score out of 10" }) {
+                    Text("$score", fontSize = 17.sp, fontWeight = FontWeight(800), color = p.ink)
                 }
             }
+        }
+        if (isBarcode) {
+            Spacer(Modifier.height(12.dp))
+            if (r.needsBackOfPack) Text(BACK_OF_PACK_HINT, fontSize = 13.sp, color = p.orange, lineHeight = 18.sp)
+            else MacroCells(r)
+            if (g.oneLiner.isNotBlank()) Text(g.oneLiner, fontSize = 13.sp, color = p.muted, lineHeight = 18.sp, modifier = Modifier.padding(top = 10.dp))
+        } else {
+            Spacer(Modifier.height(4.dp))
+            ScoreDial(score, scoreColor, scoreWords(score), Modifier.align(Alignment.CenterHorizontally))
+            if (g.oneLiner.isNotBlank()) Text(g.oneLiner, fontSize = 13.sp, color = p.muted, lineHeight = 18.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+        }
+        if (food != null) {
+            Spacer(Modifier.height(12.dp))
+            // v2.4: opens Add food with one serving already on the plate (the amount stays editable there).
+            PillButton("Log 1 serving" + (r.servingG?.takeIf { it > 0 }?.let { " · ${it.roundToInt()} g" } ?: ""), { logOne() }, height = 48.dp)
+            logged?.let { Row(Modifier.padding(top = 8.dp, start = 4.dp), verticalAlignment = Alignment.CenterVertically) { Icon(CheckIcon, null, tint = p.green, modifier = Modifier.size(14.dp)); Text("  $it — on Home", fontSize = 12.sp, fontWeight = FontWeight(600), color = p.green) } }
+            logError?.let { Text(it, fontSize = 12.sp, color = p.red, modifier = Modifier.padding(top = 8.dp, start = 4.dp)) }
+        }
+    }
+
+    // v2.8: deterministic sanity-check flags (kJ read as kcal, decimal slips, ...) — non-blocking.
+    if (r.validation.isNotEmpty()) {
+        Column(
+            Modifier.scanEnter(1, r).fillMaxWidth().background(p.orangeBg, RoundedCornerShape(18.dp)).padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            r.validation.forEachIndexed { i, f ->
+                Text(
+                    buildAnnotatedString {
+                        if (i == 0) withStyle(SpanStyle(fontWeight = FontWeight(700))) { append("Check this: ") }
+                        append(f.issue)
+                    },
+                    fontSize = 13.sp, color = p.ink, lineHeight = 19.sp,
+                )
+            }
+        }
+    }
+
+    // ---- label: the numbers, traffic lights, claims ----
+    if (!isBarcode) {
+        if (r.needsBackOfPack) {
+            Card(Modifier.scanEnter(2, r), padding = 14.dp) { Text(BACK_OF_PACK_HINT, fontSize = 13.sp, lineHeight = 18.sp, color = p.orange) }
+        } else if (listOf("protein_g", "calories", "carbs_g", "fat_g").any { r.per100[it] != null }) {
+            Card(Modifier.scanEnter(2, r), padding = 14.dp) { MacroCells(r) }
+        }
+        TrafficLights(r, Modifier.scanEnter(3, r))
+    }
+    if (r.claims.isNotEmpty()) ClaimsCheck(r.claims, Modifier.scanEnter(4, r))
+
+    // ---- how it fits the chosen way of eating ----
+    if (fit != null || r.fits.size > 1) {
+        Card(Modifier.scanEnter(5, r)) {
             if (fit != null) {
                 val c = fitColor(fit.verdict)
-                Spacer(Modifier.height(14.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.background(c, CircleShape).padding(14.dp, 7.dp)) {
                         Text(eatLabel(fit.verdict), fontSize = 13.sp, fontWeight = FontWeight(800), color = if (fit.verdict == "weak") p.card else Color.White)
@@ -524,50 +827,18 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Uni
             }
         }
     }
-
-    // v2.8: deterministic sanity-check flags (kJ read as kcal, decimal slips, ...) — non-blocking.
-    if (r.validation.isNotEmpty()) Rise(1) {
-        Card(padding = 14.dp) {
-            Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("!", fontSize = 14.sp, fontWeight = FontWeight(800), color = p.orange)
-                Column {
-                    Text("Check this 👀", fontSize = 13.sp, fontWeight = FontWeight(700), color = p.ink)
-                    r.validation.forEach { f -> Text(f.issue, fontSize = 13.sp, color = p.muted, lineHeight = 18.sp, modifier = Modifier.padding(top = 4.dp)) }
-                }
-            }
-        }
-    }
-
-    // ---- v2.2: the numbers at a glance (2x2), then how it fits each way of eating ----
-    SummaryGrid(r)?.let { cells -> Rise(1) { cells() } }
-    if (r.fits.isNotEmpty()) Rise(1) { FitPills(r.fits) }
-
-    if (food != null) Rise(2) {
-        Column {
-            // v2.4: opens Add food with one serving already on the plate (the amount stays editable there).
-            PillButton("Log 1 serving" + (r.servingG?.takeIf { it > 0 }?.let { " · ${it.roundToInt()} g" } ?: ""), {
-                val go = onLogServing
-                com.sohum.bandlog.data.Analytics.hintMealMethod(if (r.kind == "barcode") "barcode" else "label")
-                if (go == null) logFood = food
-                // v2.9: the plate's ⓘ shows where these numbers came from (the label, or Open Food Facts).
-                else go(food.item(if (food.servingGrams != null) com.sohum.bandlog.util.Quantity(com.sohum.bandlog.util.QUnit.SERVING, 1.0) else com.sohum.bandlog.util.Quantity(com.sohum.bandlog.util.QUnit.G, 100.0))
-                    .copy(sourceInfo = r.sourceInfo ?: Sources.forReport(r.nutritionSource, r.barcode)))
-            })
-            logged?.let { Row(Modifier.padding(top = 8.dp, start = 4.dp), verticalAlignment = Alignment.CenterVertically) { Icon(CheckIcon, null, tint = p.green, modifier = Modifier.size(14.dp)); Text("  $it — on Home", fontSize = 12.sp, fontWeight = FontWeight(600), color = p.green) } }
-            logError?.let { Text(it, fontSize = 12.sp, color = p.red, modifier = Modifier.padding(top = 8.dp, start = 4.dp)) }
-        }
-    }
+    if (r.fits.isNotEmpty()) Box(Modifier.scanEnter(5, r)) { FitPills(r.fits) }
 
     // ---- details ----
-    Rise(3) {
+    Box(Modifier.scanEnter(6, r)) {
         val rot by animateFloatAsState(if (details) 180f else 0f, Motion.spatialFast(), label = "details")
         Card(padding = 16.dp, onClick = { details = !details }) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Details", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
-                    Text("Trust, sugar, salt, protein, ingredients, claims", fontSize = 12.sp, color = p.muted, maxLines = 1)
+                    Text("Trust, sugar, salt, protein, ingredients", fontSize = 12.sp, color = p.muted, maxLines = 1)
                 }
-                Icon(ChevronDownIcon, null, tint = p.muted, modifier = Modifier.size(20.dp).graphicsLayer { rotationZ = rot })
+                Icon(ChevronDownIcon, if (details) "Hide details" else "Show details", tint = p.muted, modifier = Modifier.size(20.dp).graphicsLayer { rotationZ = rot })
             }
         }
     }
@@ -588,12 +859,7 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Uni
             if (food != null && (food.proteinG + food.carbsG + food.fatG) > 0) Card {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text("One serving", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
-                    if (r.nutritionSource != null && r.nutritionSource != "label") {
-                        Text(
-                            "ESTIMATE", fontSize = 10.sp, fontWeight = FontWeight(700), color = p.orange,
-                            modifier = Modifier.background(p.orangeBg, RoundedCornerShape(999.dp)).padding(horizontal = 8.dp, vertical = 3.dp),
-                        )
-                    }
+                    if (r.nutritionSource != null && r.nutritionSource != "label") EstimateBadge()
                 }
                 Text(if (r.servingG != null && r.servingG > 0) "${r.servingG.roundToInt()} g · where the calories come from" else "Per 100 g · where the calories come from", fontSize = 12.sp, color = p.muted)
                 Spacer(Modifier.height(12.dp))
@@ -631,7 +897,7 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Uni
                 if (g.sugarTsp > 0.04) {
                     Text("Sugar", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
                     Spacer(Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.clearAndSetSemantics { }, verticalAlignment = Alignment.CenterVertically) {
                         repeat(spoons.coerceIn(0, 12)) { Icon(SpoonIcon, null, tint = p.orange, modifier = Modifier.size(19.dp).padding(end = 2.dp)) }
                         if (spoons > 12) Text("+", fontSize = 18.sp, fontWeight = FontWeight(800), color = p.orange)
                     }
@@ -679,22 +945,6 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Uni
                 }
             }
 
-            if (r.claims.isNotEmpty()) Card {
-                Text("Claims on the pack", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
-                r.claims.forEach { (claim, status, why) ->
-                    Spacer(Modifier.height(10.dp))
-                    val (c, icon) = when (status) { "supported" -> p.green to CheckIcon; "misleading", "false" -> p.red to CrossIcon; else -> p.orange to QuestionIcon }
-                    Row(verticalAlignment = Alignment.Top) {
-                        Box(Modifier.size(20.dp).background(c.copy(alpha = 0.16f), CircleShape), contentAlignment = Alignment.Center) { Icon(icon, null, tint = c, modifier = Modifier.size(12.dp)) }
-                        Spacer(Modifier.width(10.dp))
-                        Column {
-                            Text("“$claim”", fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink, lineHeight = 19.sp)
-                            Text(why, fontSize = 13.sp, color = p.muted, lineHeight = 18.sp)
-                        }
-                    }
-                }
-            }
-
             if (r.suggestions.isNotEmpty()) Column(Modifier.fillMaxWidth().background(p.btn, RoundedCornerShape(20.dp)).padding(18.dp)) {
                 Text("For you · ${LENSES.firstOrNull { it.first == r.lens }?.second ?: r.lens}", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.btnInk)
                 r.suggestions.forEach {
@@ -733,70 +983,141 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Uni
     }
 }
 
+@Composable
+private fun EstimateBadge() {
+    val p = palette
+    Text(
+        "ESTIMATE", fontSize = 10.sp, fontWeight = FontWeight(700), color = p.orange,
+        modifier = Modifier.background(p.orangeBg, RoundedCornerShape(999.dp)).padding(horizontal = 8.dp, vertical = 3.dp),
+    )
+}
+
 /**
- * Protein / Calories / Sugar / Fat as a clean 2x2: per serving (per-100 g × serving size) when the
- * label gives a serving, else per 100 g (and it says so). Null when the report has no numbers.
+ * kcal · protein · carbs · fat as four cells: per serving (per-100 g × serving size) when the
+ * label gives a serving, else per 100 g (and it says so).
  */
-private fun SummaryGrid(r: LabelReport): (@Composable () -> Unit)? {
-    if (r.needsBackOfPack) {
-        return {
-            val p = palette
-            Card(padding = 14.dp) {
-                Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("!", fontSize = 14.sp, fontWeight = FontWeight(800), color = p.orange)
-                    Text(BACK_OF_PACK_HINT, fontSize = 13.sp, lineHeight = 18.sp, color = p.ink)
-                }
-            }
-        }
-    }
-    val keys = listOf("protein_g", "calories", "sugar_g", "fat_g")
-    if (keys.none { r.per100[it] != null }) return null
+@Composable
+private fun MacroCells(r: LabelReport) {
+    val p = palette
     val serving = r.servingG?.takeIf { it > 0 }
     val k = (serving ?: 100.0) / 100.0
     val isEstimate = r.nutritionSource != null && r.nutritionSource != "label"
     fun v(key: String): String = r.per100[key]?.let { x ->
         val y = x * k
-        if (key == "calories") "${y.roundToInt()}" else fmt(round1(y))
+        if (key == "calories") "${y.roundToInt()}" else fmt(round1(y)) + " g"
     } ?: "—"
-    return {
-        val p = palette
-        Card(padding = 14.dp) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    if (serving != null) "Per serving · ${serving.roundToInt()} g" else "Per 100 g",
-                    fontSize = 12.sp, fontWeight = FontWeight(600), color = p.muted,
-                )
-                if (isEstimate) {
-                    Text(
-                        "ESTIMATE", fontSize = 10.sp, fontWeight = FontWeight(700), color = p.orange,
-                        modifier = Modifier.background(p.orangeBg, RoundedCornerShape(999.dp)).padding(horizontal = 8.dp, vertical = 3.dp),
-                    )
-                }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Text(if (serving != null) "Per serving · ${serving.roundToInt()} g" else "Per 100 g", fontSize = 12.sp, fontWeight = FontWeight(600), color = p.muted)
+        if (isEstimate) EstimateBadge()
+    }
+    Spacer(Modifier.height(8.dp))
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        listOf(v("calories") to "kcal", v("protein_g") to "protein", v("carbs_g") to "carbs", v("fat_g") to "fat").forEach { (value, label) ->
+            Column(
+                Modifier.weight(1f).background(p.card2, RoundedCornerShape(12.dp)).padding(vertical = 8.dp, horizontal = 4.dp)
+                    .semantics(mergeDescendants = true) { },
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(value, fontSize = 16.sp, fontWeight = FontWeight(800), color = p.ink, maxLines = 1)
+                Text(label, fontSize = 11.sp, color = p.muted, maxLines = 1)
             }
+        }
+    }
+}
+
+/**
+ * Scan 4 · traffic lights per 100 g, from the parsed numbers. Sugar and sodium use the UK FSA
+ * front-of-pack bands (sugar ≤5 / >22.5 g; sodium ≤120 / >600 mg, i.e. salt ≤0.3 / >1.5 g). Fibre
+ * uses the EU claim thresholds (≥3 g "source", ≥6 g "high"). Protein follows the report's own
+ * protein rating. Good things are never red: low fibre or protein is grey.
+ */
+@Composable
+private fun TrafficLights(r: LabelReport, modifier: Modifier = Modifier) {
+    val p = palette
+    data class Light(val name: String, val value: String, val color: Color, val word: String)
+    val rows = buildList {
+        r.per100["sugar_g"]?.let { s ->
+            val (c, w) = when { s <= 5 -> p.green to "low"; s <= 22.5 -> p.orange to "medium"; else -> p.red to "high" }
+            add(Light("Sugar", "${fmt(round1(s))} g", c, w))
+        }
+        r.per100["sodium_mg"]?.let { s ->
+            val (c, w) = when { s <= 120 -> p.green to "low"; s <= 600 -> p.orange to "medium"; else -> p.red to "high" }
+            add(Light("Sodium", "${s.roundToInt()} mg", c, w))
+        }
+        r.per100["fiber_g"]?.let { f ->
+            val (c, w) = when { f >= 6 -> p.green to "high"; f >= 3 -> p.orange to "some"; else -> p.muted to "low" }
+            add(Light("Fibre", "${fmt(round1(f))} g", c, w))
+        }
+        r.per100["protein_g"]?.let { pr ->
+            val (c, w) = when (r.proteinRating) { "excellent", "good" -> p.green to r.proteinRating; "average" -> p.orange to "average"; else -> p.muted to "low" }
+            add(Light("Protein", "${fmt(round1(pr))} g", c, w))
+        }
+    }
+    if (rows.isEmpty()) return
+    Card(modifier) {
+        Text("Per 100 g", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink)
+        rows.forEach { l ->
+            Row(
+                Modifier.fillMaxWidth().padding(top = 10.dp).semantics(mergeDescendants = true) { contentDescription = "${l.name} ${l.value} per 100 grams, ${l.word}" },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.size(10.dp).background(l.color, CircleShape))
+                Text(l.name, fontSize = 13.sp, color = p.ink, modifier = Modifier.padding(start = 10.dp).weight(1f))
+                Text(l.value, fontSize = 13.sp, color = p.muted)
+                Text(" · ${l.word}", fontSize = 12.sp, color = l.color.takeIf { it != p.muted } ?: p.muted, fontWeight = FontWeight(600))
+            }
+        }
+    }
+}
+
+/** Claims on the pack, each checked: supported (green tick), misleading/false (red cross), unclear (amber). */
+@Composable
+private fun ClaimsCheck(claims: List<Triple<String, String, String>>, modifier: Modifier = Modifier) {
+    val p = palette
+    Card(modifier) {
+        Text("Claims check", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink)
+        claims.forEach { (claim, status, why) ->
             Spacer(Modifier.height(10.dp))
-            val cells = listOf(
-                Triple(v("protein_g"), "g", "Protein") to p.red,
-                Triple(v("calories"), "kcal", "Calories") to p.ink,
-                Triple(v("sugar_g"), "g", "Sugar") to p.orange,
-                Triple(v("fat_g"), "g", "Fat") to p.blue,
-            )
-            cells.chunked(2).forEachIndexed { row, pair ->
-                if (row > 0) Spacer(Modifier.height(8.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    pair.forEach { (t, c) ->
-                        Column(Modifier.weight(1f).background(p.card2, RoundedCornerShape(16.dp)).padding(horizontal = 14.dp, vertical = 12.dp)) {
-                            Row(verticalAlignment = Alignment.Bottom) {
-                                Text(t.first, fontSize = 24.sp, fontWeight = FontWeight(800), letterSpacing = (-0.8).sp, color = p.ink, maxLines = 1, lineHeight = 26.sp)
-                                if (t.first != "—") Text(" ${t.second}", fontSize = 12.sp, fontWeight = FontWeight(600), color = p.muted, modifier = Modifier.padding(bottom = 3.dp))
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
-                                Box(Modifier.size(6.dp).background(c, CircleShape))
-                                Text("  ${t.third}", fontSize = 11.sp, fontWeight = FontWeight(600), color = p.muted, maxLines = 1)
-                            }
-                        }
-                    }
+            val (c, icon, word) = when (status) { "supported" -> Triple(p.green, CheckIcon, "holds up"); "misleading", "false" -> Triple(p.red, CrossIcon, status); else -> Triple(p.orange, QuestionIcon, "unclear") }
+            Row(Modifier.semantics(mergeDescendants = true) { contentDescription = "Claim “$claim”: $word. $why" }, verticalAlignment = Alignment.Top) {
+                Box(Modifier.size(20.dp).background(c.copy(alpha = 0.16f), CircleShape), contentAlignment = Alignment.Center) { Icon(icon, null, tint = c, modifier = Modifier.size(12.dp)) }
+                Spacer(Modifier.width(10.dp))
+                Column {
+                    Text("“$claim”", fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink, lineHeight = 19.sp)
+                    if (why.isNotBlank()) Text(why, fontSize = 13.sp, color = p.muted, lineHeight = 18.sp)
                 }
             }
+        }
+    }
+}
+
+/** Scan 4 · the half-circle score dial (0–10), sweeping to its value on the scan ease. */
+@Composable
+private fun ScoreDial(score: Int, color: Color, caption: String, modifier: Modifier = Modifier) {
+    val p = palette
+    val on = rememberScanMotionOn()
+    val target = (score / 10f).coerceIn(0f, 1f)
+    val a = remember(score) { Animatable(if (on) 0f else target) }
+    LaunchedEffect(score, on) { if (on) a.animateTo(target, tween(1100, delayMillis = 200, easing = ScanEase)) else a.snapTo(target) }
+    val track = p.track
+    Box(modifier.size(220.dp, 124.dp).semantics { contentDescription = "Score $score out of 10, ${caption.lowercase()}" }, contentAlignment = Alignment.BottomCenter) {
+        Canvas(Modifier.fillMaxSize()) {
+            val sw = 16.dp.toPx()
+            val r = size.width / 2 - sw
+            val topLeft = Offset(size.width / 2 - r, size.height - 14.dp.toPx() - r)
+            val arc = Size(r * 2, r * 2)
+            drawArc(track, 180f, 180f, false, topLeft, arc, style = Stroke(sw, cap = StrokeCap.Round))
+            if (a.value > 0f) drawArc(color, 180f, 180f * a.value, false, topLeft, arc, style = Stroke(sw, cap = StrokeCap.Round))
+        }
+        Column(Modifier.padding(bottom = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                buildAnnotatedString {
+                    append("$score")
+                    withStyle(SpanStyle(fontSize = 15.sp, fontWeight = FontWeight(600), color = p.muted)) { append(" /10") }
+                },
+                fontSize = 40.sp, fontWeight = FontWeight(800), letterSpacing = (-1).sp, color = p.ink, lineHeight = 42.sp,
+            )
+            Text(caption, fontSize = 12.sp, color = p.muted)
         }
     }
 }
@@ -917,7 +1238,11 @@ private val CONF_RANK = mapOf("low" to 0, "medium" to 1, "high" to 2)
 
 /**
  * The Cal AI-style review: each item with editable grams, calories, P/C/F, a Micros expander and a
- * confidence chip. [onSave] gets the edited items plus the server-stored photo path (if any).
+ * confidence dot. [onSave] gets the edited items plus the server-stored photo path (if any).
+ * v2.12 (Scan 2): the total ± range leads, then the one follow-up question, then the items as
+ * cards (gram range, confidence, ⓘ sources, "Which one?"), then [saveLabel]. [onItemsChanged]
+ * reports every edit (the scan screen's floating totals follow it). [showPhoto] off when the
+ * photo is already on screen behind the sheet.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -925,6 +1250,9 @@ fun PhotoReview(
     est: PlateEstimate, photo: Bitmap?, readOnly: Boolean,
     /** v2.9 "Not right? Pick another" with no variants: open the plate in Add food to change it. */
     onPickAnother: ((List<PlateItem>) -> Unit)? = null,
+    showPhoto: Boolean = true,
+    saveLabel: String = "Save as meal",
+    onItemsChanged: ((List<PlateItem>) -> Unit)? = null,
     onSave: ((List<PlateItem>, String?) -> Unit)? = null,
 ) {
     val p = palette
@@ -939,114 +1267,155 @@ fun PhotoReview(
     var originals by remember(est) { mutableStateOf(est.items) }
     var open by remember(est) { mutableStateOf<Int?>(null) }
     var pickedEffect by remember(est) { mutableStateOf<String?>(null) }
+    LaunchedEffect(items) { onItemsChanged?.invoke(items) }
     if (est.items.isEmpty()) {
-        Rise(1) { Card { Text("Couldn't find food in that photo", fontWeight = FontWeight(700), color = p.ink); Text(est.plateNote, fontSize = 13.sp, color = p.muted) } }
+        Card(Modifier.scanEnter(0)) { Text("Couldn't find food in that photo", fontWeight = FontWeight(700), color = p.ink); Text(est.plateNote, fontSize = 13.sp, color = p.muted) }
         return
     }
     val kcalTotal = totalKcalRange(items)
-    Rise(1) {
-        Card {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (photo != null) { Image(photo.asImageBitmap(), null, Modifier.size(56.dp).clip(RoundedCornerShape(14.dp)), contentScale = ContentScale.Crop); Spacer(Modifier.width(12.dp)) }
-                else if (est.photoUrl != null) { RemoteImage(url = est.photoUrl, size = 56.dp, fallback = CameraIcon); Spacer(Modifier.width(12.dp)) }
-                Column(Modifier.weight(1f)) {
-                    Text(est.plateNote.ifBlank { "Your plate" }, fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink, lineHeight = 20.sp)
-                    Text("This is an estimate — edit anything.", fontSize = 12.sp, color = p.muted)
-                    if (est.portionHint == "restaurant") {
-                        Spacer(Modifier.height(6.dp))
-                        Box(Modifier.background(p.orangeBg, androidx.compose.foundation.shape.CircleShape).padding(horizontal = 10.dp, vertical = 4.dp)) {
-                            Text("Restaurant portion · ×1.4 + hidden oil", fontSize = 11.sp, fontWeight = FontWeight(700), color = p.orange)
-                        }
+
+    // ---- the total ± range ----
+    Column(Modifier.scanEnter(0, est).fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            if (showPhoto && photo != null) { Image(photo.asImageBitmap(), null, Modifier.size(52.dp).clip(RoundedCornerShape(14.dp)), contentScale = ContentScale.Crop); Spacer(Modifier.width(12.dp)) }
+            else if (showPhoto && est.photoUrl != null) { RemoteImage(url = est.photoUrl, size = 52.dp, fallback = CameraIcon); Spacer(Modifier.width(12.dp)) }
+            Text(
+                buildAnnotatedString {
+                    append(if (kcalTotal.plusMinus > 0) "~${kcalTotal.center}" else "${kcalTotal.center}")
+                    withStyle(SpanStyle(fontSize = 14.sp, fontWeight = FontWeight(600), color = p.muted, letterSpacing = 0.sp)) {
+                        append(if (kcalTotal.plusMinus > 0) " kcal ±${kcalTotal.plusMinus}" else " kcal")
                     }
-                }
+                },
+                Modifier.weight(1f).semantics { heading() },
+                fontSize = 30.sp, fontWeight = FontWeight(800), letterSpacing = (-1).sp, color = p.ink, lineHeight = 34.sp,
+            )
+            Text(
+                buildAnnotatedString {
+                    withStyle(SpanStyle(fontWeight = FontWeight(800), color = p.red)) { append("${fmt(round1(items.sumOf { it.proteinG }))} g") }
+                    append(" protein")
+                },
+                fontSize = 13.sp, color = p.ink,
+            )
+        }
+        Text(
+            (est.plateNote.ifBlank { "Your plate" }) + " · an estimate, edit anything.",
+            fontSize = 12.sp, color = p.muted, lineHeight = 17.sp, modifier = Modifier.padding(top = 4.dp),
+        )
+        if (est.portionHint == "restaurant") {
+            Spacer(Modifier.height(6.dp))
+            Box(Modifier.background(p.orangeBg, CircleShape).padding(horizontal = 10.dp, vertical = 4.dp)) {
+                Text("Restaurant portion · ×1.4 + hidden oil", fontSize = 11.sp, fontWeight = FontWeight(700), color = p.orange)
             }
         }
     }
-    Rise(2) {
-        Card(padding = 0.dp) {
-            Column(Modifier.padding(horizontal = 16.dp)) {
-                val order = items.indices.sortedBy { CONF_RANK[items[it].confidence] ?: 1 }
-                order.forEachIndexed { pos, idx ->
-                    val it = items[idx]
-                    val low = it.confidence == "low"
-                    if (pos > 0) Hair()
-                    val (cc, cl) = when (it.confidence) { "high" -> p.green to "High"; "medium" -> p.orange to "Med"; else -> p.orange to "Low" }
-                    val micros = MICRO_LABELS.filter { (k, _) -> it.micros[k] != null }
-                    val rowMod = if (low) Modifier.border(BorderStroke(1.dp, p.orange), RoundedCornerShape(12.dp)).padding(horizontal = 4.dp) else Modifier
-                    Row(rowMod.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(it.name + if (it.source == "estimated") " ~" else "", fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
-                                Spacer(Modifier.width(6.dp))
-                                Box(Modifier.background(cc.copy(alpha = 0.16f), CircleShape).padding(7.dp, 2.dp)) { Text(cl, fontSize = 10.sp, fontWeight = FontWeight(700), color = cc) }
-                                InfoButton(it.name, idx !in confirmed && Sources.needsCheck(it)) { infoIdx = idx }
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text("${it.calories.toInt()} kcal", fontSize = 12.sp, color = p.muted)
-                                MacroDot("${fmt(it.proteinG)}g", p.red); MacroDot("${fmt(it.carbsG)}g", p.orange); MacroDot("${fmt(it.fatG)}g", p.blue)
-                                if (micros.isNotEmpty()) Text(if (open == idx) "Hide" else "Micros", fontSize = 12.sp, fontWeight = FontWeight(600), color = p.ink, modifier = Modifier.clickable { open = if (open == idx) null else idx })
-                            }
-                            if (it.gramsLow != null && it.gramsHigh != null) Text(it.gramsRangeLabel(), fontSize = 11.sp, color = p.muted)
-                            if (it.uncertainties.isNotEmpty()) Text(it.uncertainties.joinToString(" · "), fontSize = 11.sp, color = p.orange)
-                            // v2.9 "Which one?" — one tap swaps the row (and its unscaled original) at the same grams.
-                            if (!readOnly && it.variants.size > 1) VariantChips(it.variants, it.foodId, { v ->
-                                items = items.toMutableList().also { l -> l[idx] = Sources.swap(l[idx], v) }
-                                originals = originals.toMutableList().also { l -> if (idx in l.indices) l[idx] = Sources.swap(l[idx], v) }
-                                confirmed = confirmed + idx
-                            })
-                            AnimatedVisibility(open == idx) {
-                                Text(micros.joinToString("  ·  ") { (k, lu) -> "${lu.first} ${fmt(round1(it.micros[k]!!))} ${lu.second}" }, fontSize = 12.sp, color = p.muted, lineHeight = 17.sp)
-                            }
-                        }
-                        if (!readOnly) {
-                            var g by remember(idx, est) { mutableStateOf(fmt(round1(it.grams))) }
-                            NumberField(g, { v ->
-                                g = v.filter { c -> c.isDigit() || c == '.' }
-                                // Always scale from the ORIGINAL estimate, never the already-scaled item — and
-                                // ignore empty/unparsable/≤0 input so the previous value sticks instead of zeroing.
-                                val d = g.toDoubleOrNull()
-                                if (d != null && d > 0) items = items.toMutableList().also { l -> l[idx] = originals[idx].withGrams(d) }
-                            }, "g")
-                            IconButton(onClick = {
-                                items = items.filterIndexed { i, _ -> i != idx }
-                                originals = originals.filterIndexed { i, _ -> i != idx }
-                                confirmed = confirmed.filter { i -> i != idx }.map { i -> if (i > idx) i - 1 else i }.toSet()
-                                reported = reported.filter { i -> i != idx }.map { i -> if (i > idx) i - 1 else i }.toSet()
-                            }, Modifier.size(32.dp)) { Icon(Icons.Outlined.Delete, "Remove", tint = p.muted) }
-                        } else {
-                            Text("${it.grams.roundToInt()} g", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink)
-                        }
-                    }
-                }
-            }
-        }
-    }
+
+    // ---- the one follow-up question, e.g. "Homemade or restaurant?" ----
     est.followUp?.takeIf { it.options.isNotEmpty() }?.let { fu ->
-        Rise(3) {
-            Column {
-                Text(fu.question, fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted, modifier = Modifier.padding(horizontal = 4.dp))
-                Spacer(Modifier.height(6.dp))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    fu.options.forEach { o ->
-                        val picked = pickedEffect == o.effect
-                        Box(
-                            Modifier
-                                .background(if (picked) p.ink else p.card2, CircleShape)
-                                .clickable {
-                                    pickedEffect = o.effect
-                                    items = applyFollowUpEffect(items, o.effect, fu.question)
-                                    originals = applyFollowUpEffect(originals, o.effect, fu.question)
-                                }
-                                .padding(horizontal = 14.dp, vertical = 9.dp),
-                        ) {
-                            Text(o.label, fontSize = 13.sp, fontWeight = FontWeight(600), color = if (picked) p.card else p.ink)
-                        }
+        Column(
+            Modifier.scanEnter(1, est).fillMaxWidth().background(p.purpleBg, RoundedCornerShape(16.dp)).padding(start = 12.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+        ) {
+            Text(fu.question, fontSize = 13.sp, fontWeight = FontWeight(600), color = p.ink, modifier = Modifier.padding(top = 4.dp, start = 2.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                fu.options.forEach { o ->
+                    val picked = pickedEffect == o.effect
+                    Box(
+                        Modifier.heightIn(min = 48.dp).clip(CircleShape)
+                            .clickable {
+                                pickedEffect = o.effect
+                                items = applyFollowUpEffect(items, o.effect, fu.question)
+                                originals = applyFollowUpEffect(originals, o.effect, fu.question)
+                            }
+                            .semantics { role = Role.RadioButton; selected = picked },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            o.label, fontSize = 12.sp, fontWeight = FontWeight(700), color = if (picked) p.card else p.ink,
+                            modifier = Modifier
+                                .background(if (picked) p.ink else Color.Transparent, CircleShape)
+                                .border(1.dp, if (picked) p.ink else p.muted.copy(alpha = 0.45f), CircleShape)
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                        )
                     }
                 }
             }
         }
     }
-    if (est.notes.isNotEmpty()) Rise(3) { Text(est.notes.joinToString(" · "), fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(horizontal = 4.dp)) }
+
+    // ---- the items, low confidence first ----
+    Column(Modifier.scanEnter(2, est), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        val order = items.indices.sortedBy { CONF_RANK[items[it].confidence] ?: 1 }
+        order.forEach { idx ->
+            val it = items[idx]
+            val low = it.confidence == "low"
+            val (cc, cl) = when (it.confidence) { "high" -> p.green to "high"; "medium" -> p.orange to "medium"; else -> p.orange to "low" }
+            val micros = MICRO_LABELS.filter { (k, _) -> it.micros[k] != null }
+            val shape = RoundedCornerShape(16.dp)
+            Column(
+                Modifier.fillMaxWidth().background(p.card, shape).then(if (low) Modifier.border(BorderStroke(1.dp, p.orange), shape) else Modifier)
+                    .padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(it.name + if (it.source == "estimated") " ~" else "", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    Spacer(Modifier.width(8.dp))
+                    Row(Modifier.semantics(mergeDescendants = true) { contentDescription = "Confidence $cl" }, verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(7.dp).background(cc, CircleShape))
+                        Text(" $cl", fontSize = 11.sp, color = p.muted)
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        buildAnnotatedString {
+                            append("${it.calories.toInt()}")
+                            withStyle(SpanStyle(fontSize = 11.sp, fontWeight = FontWeight(600), color = p.muted)) { append(" kcal") }
+                        },
+                        fontSize = 15.sp, fontWeight = FontWeight(800), color = p.ink,
+                    )
+                    InfoButton(it.name, idx !in confirmed && Sources.needsCheck(it)) { infoIdx = idx }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        if (it.gramsLow != null && it.gramsHigh != null) Text(it.gramsRangeLabel(), fontSize = 12.sp, color = p.muted)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            MacroDot("${fmt(it.proteinG)}g", p.red); MacroDot("${fmt(it.carbsG)}g", p.orange); MacroDot("${fmt(it.fatG)}g", p.blue)
+                            if (micros.isNotEmpty()) Box(
+                                Modifier.heightIn(min = 32.dp).clip(RoundedCornerShape(8.dp)).clickable { open = if (open == idx) null else idx }.semantics { role = Role.Button }.padding(horizontal = 4.dp),
+                                contentAlignment = Alignment.Center,
+                            ) { Text(if (open == idx) "Hide" else "Micros", fontSize = 12.sp, fontWeight = FontWeight(600), color = p.ink) }
+                        }
+                    }
+                    if (!readOnly) {
+                        var g by remember(idx, est) { mutableStateOf(fmt(round1(it.grams))) }
+                        NumberField(g, { v ->
+                            g = v.filter { c -> c.isDigit() || c == '.' }
+                            // Always scale from the ORIGINAL estimate, never the already-scaled item — and
+                            // ignore empty/unparsable/≤0 input so the previous value sticks instead of zeroing.
+                            val d = g.toDoubleOrNull()
+                            if (d != null && d > 0) items = items.toMutableList().also { l -> l[idx] = originals[idx].withGrams(d) }
+                        }, "g")
+                        IconButton(onClick = {
+                            items = items.filterIndexed { i, _ -> i != idx }
+                            originals = originals.filterIndexed { i, _ -> i != idx }
+                            confirmed = confirmed.filter { i -> i != idx }.map { i -> if (i > idx) i - 1 else i }.toSet()
+                            reported = reported.filter { i -> i != idx }.map { i -> if (i > idx) i - 1 else i }.toSet()
+                        }, Modifier.size(48.dp)) { Icon(Icons.Outlined.Delete, "Remove ${it.name}", tint = p.muted, modifier = Modifier.size(20.dp)) }
+                    } else {
+                        Text("${it.grams.roundToInt()} g", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink, modifier = Modifier.padding(end = 10.dp))
+                    }
+                }
+                if (it.uncertainties.isNotEmpty()) Text(it.uncertainties.joinToString(" · "), fontSize = 11.sp, color = p.orange, modifier = Modifier.padding(end = 8.dp))
+                // v2.9 "Which one?" — one tap swaps the row (and its unscaled original) at the same grams.
+                if (!readOnly && it.variants.size > 1) VariantChips(it.variants, it.foodId, { v ->
+                    items = items.toMutableList().also { l -> l[idx] = Sources.swap(l[idx], v) }
+                    originals = originals.toMutableList().also { l -> if (idx in l.indices) l[idx] = Sources.swap(l[idx], v) }
+                    confirmed = confirmed + idx
+                })
+                AnimatedVisibility(open == idx) {
+                    Text(micros.joinToString("  ·  ") { (k, lu) -> "${lu.first} ${fmt(round1(it.micros[k]!!))} ${lu.second}" }, fontSize = 12.sp, color = p.muted, lineHeight = 17.sp, modifier = Modifier.padding(end = 8.dp))
+                }
+            }
+        }
+    }
+    if (est.notes.isNotEmpty()) Text(est.notes.joinToString(" · "), fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(horizontal = 4.dp).scanEnter(3, est))
     infoIdx?.let { idx ->
         val row = items.getOrNull(idx)
         if (row == null) { infoIdx = null; return@let }
@@ -1072,18 +1441,11 @@ fun PhotoReview(
             },
         )
     }
-    if (!readOnly && onSave != null) Rise(4) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column {
-                val kcalText = if (kcalTotal.plusMinus > 0) "~${kcalTotal.center} kcal ±${kcalTotal.plusMinus}" else "${kcalTotal.center} kcal"
-                Text(kcalText, fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.5).sp, color = p.ink)
-                Text("${fmt(round1(items.sumOf { it.proteinG }))} g protein", fontSize = 12.sp, color = p.muted)
-            }
-            Spacer(Modifier.width(12.dp))
-            PillButton("Save as meal", { onSave(items, est.photoPath) }, Modifier.weight(1f), enabled = items.isNotEmpty())
-        }
+    if (!readOnly && onSave != null) {
+        Box(Modifier.scanEnter(4, est)) { PillButton(saveLabel, { onSave(items, est.photoPath) }, enabled = items.isNotEmpty()) }
     }
 }
+
 
 private fun round1(d: Double) = (d * 10).roundToInt() / 10.0
 
