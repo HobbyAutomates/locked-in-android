@@ -72,7 +72,8 @@ object Wrap {
         val tomorrow = tomorrow(workouts, date)
         val proteinPart = if (hit) "${protein.roundToInt()} g protein ✓" else "${protein.roundToInt()} g protein (${(target - protein).roundToInt().coerceAtLeast(0)} g short)"
         val day = if (date == Dates.today()) "Today" else "Yesterday"
-        val line = "$day: $proteinPart · ${String.format(Locale.US, "%,d", calories.roundToInt())} kcal · $sessions/${profile.weeklyWorkoutTarget} sessions — tomorrow: $tomorrow"
+        val kcalPart = if (profile.hideNumbers == true) "" else " · ${String.format(Locale.US, "%,d", calories.roundToInt())} kcal"
+        val line = "$day: $proteinPart$kcalPart · $sessions/${profile.weeklyWorkoutTarget} sessions — tomorrow: $tomorrow"
         return Result(
             date = date,
             protein = protein.roundToInt(),

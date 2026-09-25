@@ -349,6 +349,7 @@ internal fun ChangelogSheet(onDismiss: () -> Unit) {
 }
 
 private val CHANGELOG = listOf(
+    "2.11" to listOf("React to squad posts and chats with ❤️ 🔥 👍 😂 😮 💪 (long-press, or double-tap a post for ❤️)", "Chat shows who sent each message, ✓✓ Seen by, and unread counts", "Hide calorie numbers now covers the 9 pm wrap and the home-screen widget"),
     "2.10" to listOf("Tap your calorie or macro cards to flip between left and eaten; swipe the cards at the top", "BMI with Indian ranges, a healthy weight range and safe, science-based targets (with the sources)", "Deleting a log removes its squad posts; choose what auto-posts; pick the right roti and see where numbers come from"),
     "2.8" to listOf("Home groups your food into Breakfast, Lunch, Dinner and Snacks", "Tap anything you logged to edit it: meals, activities, water, weigh-ins", "One Log activity button, one-tap water, simpler Progress, gram ranges on photo scans"),
     "2.7" to listOf("Squad Challenges: train days, protein days or log every day, with a ranked board and 🏆 when you finish", "Squad Food Battle: a daily crown for whoever eats closest to their own goal", "Fixes: editing grams on a scan keeps the macros, \"4 idli\" logs 4, deletes can be undone, sharper label and barcode scans"),

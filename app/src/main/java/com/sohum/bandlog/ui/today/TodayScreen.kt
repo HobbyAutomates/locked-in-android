@@ -125,7 +125,7 @@ fun TodayScreen(
     // v2.3: today's budget honours "Add burned calories" and "Rollover calories" (both from Preferences).
     val budget = if (isToday) vm.budgetToday else prof.calorieTarget.toDouble()
     val caloriesLeft = (budget - totals.calories).toInt().coerceAtLeast(0)
-    if (isToday && vm.loadedOnce) androidx.compose.runtime.LaunchedEffect(caloriesLeft) { com.sohum.bandlog.widget.CaloriesWidget.publish(ctx, caloriesLeft) }
+    if (isToday && vm.loadedOnce) androidx.compose.runtime.LaunchedEffect(caloriesLeft) { com.sohum.bandlog.widget.CaloriesWidget.publish(ctx, caloriesLeft, if (prof.hideNumbers == true) com.sohum.bandlog.util.Goals.calorieWords(totals.calories, budget.toDouble()) else null) }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 110.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
@@ -148,7 +148,7 @@ fun TodayScreen(
                 BannerPager(banners) { banner ->
                     when (banner) {
                         "nudge" -> NudgeBanner(vm.nudges) { latestNudge?.let { com.sohum.bandlog.util.Wrap.dismissNudge(ctx, it.id) }; nudgeHidden = true }
-                        "wrap" -> WrapCard(vm.wrap()) { com.sohum.bandlog.util.Wrap.dismiss(ctx, wrapDate); wrapHidden = true }
+                        "wrap" -> WrapCard(vm.wrap(), hideNumbers = prof.hideNumbers == true) { com.sohum.bandlog.util.Wrap.dismiss(ctx, wrapDate); wrapHidden = true }
                         else -> PendingBanner(vm.pendingMeals)
                     }
                 }
@@ -322,7 +322,7 @@ private fun NudgeBanner(nudges: List<com.sohum.bandlog.data.Nudge>, onDismiss: (
 
 /** The 9 pm daily wrap card: protein, calories vs budget, sessions, tomorrow's session, best meal, share. */
 @Composable
-private fun WrapCard(w: com.sohum.bandlog.util.Wrap.Result, onDismiss: () -> Unit) {
+private fun WrapCard(w: com.sohum.bandlog.util.Wrap.Result, hideNumbers: Boolean = false, onDismiss: () -> Unit) {
     val p = palette
     val ctx = androidx.compose.ui.platform.LocalContext.current
     Card(padding = 18.dp) {
@@ -338,7 +338,8 @@ private fun WrapCard(w: com.sohum.bandlog.util.Wrap.Result, onDismiss: () -> Uni
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             WrapStat(Modifier.weight(1f), "${w.protein} g", if (w.proteinHit) "protein, hit" else "protein · ${(w.proteinTarget - w.protein).coerceAtLeast(0)} short", if (w.proteinHit) p.green else p.red, check = w.proteinHit)
-            WrapStat(Modifier.weight(1f), String.format(Locale.US, "%,d", w.calories), "of ${String.format(Locale.US, "%,d", w.calorieBudget)} kcal", p.ink)
+            // v2.11: "Hide calorie numbers" keeps kcal off the wrap too.
+            if (!hideNumbers) WrapStat(Modifier.weight(1f), String.format(Locale.US, "%,d", w.calories), "of ${String.format(Locale.US, "%,d", w.calorieBudget)} kcal", p.ink)
             WrapStat(Modifier.weight(1f), "${w.sessions}/${w.sessionTarget}", "sessions this week", p.ink)
         }
         Spacer(Modifier.height(12.dp))
