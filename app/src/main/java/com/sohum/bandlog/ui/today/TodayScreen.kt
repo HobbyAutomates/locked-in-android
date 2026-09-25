@@ -61,7 +61,11 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 @Composable
-fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit, onLogExercise: () -> Unit = {}, onOpenCalendar: () -> Unit = {}, onLog: (String) -> Unit = {}, wrapTick: Int = 0, onLogWater: () -> Unit = {}) {
+fun TodayScreen(
+    vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit, onLogExercise: () -> Unit = {}, onOpenCalendar: () -> Unit = {}, onLog: (String) -> Unit = {}, wrapTick: Int = 0, onLogWater: () -> Unit = {},
+    /** v2.8: a meal section's "+ Add" (date, meal type) and a tapped meal row (the editor). */
+    onAddMeal: (String, String) -> Unit = { _, _ -> }, onOpenMeal: (Meal) -> Unit = {},
+) {
     val p = palette
     val today = vm.today
     var selected by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(today) }
@@ -81,20 +85,21 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit, onLogExerci
     val showWrap = com.sohum.bandlog.util.Wrap.inWindow() && !wrapHidden && vm.loadedOnce
     val latestNudge = vm.nudges.firstOrNull()
     var nudgeHidden by androidx.compose.runtime.remember(latestNudge?.id) { androidx.compose.runtime.mutableStateOf(latestNudge?.let { com.sohum.bandlog.util.Wrap.nudgeDismissed(ctx, it.id) } ?: true) }
-    // v2.1: one banner slot — nudge, then the wrap, then a meal still being worked out.
-    val banners = buildList {
-        if (latestNudge != null && !nudgeHidden) add("nudge")
-        if (showWrap) add("wrap")
-        if (vm.pendingMeals.isNotEmpty()) add("pending")
+    // v2.8: one card, never a carousel — the most relevant of a meal still being saved, a squad
+    // nudge, then the 9 pm wrap (a tapped wrap notification puts the wrap first). Dismissing one lets the next show.
+    val banner = when {
+        wrapTick > 0 && showWrap -> "wrap"
+        vm.pendingMeals.isNotEmpty() -> "pending"
+        latestNudge != null && !nudgeHidden -> "nudge"
+        showWrap -> "wrap"
+        else -> null
     }
-    var bannerAt by androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(0) }
-    // A tapped wrap notification lands on the wrap, not whatever banner was up.
-    androidx.compose.runtime.LaunchedEffect(wrapTick) { if (wrapTick > 0) bannerAt = banners.indexOf("wrap").coerceAtLeast(0) }
     // Steps and burned calories go stale while the app is backgrounded; re-read on every resume.
     val owner = androidx.compose.ui.platform.LocalLifecycleOwner.current
     androidx.compose.runtime.DisposableEffect(owner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) vm.refreshHealth(ctx)
+            // v2.8: Home re-reads on resume (at most once a minute) instead of a refresh button in the header.
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) { vm.refreshHealth(ctx); vm.refreshIfStale() }
         }
         owner.lifecycle.addObserver(observer)
         onDispose { owner.lifecycle.removeObserver(observer) }
@@ -114,45 +119,19 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit, onLogExerci
                         Spacer(Modifier.width(8.dp))
                         Text("Locked In", fontSize = 22.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink)
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        HeaderButton(onClick = onOpenCalendar) { Icon(Icons.Outlined.CalendarMonth, "Calendar", tint = p.ink, modifier = Modifier.size(18.dp)) }
-                        // Compose 1.6's PullToRefresh is still experimental, so Home gets an
-                        // explicit refresh button instead — same job, no API risk.
-                        HeaderButton(enabled = !vm.loading, onClick = { vm.refresh(); vm.refreshHealth(ctx) }) {
-                            if (vm.loading) CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 2.dp, color = p.muted)
-                            else Icon(Icons.Outlined.Refresh, "Refresh", tint = p.ink, modifier = Modifier.size(17.dp))
-                        }
-                        Row(
-                            Modifier.height(40.dp).shadow(8.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow).background(p.card, CircleShape).padding(start = 10.dp, end = 13.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Flame(p.flame, 16.dp)
-                            Spacer(Modifier.width(5.dp))
-                            Text("${vm.weekStreak}", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink)
-                        }
-                    }
+                    // v2.8 declutter: the header keeps only Calendar. Refresh happens on resume and after
+                    // every save; the week streak lives on Calendar and Progress.
+                    HeaderButton(onClick = onOpenCalendar) { Icon(Icons.Outlined.CalendarMonth, "Calendar", tint = p.ink, modifier = Modifier.size(18.dp)) }
                 }
                 ErrorNote(vm.error, Modifier.padding(top = 8.dp))
             }
         }
-        if (banners.isNotEmpty()) item(key = "banner") {
-            val kind = banners[bannerAt.mod(banners.size)]
+        if (banner != null) item(key = "banner") {
             Rise(1) {
-                Column {
-                    when (kind) {
-                        "nudge" -> NudgeBanner(vm.nudges) { latestNudge?.let { com.sohum.bandlog.util.Wrap.dismissNudge(ctx, it.id) }; nudgeHidden = true }
-                        "wrap" -> WrapCard(vm.wrap()) { com.sohum.bandlog.util.Wrap.dismiss(ctx, wrapDate); wrapHidden = true }
-                        else -> PendingBanner(vm.pendingMeals)
-                    }
-                    if (banners.size > 1) Row(
-                        Modifier.fillMaxWidth().height(28.dp).clickable { bannerAt = (bannerAt + 1).mod(banners.size) },
-                        horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        banners.indices.forEach { i ->
-                            Box(Modifier.padding(horizontal = 3.dp).size(if (i == bannerAt.mod(banners.size)) 7.dp else 6.dp).background(if (i == bannerAt.mod(banners.size)) p.ink else p.hair, CircleShape))
-                        }
-                        Text("  next", fontSize = 11.sp, fontWeight = FontWeight(600), color = p.muted)
-                    }
+                when (banner) {
+                    "nudge" -> NudgeBanner(vm.nudges) { latestNudge?.let { com.sohum.bandlog.util.Wrap.dismissNudge(ctx, it.id) }; nudgeHidden = true }
+                    "wrap" -> WrapCard(vm.wrap()) { com.sohum.bandlog.util.Wrap.dismiss(ctx, wrapDate); wrapHidden = true }
+                    else -> PendingBanner(vm.pendingMeals)
                 }
             }
         }
@@ -226,23 +205,16 @@ fun TodayScreen(vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit, onLogExerci
         item {
             Rise(4) {
                 RowSpaceBetween {
-                    Text(if (isToday) "Recently logged" else Dates.long(selected), fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.5).sp, color = p.ink)
+                    Text(if (isToday) "Today" else Dates.long(selected), fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.5).sp, color = p.ink)
                     if (vm.loading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = p.muted)
                 }
             }
         }
-        if (todayWorkouts.isEmpty() && todayMeals.isEmpty() && todayExercises.isEmpty()) item {
-            Rise(5) {
-                Card {
-                    Text(if (isToday) "Nothing logged yet today." else "Nothing logged on ${Dates.long(selected)}.", fontSize = 14.sp, color = p.ink)
-                    Spacer(Modifier.height(10.dp))
-                    PillButton(if (isToday) "Log something" else "Log for this day", { onLog(selected) }, height = 46.dp)
-                }
-            }
-        }
+        // v2.8: no "Log something" button here — the + button logs; each meal section has its own "+ Add".
         items(todayWorkouts, key = { "w" + it.id }) { w -> Rise(5) { WorkoutRow(w, burnKcal = workoutBurn[w.id]) { onOpenWorkout(w) } } }
         items(todayExercises, key = { "e" + it.id }) { e -> Rise(5) { ExerciseRow(e) { vm.launch { vm.deleteExercise(e.id) } } } }
-        items(todayMeals, key = { "m" + it.id }) { m -> Rise(6) { MealRow(m, onDelete = { vm.launch { vm.deleteMeal(m.id) } }, onFeedback = { r -> vm.launch { runCatching { com.sohum.bandlog.data.Api.feedback(r, m.rawText, m.id) } } }) } }
+        // v2.8: Breakfast · Lunch · Dinner · Snacks, each with its totals and "+ Add"; tap a meal to edit it.
+        items(com.sohum.bandlog.util.MealTypes.group(todayMeals), key = { "s" + it.type.key }) { s -> Rise(6) { MealSection(s, onAdd = { t -> onAddMeal(selected, t) }, onOpen = onOpenMeal) } }
     }
 }
 

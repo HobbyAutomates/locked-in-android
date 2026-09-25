@@ -342,6 +342,31 @@ class AppViewModel : ViewModel() {
         }
     }
 
+    /**
+     * v2.8: the same rollup for specific days — a meal edited or deleted on an earlier day, or moved
+     * between days, refreshes both. Counting is unchanged: one meals row is one meal.
+     */
+    private fun pushRollupFor(dates: Collection<String>) {
+        if (!signedIn || !loadedOnce) return
+        val days = dates.filter { Regex("\\d{4}-\\d{2}-\\d{2}").matches(it) }.distinct()
+        if (days.isEmpty()) return
+        val streak = weekStreak
+        val trainedDates = workoutDates.toSet()
+        val rows = days.map { d ->
+            val tot = com.sohum.bandlog.data.totalsFor(meals, d)
+            Api.DailyStat(d, d in trainedDates, tot.protein, tot.calories, burnedOn(d), meals.count { it.date == d }, streak)
+        }
+        viewModelScope.launch {
+            runCatching { Api.upsertDailyStats(rows) }.onSuccess { runCatching { Api.checkChallengeCompletions() } }
+        }
+    }
+
+    /** Waits for the refresh a [mutate] started, so rollups read the fresh meals. */
+    private suspend fun awaitRefresh() {
+        kotlinx.coroutines.delay(50)
+        while (loading) kotlinx.coroutines.delay(50)
+    }
+
     /** Tonight's wrap (or last night's, after midnight), from the same data as Home. */
     fun wrap(): com.sohum.bandlog.util.Wrap.Result {
         val d = com.sohum.bandlog.util.Wrap.wrapDate()
@@ -380,7 +405,7 @@ class AppViewModel : ViewModel() {
      * Save pressed while a parse / photo is still working: the page closes, Home shows the pending
      * row, and the meal is saved with everything already on the plate plus whatever the jobs add.
      */
-    fun saveMealAfter(date: String, raw: String, items: List<MealItem>, photoPath: String?, jobs: List<Deferred<MealBatch>>) {
+    fun saveMealAfter(date: String, raw: String, items: List<MealItem>, photoPath: String?, jobs: List<Deferred<MealBatch>>, mealType: String? = null) {
         val label = raw.ifBlank { "Meal" }
         pendingMeals = pendingMeals + label
         viewModelScope.launch {
@@ -389,7 +414,7 @@ class AppViewModel : ViewModel() {
                 val all = items + batches.flatMap { it.items }
                 if (all.isNotEmpty()) {
                     val photo = photoPath ?: batches.firstNotNullOfOrNull { it.photoPath }
-                    val mid = Api.saveMeal(date, label, all, photo)
+                    val mid = Api.saveMeal(date, label, all, photo, mealType)
                     shareMeal(date, label, all, photo, mid)
                 }
                 else error = "Couldn't find any food in “${label.take(40)}”"
@@ -561,13 +586,42 @@ class AppViewModel : ViewModel() {
     suspend fun saveDescribed(date: String, items: List<com.sohum.bandlog.data.DescribedExercise>) = mutate {
         items.forEach { Api.saveExercise(date, it.activityCode, it.name, it.minutes, it.intensity, it.kcal, "describe") }
     }
-    suspend fun saveMeal(date: String, raw: String, items: List<MealItem>, photoPath: String? = null): Boolean {
+    suspend fun saveMeal(date: String, raw: String, items: List<MealItem>, photoPath: String? = null, mealType: String? = null): Boolean {
         var mid: String? = null
-        val ok = mutate { mid = Api.saveMeal(date, raw, items, photoPath) }
+        val ok = mutate { mid = Api.saveMeal(date, raw, items, photoPath, mealType) }
         if (ok) shareMeal(date, raw, items, photoPath, mid)
+        if (ok && date != today) { awaitRefresh(); pushRollupFor(listOf(date)) }
         return ok
     }
-    suspend fun deleteMeal(id: String) = mutate { Api.deleteMeal(id) }
+
+    /**
+     * v2.8 meal editor: new date / type / items for [meal]. The rollup reruns for the old and the
+     * new date (a meal moved between days leaves one and joins the other).
+     */
+    suspend fun updateMeal(meal: com.sohum.bandlog.data.Meal, date: String, mealType: String, items: List<MealItem>, rawText: String? = null): Boolean {
+        val ok = mutate { Api.updateMeal(meal.id, date, mealType, items, rawText) }
+        if (ok) { awaitRefresh(); pushRollupFor(listOf(meal.date, date, today)) }
+        return ok
+    }
+
+    suspend fun deleteMeal(id: String): Boolean {
+        val day = meals.firstOrNull { it.id == id }?.date
+        val ok = mutate { Api.deleteMeal(id) }
+        if (ok && day != null && day != today) { awaitRefresh(); pushRollupFor(listOf(day)) }
+        return ok
+    }
+
+    /** The editor's delete, finished on [viewModelScope] when the page closes before its undo window ends. */
+    fun deleteMealLater(id: String) { viewModelScope.launch { deleteMeal(id) } }
+
+    /** v2.8: Home re-reads on resume (at most once a minute) — the header's refresh button is gone. */
+    private var refreshedAt = 0L
+    fun refreshIfStale(maxAgeMs: Long = 60_000) {
+        val now = System.currentTimeMillis()
+        if (loading || now - refreshedAt < maxAgeMs) return
+        refreshedAt = now
+        refresh()
+    }
     suspend fun saveTargets(p: Profile) = mutate { Api.saveProfile(p) }
 
     /** Saves the whole profile (Personal details, goals, reminders all go through here). */
