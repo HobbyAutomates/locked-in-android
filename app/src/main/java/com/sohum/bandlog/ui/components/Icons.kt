@@ -680,3 +680,21 @@ fun challengeKindIcon(kind: String): ImageVector = when (kind) {
 
 /** Plus, the same path as the web's Plus icon ("Start a challenge"). */
 val PlusIcon: ImageVector by lazy { stroke("Plus") { moveTo(12f, 5f); verticalLineTo(19f); moveTo(5f, 12f); horizontalLineTo(19f) } }
+
+/** v2.10: circled "i" for "The science" sheets (same shape as the web's Info icon). */
+val InfoIcon: ImageVector by lazy {
+    stroke("Info") {
+        moveTo(21f, 12f); arcTo(9f, 9f, 0f, true, true, 3f, 12f); arcTo(9f, 9f, 0f, true, true, 21f, 12f)
+        moveTo(12f, 11f); verticalLineTo(16.5f)
+        moveTo(12f, 7.6f); horizontalLineTo(12.01f)
+    }
+}
+
+/** v2.10: handset for the helpline numbers in the safety note. */
+val PhoneIcon: ImageVector by lazy {
+    stroke("Phone") {
+        moveTo(5f, 4f); horizontalLineTo(9f); lineTo(11f, 9f); lineTo(8.5f, 10.5f)
+        arcTo(11f, 11f, 0f, false, false, 13.5f, 15.5f); lineTo(15f, 13f); lineTo(20f, 15f); verticalLineTo(19f)
+        arcTo(2f, 2f, 0f, false, true, 18f, 21f); arcTo(16f, 16f, 0f, false, true, 3f, 6f); arcTo(2f, 2f, 0f, false, true, 5f, 4f); close()
+    }
+}

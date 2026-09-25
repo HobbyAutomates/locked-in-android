@@ -107,6 +107,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Session.init(this)
+        // v2.10: the WHO 2007 BMI-for-age table (res/raw) for the teen BMI card and safety flags.
+        com.sohum.bandlog.util.Bmi.load(this)
         handleIntent(intent)
         // A reboot or update clears AlarmManager; re-arm here too in case the receiver was missed.
         runCatching { com.sohum.bandlog.alarm.MealAlarms.rescheduleAll(this) }

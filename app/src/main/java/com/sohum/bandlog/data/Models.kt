@@ -259,6 +259,10 @@ data class Profile(
     val waterGlassMl: Int = 250,
     /** v2.9 Squad sharing: kinds that auto-post (meal / workout / pr); null = column missing (schema_v31 not applied, everything posts). */
     val autoShare: List<String>? = null,
+    /** v2.10 Preferences → Tracking "Hide calorie numbers" (opt-in); null = column missing (schema_v34 not applied, off). */
+    val hideNumbers: Boolean? = null,
+    /** v2.10 optional waist for waist-to-height; null = not entered (or column missing). */
+    val waistCm: Double? = null,
 ) {
     /** The lens a report opens on: `goal` follows the weight goal (lose → cutting, gain → bulking, else protein). */
     val initialLens: String
@@ -314,6 +318,8 @@ data class Profile(
             waterReminderEveryMin = if (!o.has("water_reminder_every_min") || o.isNull("water_reminder_every_min")) null else o.optInt("water_reminder_every_min", 0),
             waterGlassMl = if (!o.has("water_glass_ml") || o.isNull("water_glass_ml")) 250 else o.optInt("water_glass_ml", 250).coerceIn(50, 2000),
             autoShare = if (!o.has("auto_share")) null else com.sohum.bandlog.util.SquadSharing.parseAutoShare(o.optJSONArray("auto_share")) ?: com.sohum.bandlog.util.SquadSharing.KINDS,
+            hideNumbers = if (!o.has("hide_numbers")) null else o.optBoolean("hide_numbers", false),
+            waistCm = if (!o.has("waist_cm")) null else o.dbl("waist_cm"),
         )
     }
 }

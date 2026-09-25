@@ -42,6 +42,10 @@ import com.sohum.bandlog.ui.components.pressable
 import com.sohum.bandlog.ui.log.NumberField
 import com.sohum.bandlog.ui.theme.palette
 import com.sohum.bandlog.util.Goals
+import com.sohum.bandlog.util.TargetEdits
+import com.sohum.bandlog.ui.components.SafetyNote
+import com.sohum.bandlog.ui.components.ScienceButton
+import com.sohum.bandlog.ui.components.TeenGoalMigration
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -113,8 +117,14 @@ fun NutritionGoalsScreen(vm: AppViewModel, onBack: () -> Unit, onOpenPersonal: (
     var showMicros by remember { mutableStateOf(false) }
     var fiber by remember(prof) { mutableStateOf(prof.fiberTarget.toString()) }
     var sugar by remember(prof) { mutableStateOf(prof.sugarTarget.toString()) }
+    var safety by remember { mutableStateOf<Pair<List<String>, Int?>?>(null) }
+    var planNote by remember(prof) { mutableStateOf<Goals.Plan?>(null) }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val working = Goals.plan(prof)
+    androidx.compose.runtime.LaunchedEffect(Unit) { if (vm.weights.isEmpty()) vm.loadWeights() }
 
-    val cal = calories.toIntOrNull()?.coerceIn(800, 10_000) ?: prof.calorieTarget
+    // v2.10: anything under the safe floor is lifted to it on save (never blocked).
+    val cal = calories.toIntOrNull()?.coerceIn(1, 10_000) ?: prof.calorieTarget
     val (pg, cg, fg) = generated?.let { Triple(it.protein, it.carbs, it.fat) } ?: split.grams(cal)
 
     fun edited(): Profile {
@@ -131,13 +141,24 @@ fun NutritionGoalsScreen(vm: AppViewModel, onBack: () -> Unit, onOpenPersonal: (
     fun save() {
         scope.launch {
             busy = true; saved = false
-            saved = vm.saveProfile(edited())
-            if (saved) { generated = null; touched = false }
+            val want = edited()
+            // Safety: only when the calorie number itself changed, so editing fibre alone never moves an old target.
+            val changed = want.calorieTarget != prof.calorieTarget
+            val (capped, wasCapped) = if (changed) Goals.capToFloor(want.calorieTarget, Goals.floorFor(prof)) else want.calorieTarget to false
+            val out = if (!wasCapped) want else split.grams(capped).let { (gp, gc, gf) -> want.copy(calorieTarget = capped, proteinTargetG = gp.coerceIn(10, 500), carbTargetGSet = gc.coerceIn(0, 1000), fatTargetGSet = gf.coerceIn(0, 500)) }
+            saved = vm.saveProfile(out)
+            if (saved) {
+                val edits = TargetEdits.record(ctx, "calories", prof.calorieTarget.toDouble(), want.calorieTarget.toDouble())
+                val flags = Goals.edFlags(Goals.screenInput(prof, weights = vm.weights.map { Goals.WeighIn(it.date, it.weightKg) }, requestedCalories = if (changed) want.calorieTarget else null, edits = edits))
+                safety = if (flags.isNotEmpty()) flags to (if (wasCapped) capped else null) else null
+                generated = null; touched = false
+            }
             busy = false
         }
     }
 
     SubPage("Nutrition goals", onBack) {
+        TeenGoalMigration(vm)
         // ---- calories ----
         Rise(0) {
             Card(padding = 0.dp) {
@@ -175,6 +196,13 @@ fun NutritionGoalsScreen(vm: AppViewModel, onBack: () -> Unit, onOpenPersonal: (
                     MacroRow("Carbs", CarbsColor, split.carbs, cg) { edit(1, it) }
                     Hair()
                     MacroRow("Fat", FatColor, split.fat, fg) { edit(2, it) }
+                    // v2.10 AMDR: soft notes, never blocks.
+                    val notes = Goals.amdrNotes(Goals.Targets(cal, pg, cg, fg))
+                    if (notes.isNotEmpty()) {
+                        Column(Modifier.fillMaxWidth().padding(bottom = 10.dp).background(p.card2, RoundedCornerShape(14.dp)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            notes.forEach { n -> Text(n.text, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = if (n.level == "warn") FontWeight(600) else FontWeight(400), color = if (n.level == "warn") p.orange else p.muted) }
+                        }
+                    }
                     Hair()
                     // v2.3: fibre + sugar goals behind an expander.
                     Row(
@@ -200,18 +228,27 @@ fun NutritionGoalsScreen(vm: AppViewModel, onBack: () -> Unit, onOpenPersonal: (
         // ---- auto generate ----
         Rise(2) {
             Card {
-                Text("Auto generate", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Auto generate", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
+                    Spacer(Modifier.width(6.dp))
+                    ScienceButton()
+                }
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "Mifflin-St Jeor from your weight, height, age and gender, adjusted for " +
-                        "${prof.goalType} at ${com.sohum.bandlog.ui.today.fmt(prof.goalSpeedKgWk)} kg/week. " +
-                        "Protein 1.8 g/kg, fat a quarter of your calories, carbs the rest.",
+                    when {
+                        working == null -> "From your weight, height, age and gender."
+                        working.teen -> "Built for a growing body: ${if (working.goal == "gain") "what you need to grow and train, plus a small extra" else "what you need to grow and train"}. No deficits under 18."
+                        else -> "From your weight, height, age and gender: ${working.pal.label.lowercase()}, " +
+                            (if (working.goal == "maintain") "maintaining." else "${if (working.goal == "lose") "losing" else "gaining"} ${com.sohum.bandlog.ui.today.fmt(working.speed)} kg/week.")
+                    },
                     fontSize = 12.sp, color = p.muted, lineHeight = 17.sp,
                 )
                 Spacer(Modifier.height(12.dp))
                 PillButton("Auto generate", height = 46.dp, onClick = {
                     missing = Goals.missing(prof)
-                    val t = Goals.generate(prof) ?: return@PillButton
+                    val pl = Goals.plan(prof) ?: return@PillButton
+                    val t = pl.targets
+                    planNote = pl
                     generated = t
                     calories = t.calories.toString()
                     split = Split.from(t.calories, t.protein, t.carbs, t.fat)
@@ -233,6 +270,9 @@ fun NutritionGoalsScreen(vm: AppViewModel, onBack: () -> Unit, onOpenPersonal: (
                         BeforeAfter("Carbs", CarbsColor, prof.carbTargetG, g.carbs, "g")
                         BeforeAfter("Fat", FatColor, prof.fatTargetG, g.fat, "g")
                     }
+                    val pl = planNote
+                    if (pl != null && pl.speedCapped) Text("We used ${com.sohum.bandlog.ui.today.fmt(pl.speed)} kg/week, the safe max for your body weight, instead of ${com.sohum.bandlog.ui.today.fmt(prof.goalSpeedKgWk)}.", fontSize = 12.sp, color = p.muted, lineHeight = 16.sp, modifier = Modifier.padding(top = 8.dp))
+                    if (pl != null && pl.floorApplied) Text("Calories sit at your floor (${pl.targets.calories} kcal), the lowest we'll go for your body.", fontSize = 12.sp, color = p.muted, lineHeight = 16.sp, modifier = Modifier.padding(top = 4.dp))
                 }
             }
         }
@@ -245,6 +285,7 @@ fun NutritionGoalsScreen(vm: AppViewModel, onBack: () -> Unit, onOpenPersonal: (
                 onClick = { save() },
             )
         }
+        safety?.let { (flags, floor) -> Rise(4) { SafetyNote(vm, flags, floor, onClose = { safety = null }) } }
         Spacer(Modifier.height(4.dp))
     }
 }

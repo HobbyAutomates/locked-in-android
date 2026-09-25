@@ -180,6 +180,8 @@ fun ProfileScreen(
 
         // ---- v2.7: graffiti wall (Squad Food Battle crowns) — hidden until the first win ----
         graffiti?.takeIf { it.total > 0 }?.let { g -> Rise(1) { GraffitiWallCard(g) } }
+        // v2.10: an under-18 "lose" goal moves to maintain here too, with its one-time card.
+        com.sohum.bandlog.ui.components.TeenGoalMigration(vm)
 
         // ---- you ----
         Rise(1) { GroupLabel("You") }
@@ -189,7 +191,7 @@ fun ProfileScreen(
                     SettingRow(Icons.Outlined.Person, p.ink, "Personal details", onClick = { onOpen(ProfilePage.PERSONAL) }) { Chevron() }
                     Hair()
                     SettingRow(TargetIcon, p.ink, "Nutrition goals", onClick = { onOpen(ProfilePage.GOALS) }) {
-                        Text("${prof.calorieTarget} kcal", fontSize = 13.sp, color = p.muted)
+                        Text(if (prof.hideNumbers == true) "Set" else "${prof.calorieTarget} kcal", fontSize = 13.sp, color = p.muted)
                     }
                     Hair()
                     SettingRow(FlameIcon, p.flame, "Goal & weight", onClick = { onOpen(ProfilePage.GOAL_WEIGHT) }) {

@@ -96,7 +96,9 @@ fun PersonalDetailsScreen(vm: AppViewModel, onBack: () -> Unit, onChangeGoal: ()
                             fontSize = 34.sp, fontWeight = FontWeight(800), letterSpacing = (-1.2).sp, color = p.ink, lineHeight = 36.sp,
                         )
                         Text(
-                            prof.goalType.replaceFirstChar { it.uppercase() } + " · ${fmt(prof.goalSpeedKgWk)} kg/week",
+                            if (com.sohum.bandlog.util.Goals.isTeen(prof.age)) {
+                                if (com.sohum.bandlog.util.Goals.effectiveGoal(prof.goalType, prof.age) == "gain") "Gain / build muscle" else "Maintain / grow stronger"
+                            } else prof.goalType.replaceFirstChar { it.uppercase() } + " · ${fmt(prof.goalSpeedKgWk)} kg/week",
                             fontSize = 12.sp, color = p.muted,
                         )
                     }
