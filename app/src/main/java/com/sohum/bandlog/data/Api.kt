@@ -119,6 +119,15 @@ object Api {
         run(rest("weight_log?id=eq.$id").delete().build(), "Delete weigh-in"); Unit
     }
 
+    /** v2.8: edits a weigh-in (kg, date, note); [mirror] also puts the kg on the profile (the newest weigh-in). */
+    suspend fun updateWeight(id: String, date: String, kg: Double, note: String, mirror: Boolean) = withContext(Dispatchers.IO) {
+        val uid = Session.userId ?: throw AuthException("Not signed in")
+        val payload = JSONObject().put("date", date).put("weight_kg", kg).put("note", note.ifBlank { JSONObject.NULL }).toString()
+        run(rest("weight_log?id=eq.$id").header("Prefer", "return=minimal").patch(json(payload)).build(), "Update weigh-in")
+        if (mirror) run(rest("profiles?id=eq.$uid").patch(json(JSONObject().put("weight_kg", kg).toString())).build(), "Update weight")
+        Unit
+    }
+
     // ---- badge totals ----
 
     /** Every workout date ever (badges need the longest run, not just the 120-day window). */
@@ -267,6 +276,19 @@ object Api {
 
     suspend fun deleteWater(id: String) = withContext(Dispatchers.IO) { run(rest("water_log?id=eq.$id").delete().build(), "Delete water"); Unit }
 
+    /** v2.8: changes one drink's amount (and its vessel, when the column exists). */
+    suspend fun updateWater(id: String, ml: Int, vessel: String?) = withContext(Dispatchers.IO) {
+        val base = JSONObject().put("ml", ml)
+        if (vessel == null) { run(rest("water_log?id=eq.$id").header("Prefer", "return=minimal").patch(json(base.toString())).build(), "Update water"); return@withContext }
+        try {
+            run(rest("water_log?id=eq.$id").header("Prefer", "return=minimal").patch(json(JSONObject(base.toString()).put("vessel", vessel).toString())).build(), "Update water")
+        } catch (e: ApiException) {
+            val m = e.message.orEmpty()
+            if ("vessel" in m || "column" in m || "PGRST204" in m) run(rest("water_log?id=eq.$id").header("Prefer", "return=minimal").patch(json(base.toString())).build(), "Update water") else throw e
+        }
+        Unit
+    }
+
     // ---- v2.3: progress photos (private bucket progress-photos/<uid>/<date>-<ts>.jpg) ----
 
     suspend fun progressPhotos(): List<ProgressPhoto> = withContext(Dispatchers.IO) {
@@ -292,6 +314,27 @@ object Api {
 
     suspend fun deleteExercise(id: String) = withContext(Dispatchers.IO) {
         run(rest("exercise_log?id=eq.$id").delete().build(), "Delete exercise"); Unit
+    }
+
+    /** v2.8: saves an edited run / activity in place (extras dropped if the columns aren't there yet). */
+    suspend fun updateExercise(
+        id: String, activityCode: String?, name: String, minutes: Int, intensity: String, kcal: Double, note: String,
+        extras: ExerciseExtras = ExerciseExtras(),
+    ) = withContext(Dispatchers.IO) {
+        val base = JSONObject().put("activity_code", activityCode ?: JSONObject.NULL).put("name", name)
+            .put("minutes", minutes.coerceAtLeast(1)).put("intensity", intensity).put("kcal", kcal).put("note", note)
+        val full = JSONObject(base.toString())
+            .put("started_at", extras.startedAt ?: JSONObject.NULL)
+            .put("intensity_pct", extras.intensityPct ?: JSONObject.NULL)
+            .put("distance_km", extras.distanceKm ?: JSONObject.NULL)
+            .put("steps", extras.steps ?: JSONObject.NULL)
+        try {
+            run(rest("exercise_log?id=eq.$id").header("Prefer", "return=minimal").patch(json(full.toString())).build(), "Update exercise")
+        } catch (e: ApiException) {
+            android.util.Log.w("LockedIn", "Exercise extras rejected, updating without: ${e.message}")
+            run(rest("exercise_log?id=eq.$id").header("Prefer", "return=minimal").patch(json(base.toString())).build(), "Update exercise")
+        }
+        Unit
     }
 
     /** Removes the auto-burn row a band workout wrote (its note holds the workout id). */

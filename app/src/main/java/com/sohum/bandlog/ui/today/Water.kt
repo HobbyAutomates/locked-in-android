@@ -120,6 +120,7 @@ private fun lastLoggedLabel(createdAt: String?): String? = createdAt?.let {
 /**
  * v2.6 Water page (Fittr bottle + Sohum's vessel row): the goal in glasses on the left, a bottle
  * that fills beside + / − on the right, the four vessels, and the reminder window + frequency.
+ * v2.8: today's drinks are listed; tap one to change its amount or delete it (with Undo).
  */
 @Composable
 fun WaterScreen(vm: AppViewModel, onBack: () -> Unit) {
@@ -129,12 +130,15 @@ fun WaterScreen(vm: AppViewModel, onBack: () -> Unit) {
     val prof = vm.profile
     val glass = prof.waterGlassMl.coerceAtLeast(50)
     val goal = prof.waterGoalMl.coerceAtLeast(glass)
-    val total = vm.waterToday
+    var pendingDeletes by remember { mutableStateOf(setOf<String>()) }
+    // Drinks waiting out their Undo window already leave the bottle.
+    val total = vm.waterToday - vm.waterTodayRows.filter { it.id in pendingDeletes }.sumOf { it.ml }
     val done = total >= goal
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var customSheet by remember { mutableStateOf(false) }
     var goalSheet by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<com.sohum.bandlog.data.WaterEntry?>(null) }
 
     fun add(ml: Int, vessel: String) {
         if (busy) return
@@ -229,6 +233,26 @@ fun WaterScreen(vm: AppViewModel, onBack: () -> Unit) {
                     "Total ${WaterPrefs.litres(total)} of ${WaterPrefs.litres(goal)}",
                     fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
                 )
+                val rows = vm.waterTodayRows
+                if (rows.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    rows.forEachIndexed { i, e ->
+                        if (i > 0) com.sohum.bandlog.ui.components.Hair()
+                        androidx.compose.runtime.key(e.id) {
+                            if (e.id in pendingDeletes) com.sohum.bandlog.ui.log.DeletedRow(
+                                onUndo = { pendingDeletes = pendingDeletes - e.id },
+                                onExpire = { pendingDeletes = pendingDeletes - e.id; vm.deleteWaterLater(e.id) },
+                            ) else Row(
+                                Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(enabled = !e.id.startsWith("local-"), onClickLabel = "Edit") { editing = e },
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(lastLoggedLabel(e.createdAt) ?: "", fontSize = 13.sp, color = p.muted, modifier = Modifier.weight(1f))
+                                Text("${VESSELS.firstOrNull { it.key == e.vessel }?.label ?: "Water"} · ${e.ml} mL", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.ink)
+                                Text("  ›", fontSize = 16.sp, color = p.muted)
+                            }
+                        }
+                    }
+                }
             }
 
             Spacer(Modifier.height(26.dp))
@@ -237,6 +261,20 @@ fun WaterScreen(vm: AppViewModel, onBack: () -> Unit) {
     }
 
     if (customSheet) CustomAmountSheet(onDismiss = { customSheet = false }) { ml -> customSheet = false; add(ml, "custom") }
+    editing?.let { e ->
+        WaterEntrySheet(
+            e, onDismiss = { editing = null },
+            onSave = { ml ->
+                scope.launch {
+                    busy = true; error = null
+                    val vessel = VESSELS.firstOrNull { it.ml == ml }?.key ?: "custom"
+                    if (vm.updateWater(e.id, ml, vessel)) editing = null else error = vm.error
+                    busy = false
+                }
+            },
+            onDelete = { editing = null; pendingDeletes = pendingDeletes + e.id },
+        )
+    }
     if (goalSheet) GoalSheet(goal, glass, onDismiss = { goalSheet = false }) { ml -> goalSheet = false; vm.setWaterGoal(ml) }
 }
 
@@ -371,6 +409,38 @@ private fun CustomAmountSheet(onDismiss: () -> Unit, onAdd: (Int) -> Unit) {
                 }
             }
         }
+    }
+}
+
+/** v2.8: tap a logged drink — change its amount or delete it (Undo shows in the list). */
+@Composable
+private fun WaterEntrySheet(entry: com.sohum.bandlog.data.WaterEntry, onDismiss: () -> Unit, onSave: (Int) -> Unit, onDelete: () -> Unit) {
+    val p = palette
+    val focus = LocalFocusManager.current
+    var ml by remember(entry.id) { mutableStateOf(entry.ml.toString()) }
+    val amount = ml.toIntOrNull() ?: 0
+    BottomSheet(title = "Edit water", subtitle = lastLoggedLabel(entry.createdAt)?.let { "Logged $it" }, onDismiss = onDismiss, primary = "Save", primaryEnabled = amount in 1..5000, onPrimary = { onSave(amount) }) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.Bottom) {
+            BasicTextField(
+                ml, { ml = it.filter(Char::isDigit).take(4) }, Modifier.width(150.dp), singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
+                textStyle = TextStyle(fontSize = 52.sp, fontWeight = FontWeight(800), color = p.ink, textAlign = TextAlign.End, letterSpacing = (-1.5).sp),
+                cursorBrush = SolidColor(p.ink),
+            )
+            Text(" mL", fontSize = 18.sp, fontWeight = FontWeight(700), color = p.muted, modifier = Modifier.padding(bottom = 12.dp))
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            VESSELS.mapNotNull { it.ml }.forEach { v ->
+                val sel = amount == v
+                Box(Modifier.weight(1f).height(40.dp).background(if (sel) p.btn else p.card2, CircleShape).clickable { ml = v.toString() }, contentAlignment = Alignment.Center) {
+                    Text("$v mL", fontSize = 14.sp, fontWeight = FontWeight(700), color = if (sel) p.btnInk else p.ink)
+                }
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        com.sohum.bandlog.ui.log.DeleteLink(onClick = onDelete)
     }
 }
 

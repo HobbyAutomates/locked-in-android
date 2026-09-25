@@ -320,6 +320,8 @@ class AppViewModel : ViewModel() {
     /** Nudges squad-mates sent me in the last 24 h (Home's banner). */
     var nudges by mutableStateOf<List<com.sohum.bandlog.data.Nudge>>(emptyList()); private set
     private var rolledYesterday = false
+    /** v2.8: an edit or delete on an earlier day reruns that day's rollup on the next push too. */
+    private var rollupExtra: Set<String> = emptySet()
 
     /**
      * Upserts today's `daily_stats` row (and yesterday's on the first push of this app session) so
@@ -328,7 +330,8 @@ class AppViewModel : ViewModel() {
     private fun pushRollup() {
         if (!signedIn || !loadedOnce) return
         val t = today
-        val dates = if (rolledYesterday) listOf(t) else listOf(t, Dates.addDays(t, -1))
+        val dates = ((if (rolledYesterday) listOf(t) else listOf(t, Dates.addDays(t, -1))) + rollupExtra.filter { it <= t }).distinct()
+        rollupExtra = emptySet()
         val streak = weekStreak
         val trainedDates = workoutDates.toSet()
         val rows = dates.map { d ->
@@ -556,7 +559,53 @@ class AppViewModel : ViewModel() {
         date: String, activityCode: String?, name: String, minutes: Int, intensity: String, kcal: Double, source: String,
         note: String = "", extras: Api.ExerciseExtras = Api.ExerciseExtras(),
     ) = mutate { Api.saveExercise(date, activityCode, name, minutes, intensity, kcal, source, note, extras) }
-    suspend fun deleteExercise(id: String) = mutate { Api.deleteExercise(id) }
+    suspend fun deleteExercise(id: String): Boolean {
+        exercises.firstOrNull { it.id == id }?.date?.let { rollupExtra = rollupExtra + it }
+        return mutate { Api.deleteExercise(id) }
+    }
+
+    /** v2.8: the undo window ran out after the editor closed; finish the delete on the ViewModel's scope. */
+    fun deleteExerciseLater(id: String) { viewModelScope.launch { deleteExercise(id) } }
+
+    /** v2.8: an edited run / activity, saved in place (Home and the daily_stats rollup follow). */
+    suspend fun updateExercise(
+        id: String, date: String, activityCode: String?, name: String, minutes: Int, intensity: String, kcal: Double,
+        note: String = "", extras: Api.ExerciseExtras = Api.ExerciseExtras(),
+    ): Boolean {
+        rollupExtra = rollupExtra + date
+        val ok = mutate { Api.updateExercise(id, activityCode, name, minutes, intensity, kcal, note, extras) }
+        if (ok) notice = "Activity updated"
+        return ok
+    }
+
+    /** v2.8: a logged drink's new amount (vessel follows: a preset size, else custom). */
+    suspend fun updateWater(id: String, ml: Int, vessel: String?): Boolean {
+        if (ml !in 1..5000) { error = "Enter between 1 and 5000 mL"; return false }
+        val before = water
+        water = water.map { if (it.id == id) it.copy(ml = ml, vessel = vessel ?: it.vessel) else it }
+        return try {
+            Api.updateWater(id, ml, vessel)
+            runCatching { water = Api.water(Dates.addDays(today, -30), today) }
+            true
+        } catch (e: AuthException) { water = before; onAuthLost(e.message); false }
+        catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { water = before; error = e.message ?: "Couldn't save"; false }
+    }
+
+    /** v2.8: deletes one drink (the Water page's undo window has already run out). */
+    suspend fun deleteWaterEntry(id: String): Boolean {
+        val row = water.firstOrNull { it.id == id } ?: return false
+        water = water - row
+        return try {
+            if (!id.startsWith("local-")) Api.deleteWater(id)
+            runCatching { water = Api.water(Dates.addDays(today, -30), today) }
+            true
+        } catch (e: AuthException) { water = water + row; onAuthLost(e.message); false }
+        catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { water = water + row; error = e.message ?: "Couldn't delete"; false }
+    }
+
+    fun deleteWaterLater(id: String) { viewModelScope.launch { deleteWaterEntry(id) } }
     /** Every activity Haiku found in a description, saved as its own row. */
     suspend fun saveDescribed(date: String, items: List<com.sohum.bandlog.data.DescribedExercise>) = mutate {
         items.forEach { Api.saveExercise(date, it.activityCode, it.name, it.minutes, it.intensity, it.kcal, "describe") }
@@ -590,6 +639,16 @@ class AppViewModel : ViewModel() {
 
     suspend fun deleteWeight(id: String): Boolean {
         val ok = mutate { Api.deleteWeight(id) }
+        if (ok) runCatching { weights = Api.weights() }
+        return ok
+    }
+
+    fun deleteWeightLater(id: String) { viewModelScope.launch { deleteWeight(id) } }
+
+    /** v2.8: edits a weigh-in; if it's still the newest one, the profile weight follows. */
+    suspend fun updateWeight(id: String, date: String, kg: Double, note: String): Boolean {
+        val newest = weights.map { if (it.id == id) it.copy(date = date) else it }.maxByOrNull { it.date }
+        val ok = mutate { Api.updateWeight(id, date, kg, note, mirror = newest?.id == id) }
         if (ok) runCatching { weights = Api.weights() }
         return ok
     }

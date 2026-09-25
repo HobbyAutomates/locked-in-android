@@ -2,6 +2,7 @@ package com.sohum.bandlog.ui.log
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -75,94 +76,68 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
-/** One tile of the Workout type picker. */
-private data class Kind(val key: String, val label: String, val sub: String)
-
-private val KIND_TILES = listOf(
-    Kind("gym", "Gym", "Weights · sets × reps"),
-    Kind("bodyweight", "Bodyweight", "Push-ups, pull-ups, plank"),
-    Kind(Workout.BANDS, "Bands", "Resistance bands"),
-    Kind("cardio", "Cardio", "Run, walk, cycle, swim"),
-    Kind("sport", "Sport", "Cricket, football, badminton"),
-    Kind("yoga", "Yoga / Stretch", "Yoga, stretching"),
-)
-
 /**
- * v2.5 the Workout segment, general first (Google Fit / Cal AI): a type picker — Gym · Bodyweight ·
- * Bands · Cardio · Sport · Yoga — then the form for that kind. Bands opens the band form unchanged
- * ([bandForm]); Gym / Bodyweight get the sets grid ([LiftForm]); Cardio / Sport / Yoga open the
- * Exercise form filtered to that kind and save as a workout of that kind. An existing workout
- * opens straight into its own kind's form.
+ * v2.8 Log activity (replaces the Workout / Exercise split and the separate type screen): Gym ·
+ * Bodyweight · Bands · Cardio / Run · Sport · Yoga · Other, picked inline in one chip row, then the
+ * form for that type. Gym, Bodyweight, Bands, Sport and Yoga save to `workouts` (streaks); Cardio /
+ * Run and Other save to `exercise_log`. An existing workout opens straight into its own form
+ * ([existing]); a logged run / activity opens the activity form as its editor ([editingExercise]).
  */
 @Composable
 fun WorkoutTab(
     vm: AppViewModel, existing: Workout?, initialDate: String, onClose: () -> Unit,
-    /** Start on a kind / with lifts already listed (layout screenshots; not used by the app itself). */
+    /** Start on a type / with lifts already listed (layout screenshots; not used by the app itself). */
     initialKind: String? = null, prefill: List<Lift>? = null,
+    editingExercise: com.sohum.bandlog.data.ExerciseEntry? = null,
     bandForm: @Composable () -> Unit,
 ) {
-    var kind by rememberSaveable { mutableStateOf(existing?.kind ?: initialKind) }
-    val k = kind
-    if (k == null) KindPicker(vm) { kind = it }
-    else Column(Modifier.fillMaxSize()) {
-        if (existing == null) KindHeader(k) { kind = null }
-        when {
-            k == Workout.BANDS -> bandForm()
-            k == "gym" || k == "bodyweight" -> LiftForm(vm, k, existing, initialDate, onClose, prefill)
-            existing != null -> KindEditForm(vm, existing, onClose)
-            else -> ExerciseForm(vm, initialDate, onClose, kind = k)
-        }
-    }
-}
-
-@Composable
-private fun KindPicker(vm: AppViewModel, onPick: (String) -> Unit) {
-    val p = palette
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp, 6.dp, 16.dp, 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("What did you do?", fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.4).sp, color = p.ink)
-        KIND_TILES.chunked(2).forEachIndexed { i, row ->
-            Rise(i) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    row.forEach { t -> KindTile(t, vm.lastWorkout(t.key), Modifier.weight(1f)) { onPick(t.key) } }
-                    if (row.size == 1) Spacer(Modifier.weight(1f))
-                }
-            }
-        }
-        Text("Streaks count every kind of workout.", fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(horizontal = 4.dp))
-    }
-}
-
-@Composable
-private fun KindTile(t: Kind, last: Workout?, modifier: Modifier, onClick: () -> Unit) {
-    val p = palette
-    val shape = RoundedCornerShape(20.dp)
-    Column(
-        modifier.heightIn(min = 112.dp).shadow(10.dp, shape, ambientColor = p.shadow, spotColor = p.shadow).pressable().background(p.card, shape).clickable(onClick = onClick).padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Box(Modifier.size(40.dp).background(p.card2, CircleShape), contentAlignment = Alignment.Center) {
-            Icon(workoutKindIcon(t.key), null, tint = p.ink, modifier = Modifier.size(20.dp))
-        }
-        Spacer(Modifier.height(4.dp))
-        Text(t.label, fontSize = 16.sp, fontWeight = FontWeight(800), color = p.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(
-            last?.let { "Last: " + it.date.let { d -> com.sohum.bandlog.util.Dates.short(d) } } ?: t.sub,
-            fontSize = 12.sp, color = p.muted, maxLines = 1, overflow = TextOverflow.Ellipsis, lineHeight = 15.sp,
+    var kind by rememberSaveable {
+        mutableStateOf(
+            existing?.kind
+                ?: editingExercise?.let { if (isCardioName(it.name, it.activityCode)) "cardio" else "other" }
+                ?: initialKind ?: defaultActivityType(vm.workouts, vm.exercises),
         )
     }
+    val k = kind
+    val liftEdit = existing != null && (existing.kind == "gym" || existing.kind == "bodyweight" || existing.isBands)
+    // An existing session can move between Gym / Bodyweight / Bands; nothing else switches type in an editor.
+    val types = when {
+        existing != null -> if (liftEdit) listOf("gym", "bodyweight", Workout.BANDS) else emptyList()
+        editingExercise != null -> emptyList()
+        else -> ACTIVITY_TYPES
+    }
+    Column(Modifier.fillMaxSize()) {
+        if (types.isNotEmpty()) TypeChips(types, k) { kind = it }
+        androidx.compose.runtime.key(k) {
+            when {
+                existing != null && !liftEdit -> KindEditForm(vm, existing, onClose)
+                k == Workout.BANDS -> bandForm()
+                k == "gym" || k == "bodyweight" -> LiftForm(vm, k, existing, initialDate, onClose, prefill)
+                else -> ExerciseForm(vm, editingExercise?.date ?: initialDate, onClose, kind = k, editing = editingExercise)
+            }
+        }
+    }
 }
 
-/** "‹  Gym" — back to the type picker. */
+/** The seven types as one scrolling row of icon chips (black = picked). */
 @Composable
-private fun KindHeader(kind: String, onChange: () -> Unit) {
+private fun TypeChips(types: List<String>, selected: String, onPick: (String) -> Unit) {
     val p = palette
-    Row(Modifier.padding(horizontal = 16.dp).heightIn(min = 44.dp).clickable(onClick = onChange).padding(end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("‹", fontSize = 20.sp, fontWeight = FontWeight(600), color = p.muted)
-        Spacer(Modifier.width(8.dp))
-        Icon(workoutKindIcon(kind), null, tint = p.ink, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(6.dp))
-        Text(Workout.kindLabel(kind), fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1)
-        Text("  · change", fontSize = 13.sp, color = p.muted, maxLines = 1)
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        types.forEach { t ->
+            val sel = t == selected
+            Row(
+                Modifier.height(44.dp).pressable().background(if (sel) p.btn else p.card2, CircleShape).clickable { onPick(t) }.padding(start = 12.dp, end = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(if (t == "other") com.sohum.bandlog.ui.components.FlameIcon else workoutKindIcon(t), null, tint = if (sel) p.btnInk else p.ink, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(activityTypeLabel(t), fontSize = 13.sp, fontWeight = if (sel) FontWeight(700) else FontWeight(500), color = if (sel) p.btnInk else p.ink, maxLines = 1, softWrap = false)
+            }
+        }
     }
 }
 
@@ -186,7 +161,6 @@ private fun LiftForm(vm: AppViewModel, kind: String, existing: Workout?, initial
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
     val bodyweight = kind == "bodyweight"
-    val date = existing?.date ?: initialDate
     var lifts by remember { mutableStateOf<List<LiftDraft>>((existing?.lifts ?: prefill)?.map { it.draft() } ?: emptyList()) }
     var notes by remember { mutableStateOf(existing?.notes ?: "") }
     val startedAt by rememberSaveable { mutableLongStateOf(System.currentTimeMillis()) }
@@ -197,13 +171,10 @@ private fun LiftForm(vm: AppViewModel, kind: String, existing: Workout?, initial
     var adding by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var pendingDelete by remember { mutableStateOf(false) }
-    var deleteJob by remember { mutableStateOf<Job?>(null) }
-    // If the screen leaves composition before the undo window runs out, the local job is cancelled
-    // with it — finish the delete on the ViewModel's own scope instead of silently dropping it.
-    DisposableEffect(existing?.id) {
-        onDispose { if (pendingDelete && !busy) { deleteJob?.cancel(); existing?.let { vm.deleteWorkoutLater(it.id) } } }
-    }
+    var more by rememberSaveable { mutableStateOf(false) }
+    var date by rememberSaveable { mutableStateOf(existing?.date ?: initialDate) }
+    var copied by remember { mutableStateOf(false) }
+    val del = rememberEditorDelete(existing?.id) { existing?.let { vm.deleteWorkoutLater(it.id) } }
     val last = remember(vm.workouts) { vm.lastWorkout(kind, except = existing?.id) }
 
     fun ghost(name: String): Lift? = vm.lastLift(name, except = existing?.id)
@@ -211,8 +182,7 @@ private fun LiftForm(vm: AppViewModel, kind: String, existing: Workout?, initial
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp, 6.dp, 16.dp, 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (existing == null && last != null && last.lifts.isNotEmpty()) {
-                val applied = lifts.map { it.name } == last.lifts.map { it.name }
-                SameAsLast(applied, last.summary) { lifts = last.lifts.map { it.draft() }; error = null }
+                SameAsLastChip(copied) { lifts = last.lifts.map { it.draft() }; last.minutes?.let { minutesText = it.toString() }; copied = true; error = null }
             }
             lifts.forEachIndexed { i, l ->
                 LiftCard(
@@ -234,36 +204,24 @@ private fun LiftForm(vm: AppViewModel, kind: String, existing: Workout?, initial
                         }
                         NumberField(minutesText.ifEmpty { if (existing == null) "$autoMin" else "" }, { minutesText = it.filter(Char::isDigit).take(3) }, "min")
                     }
-                    Hair()
-                    Column(Modifier.padding(vertical = 12.dp)) {
-                        Text("Notes", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted)
-                        Spacer(Modifier.height(6.dp))
-                        PlainField(notes, { notes = it.take(300) }, "How did it feel?")
-                    }
+                    DurationChips(minutesText) { minutesText = it }
+                }
+            }
+            MoreOptions(more, { more = !more }, "Date, notes") {
+                DateRow(date) { date = it }
+                Hair()
+                Column(Modifier.padding(vertical = 12.dp)) {
+                    Text("Notes", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted)
+                    Spacer(Modifier.height(6.dp))
+                    PlainField(notes, { notes = it.take(300) }, "How did it feel?")
                 }
             }
             ErrorNote(error)
-            if (existing != null) {
-                if (pendingDelete) {
-                    RowSpaceBetween {
-                        Text("Deleted", fontSize = 15.sp, fontWeight = FontWeight(500), color = p.muted)
-                        TextButton(onClick = { deleteJob?.cancel(); deleteJob = null; pendingDelete = false }) { Text("Undo", color = p.btn) }
-                    }
-                } else {
-                    TextButton(onClick = {
-                        pendingDelete = true
-                        deleteJob = scope.launch {
-                            delay(5000)
-                            busy = true
-                            if (vm.deleteWorkout(existing.id)) onClose() else { error = vm.error; busy = false; pendingDelete = false }
-                        }
-                    }, enabled = !busy) { Text("Delete workout", color = p.red) }
-                }
-            }
+            if (existing != null) EditorDelete("Delete workout", del, enabled = !busy, onDelete = { vm.deleteWorkout(existing.id).also { if (!it) error = vm.error } }, onDone = onClose)
         }
         Box(Modifier.padding(16.dp, 12.dp).navigationBarsPadding().imePadding()) {
             val n = lifts.size
-            PillButton(if (busy) "Saving…" else if (n == 0) "Save workout" else "Save · $n exercise${if (n == 1) "" else "s"}", enabled = !busy, onClick = {
+            PillButton(if (busy) "Saving…" else if (n == 0) "Save workout" else "Save · $n exercise${if (n == 1) "" else "s"}", enabled = !busy && !del.pending, onClick = {
                 // Blank fields take last session's number (the faint ghost hint): an untouched set
                 // saves as last time's; a set with no history and nothing typed is dropped.
                 val out = lifts.mapNotNull { d ->
@@ -295,25 +253,6 @@ private fun LiftForm(vm: AppViewModel, kind: String, existing: Workout?, initial
         val g = ghost(name)
         val rows = (g?.sets?.size ?: 3).coerceIn(1, 6)
         lifts = lifts + LiftDraft(name, List(rows) { SetDraft() })
-    }
-}
-
-/** The black "Same as last time" pill (grey once applied). */
-@Composable
-private fun SameAsLast(applied: Boolean, summary: String, onClick: () -> Unit) {
-    val p = palette
-    Row(
-        Modifier.fillMaxWidth().heightIn(min = 48.dp).pressable().background(if (applied) p.card2 else p.btn, CircleShape)
-            .clickable(enabled = !applied, onClick = onClick).padding(horizontal = 18.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(HistoryIcon, null, tint = if (applied) p.muted else p.btnInk, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(8.dp))
-        Text(if (applied) "Filled in from last time" else "Same as last time", fontSize = 14.sp, fontWeight = FontWeight(700), color = if (applied) p.muted else p.btnInk, maxLines = 1)
-        Text(
-            "  $summary", fontSize = 13.sp, color = (if (applied) p.muted else p.btnInk).copy(alpha = 0.7f), maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
     }
 }
 
@@ -435,13 +374,9 @@ private fun KindEditForm(vm: AppViewModel, existing: Workout, onClose: () -> Uni
     var notes by remember { mutableStateOf(existing.notes) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var pendingDelete by remember { mutableStateOf(false) }
-    var deleteJob by remember { mutableStateOf<Job?>(null) }
-    // If the screen leaves composition before the undo window runs out, the local job is cancelled
-    // with it — finish the delete on the ViewModel's own scope instead of silently dropping it.
-    DisposableEffect(existing.id) {
-        onDispose { if (pendingDelete && !busy) { deleteJob?.cancel(); vm.deleteWorkoutLater(existing.id) } }
-    }
+    var more by rememberSaveable { mutableStateOf(false) }
+    var date by rememberSaveable { mutableStateOf(existing.date) }
+    val del = rememberEditorDelete(existing.id) { vm.deleteWorkoutLater(existing.id) }
     val mins = minutes.toIntOrNull() ?: 0
     val kcal = burn?.let { b -> if (b.minutes > 0) b.kcal / b.minutes * mins else b.kcal } ?: 0.0
     val name = existing.exercises.ifBlank { burn?.name ?: Workout.kindLabel(existing.kind) }
@@ -459,6 +394,7 @@ private fun KindEditForm(vm: AppViewModel, existing: Workout, onClose: () -> Uni
                         Text("Duration", fontSize = 15.sp, fontWeight = FontWeight(500), color = p.ink, modifier = Modifier.padding(vertical = 12.dp))
                         NumberField(minutes, { minutes = it.filter(Char::isDigit).take(3) }, "min")
                     }
+                    DurationChips(minutes) { minutes = it }
                     if (burn != null) {
                         Hair()
                         RowSpaceBetween {
@@ -466,40 +402,60 @@ private fun KindEditForm(vm: AppViewModel, existing: Workout, onClose: () -> Uni
                             Text("${kcal.roundToInt()} kcal", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
                         }
                     }
-                    Hair()
-                    Column(Modifier.padding(vertical = 12.dp)) {
-                        Text("Notes", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted)
-                        Spacer(Modifier.height(6.dp))
-                        PlainField(notes, { notes = it.take(300) }, "How did it feel?")
-                    }
+                }
+            }
+            MoreOptions(more, { more = !more }, "Date, notes") {
+                DateRow(date) { date = it }
+                Hair()
+                Column(Modifier.padding(vertical = 12.dp)) {
+                    Text("Notes", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted)
+                    Spacer(Modifier.height(6.dp))
+                    PlainField(notes, { notes = it.take(300) }, "How did it feel?")
                 }
             }
             ErrorNote(error)
-            if (pendingDelete) {
-                RowSpaceBetween {
-                    Text("Deleted", fontSize = 15.sp, fontWeight = FontWeight(500), color = p.muted)
-                    TextButton(onClick = { deleteJob?.cancel(); deleteJob = null; pendingDelete = false }) { Text("Undo", color = p.btn) }
-                }
-            } else {
-                TextButton(onClick = {
-                    pendingDelete = true
-                    deleteJob = scope.launch {
-                        delay(5000)
-                        busy = true
-                        if (vm.deleteWorkout(existing.id)) onClose() else { error = vm.error; busy = false; pendingDelete = false }
-                    }
-                }, enabled = !busy) { Text("Delete workout", color = p.red) }
-            }
+            EditorDelete("Delete workout", del, enabled = !busy, onDelete = { vm.deleteWorkout(existing.id).also { if (!it) error = vm.error } }, onDone = onClose)
         }
         Box(Modifier.padding(16.dp, 12.dp).navigationBarsPadding().imePadding()) {
-            PillButton(if (busy) "Saving…" else "Save", enabled = !busy && mins > 0, onClick = {
+            PillButton(if (busy) "Saving…" else "Save", enabled = !busy && !del.pending && mins > 0, onClick = {
                 scope.launch {
                     busy = true; error = null
                     val b = burn?.let { AppViewModel.WorkoutBurn(it.activityCode, it.name, it.intensity, (kcal * 10).roundToInt() / 10.0) }
-                    val ok = vm.saveWorkout(existing.id, existing.date, existing.muscles, existing.bandLevel, null, mins, existing.exercises, notes.trim(), kind = existing.kind, burn = b)
+                    val ok = vm.saveWorkout(existing.id, date, existing.muscles, existing.bandLevel, null, mins, existing.exercises, notes.trim(), kind = existing.kind, burn = b)
                     if (ok) onClose() else { error = vm.error; busy = false }
                 }
             })
+        }
+    }
+}
+
+/** 15 · 30 · 45 · 60 min, one tap each. */
+@Composable
+internal fun DurationChips(minutes: String, onPick: (String) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        listOf(15, 30, 45, 60).forEach { d -> com.sohum.bandlog.ui.components.Chip("$d min", minutes == "$d", { onPick("$d") }, Modifier.weight(1f)) }
+    }
+}
+
+/** "Date  Today, 25 Sep ›" with the system date picker (no future days). */
+@Composable
+internal fun DateRow(date: String, onPick: (String) -> Unit) {
+    val p = palette
+    val ctx = LocalContext.current
+    RowSpaceBetween {
+        Text("Date", fontSize = 15.sp, fontWeight = FontWeight(500), color = p.ink, modifier = Modifier.padding(vertical = 12.dp))
+        Row(
+            Modifier.clickable {
+                val d = runCatching { java.time.LocalDate.parse(date) }.getOrDefault(java.time.LocalDate.now(com.sohum.bandlog.util.Dates.ZONE))
+                runCatching {
+                    android.app.DatePickerDialog(ctx, { _, y, m, dd -> onPick(java.time.LocalDate.of(y, m + 1, dd).toString()) }, d.year, d.monthValue - 1, d.dayOfMonth)
+                        .apply { datePicker.maxDate = System.currentTimeMillis() }.show()
+                }
+            }.padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(if (date == com.sohum.bandlog.util.Dates.today()) "Today, ${com.sohum.bandlog.util.Dates.short(date).drop(4)}" else com.sohum.bandlog.util.Dates.short(date), fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink)
+            Text("  ›", fontSize = 15.sp, color = p.muted)
         }
     }
 }
