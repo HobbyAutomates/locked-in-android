@@ -349,6 +349,7 @@ internal fun ChangelogSheet(onDismiss: () -> Unit) {
 }
 
 private val CHANGELOG = listOf(
+    "2.12" to listOf("A new Profile: dials for your streak, protein and weight, metal badges with your next one, and your goal at a glance", "Progress redesigned with calm, slower animations: lines draw in, rings sweep, numbers count up", "A new sign-in and sign-up, and cleaner scan screens for photos, barcodes and food labels"),
     "2.11" to listOf("React to squad posts and chats with ❤️ 🔥 👍 😂 😮 💪 (long-press, or double-tap a post for ❤️)", "Chat shows who sent each message, ✓✓ Seen by, and unread counts", "Hide calorie numbers now covers the 9 pm wrap and the home-screen widget"),
     "2.10" to listOf("Tap your calorie or macro cards to flip between left and eaten; swipe the cards at the top", "BMI with Indian ranges, a healthy weight range and safe, science-based targets (with the sources)", "Deleting a log removes its squad posts; choose what auto-posts; pick the right roti and see where numbers come from"),
     "2.8" to listOf("Home groups your food into Breakfast, Lunch, Dinner and Snacks", "Tap anything you logged to edit it: meals, activities, water, weigh-ins", "One Log activity button, one-tap water, simpler Progress, gram ranges on photo scans"),

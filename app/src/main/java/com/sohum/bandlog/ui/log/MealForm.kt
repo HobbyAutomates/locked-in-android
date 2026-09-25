@@ -514,7 +514,7 @@ fun MealForm(
             confirmButton = {
                 androidx.compose.material3.TextButton(onClick = {
                     state.selectedDateMillis?.let { ms ->
-                        val d = java.time.LocalDate.ofInstant(java.time.Instant.ofEpochMilli(ms), java.time.ZoneOffset.UTC).toString()
+                        val d = java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneOffset.UTC).toLocalDate().toString()
                         if (d <= com.sohum.bandlog.util.Dates.today()) day = d else error = "That date hasn't happened yet"
                     }
                     pickDate = false

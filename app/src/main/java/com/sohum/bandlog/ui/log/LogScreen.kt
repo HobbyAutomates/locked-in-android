@@ -218,7 +218,7 @@ private fun WorkoutForm(vm: AppViewModel, existing: Workout?, initialDate: Strin
         val state = rememberDatePickerState(initialSelectedDateMillis = Dates.parse(date).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli())
         DatePickerDialog(
             onDismissRequest = { pickDate = false },
-            confirmButton = { TextButton(onClick = { state.selectedDateMillis?.let { ms -> date = LocalDate.ofInstant(Instant.ofEpochMilli(ms), ZoneOffset.UTC).toString() }; pickDate = false }) { Text("OK") } },
+            confirmButton = { TextButton(onClick = { state.selectedDateMillis?.let { ms -> date = Instant.ofEpochMilli(ms).atZone(ZoneOffset.UTC).toLocalDate().toString() }; pickDate = false }) { Text("OK") } },
             dismissButton = { TextButton(onClick = { pickDate = false }) { Text("Cancel") } },
         ) { DatePicker(state) }
     }
