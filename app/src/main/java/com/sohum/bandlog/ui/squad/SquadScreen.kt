@@ -103,6 +103,17 @@ class SquadViewModel : ViewModel() {
     var pageLoading by mutableStateOf(false); private set
     var posting by mutableStateOf(false); private set
 
+    // ---- v2.9: deleting posts (the v2.7 undo) + "Auto-post my logs here" ----
+    /** Posts hidden while their 5 s undo window runs; the delete lands when it ends. */
+    var pendingDeletes by mutableStateOf<Set<String>>(emptySet()); private set
+    /** The post the "Post deleted · Undo" snackbar is about. */
+    var deletedSnack by mutableStateOf<String?>(null); private set
+    private val deleteJobs = mutableMapOf<String, kotlinx.coroutines.Job>()
+    /** My group_members.auto_post for the open squad; null while unknown or when the column isn't there yet (switch hidden). */
+    var autoPost by mutableStateOf<Boolean?>(null); private set
+    /** What Chat / Feed show: everything except posts inside their undo window. */
+    val visiblePosts: List<GroupPost> get() = if (pendingDeletes.isEmpty()) posts else posts.filter { it.id !in pendingDeletes }
+
     // ---- v2.7: Squad Food Battle (docs/food-battle-spec.md) ----
     /** groups.battle_enabled for the open squad; false until [loadBattle] reads it. */
     var battleEnabled by mutableStateOf(false); private set
@@ -148,7 +159,7 @@ class SquadViewModel : ViewModel() {
         loadBattle(id)
     }
 
-    fun close() { openId = null; infoOpen = false; challengeOpenId = null }
+    fun close() { openId = null; infoOpen = false; challengeOpenId = null; autoPost = null }
 
     fun loadPage(id: String = openId ?: "") {
         if (id.isBlank()) return
@@ -161,6 +172,7 @@ class SquadViewModel : ViewModel() {
                 val m = async { runCatching { Api.groupMembersDetail(id) }.getOrNull() }
                 val n = async { runCatching { Api.sentNudges() }.getOrDefault(sent) }
                 val ch = async { runCatching { Api.groupChallenges(id) } }
+                val ap = async { Api.myAutoPost(id) }
                 val sq = squads.firstOrNull { it.id == id }
                 val r = async { if (sq != null && sq.ownerId == Session.userId) runCatching { Api.joinRequests(id) }.getOrDefault(emptyList()) else emptyList() }
                 f.await().onSuccess { posts = it; feedSupported = true }.onFailure { if (feedSupported != true) feedSupported = false }
@@ -170,6 +182,7 @@ class SquadViewModel : ViewModel() {
                     ?: board.map { LeaderRow(it.userId, it.name, null, it.avatarPath, it.weekStreak, 0) }.sortedByDescending { it.flames }
                 members = m.await() ?: board.map { MemberDetail(it.userId, it.name, null, it.avatarPath, it.isOwner, it.weekStreak, "") }
                 ch.await().onSuccess { if (openId == id) { challenges = it; challengesSupported = true } }.onFailure { if (challengesSupported != true) challengesSupported = false }
+                if (openId == id) autoPost = ap.await()
             }
             pageLoading = false
         }
@@ -298,6 +311,50 @@ class SquadViewModel : ViewModel() {
                 Api.postToGroups(listOf(id), "photo", "shared a photo", null, path)
                 runCatching { posts = Api.groupFeed(id) }
             } catch (e: Exception) { error = friendly(e.message) } finally { posting = false }
+        }
+    }
+
+    /**
+     * v2.9: delete a post (mine, or any as the squad owner) with the v2.7 undo. It disappears at
+     * once, "Post deleted · Undo" shows for 5 s, then the delete runs on this ViewModel's scope,
+     * so it still lands if the squad is closed first. No confirm: Undo covers a slip.
+     */
+    fun deletePost(post: GroupPost) {
+        val id = post.id
+        if (id in pendingDeletes) return
+        error = null
+        pendingDeletes = pendingDeletes + id
+        deletedSnack = id
+        deleteJobs[id] = viewModelScope.launch {
+            kotlinx.coroutines.delay(5_000)
+            if (deletedSnack == id) deletedSnack = null
+            deleteJobs.remove(id)
+            try {
+                if (!Api.deleteGroupPost(id)) throw IllegalStateException("Only the author or the squad owner can delete this")
+                posts = posts.filter { it.id != id }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { error = friendly(e.message) }
+            finally { pendingDeletes = pendingDeletes - id }
+        }
+    }
+
+    fun undoDelete(id: String) {
+        deleteJobs.remove(id)?.cancel()
+        pendingDeletes = pendingDeletes - id
+        if (deletedSnack == id) deletedSnack = null
+    }
+
+    /** v2.9: "Auto-post my logs here" for the open squad; reverts the switch if the save fails. */
+    fun setAutoPost(on: Boolean) {
+        val id = openId ?: return
+        val before = autoPost
+        autoPost = on
+        viewModelScope.launch {
+            error = null
+            runCatching { Api.setAutoPost(id, on) }.onFailure { e ->
+                if (openId == id) autoPost = before
+                error = if (com.sohum.bandlog.util.SquadSharing.missingColumn(e.message, "auto_post")) "This switch needs the latest server update. Try again soon." else friendly(e.message)
+            }
         }
     }
 

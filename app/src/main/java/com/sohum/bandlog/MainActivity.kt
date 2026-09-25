@@ -212,6 +212,9 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
     val shellScope = androidx.compose.runtime.rememberCoroutineScope()
     var snack by remember { mutableStateOf<String?>(null) }
     var snackUndo by remember { mutableStateOf(false) }
+    // v2.9: the one-time "Posted to your squads · Change" hint shares the snackbar; Change opens Squad sharing.
+    var snackChange by remember { mutableStateOf(false) }
+    var hintPending by remember { mutableStateOf(false) }
     var snackTick by remember { mutableIntStateOf(0) }
     var glassBusy by remember { mutableStateOf(false) }
     LaunchedEffect(snackTick) { if (snackTick > 0) { kotlinx.coroutines.delay(5000); snack = null } }
@@ -219,7 +222,7 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
         val glass = vm.profile.waterGlassMl.coerceAtLeast(50)
         shellScope.launch {
             glassBusy = true
-            snack = "+1 glass of water ($glass mL)"; snackUndo = true; snackTick++
+            snack = "+1 glass of water ($glass mL)"; snackUndo = true; snackChange = false; snackTick++
             if (!vm.logWater(glass, vessel = "glass", quiet = true)) { snack = vm.error ?: "Couldn't log water"; snackUndo = false; snackTick++ }
             glassBusy = false
         }
@@ -274,6 +277,18 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
             val d = Dates.today()
             if (vm.celebrationsOn && !com.sohum.bandlog.util.WaterPrefs.celebrated(ctx, d)) { com.sohum.bandlog.util.WaterPrefs.markCelebrated(ctx, d); waterParty = true }
         }
+    }
+    // v2.9: the first auto-post that lands shows the hint once per install, when no page covers the shell.
+    LaunchedEffect(vm.postedTick) {
+        if (vm.postedTick == 0) return@LaunchedEffect
+        val prefs = ctx.getSharedPreferences(com.sohum.bandlog.util.SquadSharing.HINT_PREFS, android.content.Context.MODE_PRIVATE)
+        if (com.sohum.bandlog.util.SquadSharing.shouldShowHint(1, prefs.getBoolean(com.sohum.bandlog.util.SquadSharing.HINT_SEEN, false))) hintPending = true
+    }
+    LaunchedEffect(hintPending, page, log, meal) {
+        if (!hintPending || page != null || log != null || meal != null) return@LaunchedEffect
+        hintPending = false
+        ctx.getSharedPreferences(com.sohum.bandlog.util.SquadSharing.HINT_PREFS, android.content.Context.MODE_PRIVATE).edit().putBoolean(com.sohum.bandlog.util.SquadSharing.HINT_SEEN, true).apply()
+        snack = com.sohum.bandlog.util.SquadSharing.HINT_TEXT; snackUndo = false; snackChange = true; snackTick++
     }
     // A tapped 9 pm wrap lands on Home, where the Wrap card sits on top.
     LaunchedEffect(openWrapTick) {
@@ -360,8 +375,13 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
             exit = fadeOut(Motion.effectsFast()),
         ) {
             com.sohum.bandlog.ui.log.UndoSnackbar(
-                snack ?: "", Modifier.navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 96.dp), undoEnabled = !glassBusy,
-                onUndo = if (snackUndo) ({ snack = null; shellScope.launch { vm.undoWater() } }) else null,
+                snack ?: "", Modifier.navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 96.dp), undoEnabled = snackChange || !glassBusy,
+                actionLabel = if (snackChange) "Change" else "Undo",
+                onUndo = when {
+                    snackChange -> ({ snack = null; snackChange = false; fromPrefs = true; page = Page.PRIVACY })
+                    snackUndo -> ({ snack = null; shellScope.launch { vm.undoWater() } })
+                    else -> null
+                },
             )
         }
 

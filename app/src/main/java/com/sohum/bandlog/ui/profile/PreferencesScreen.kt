@@ -81,7 +81,7 @@ fun PreferencesScreen(vm: AppViewModel, themeMode: ThemeMode, onBack: () -> Unit
                         PrefValue(if (on == 0) "Off" else "$on on", if (on == 0) p.muted else p.green)
                     }
                     Hair()
-                    SettingRow(Icons.Outlined.Lock, p.ink, "Privacy", subtitle = "What your squads can see", onClick = { onOpen(ProfilePage.PRIVACY) }) {
+                    SettingRow(Icons.Outlined.Lock, p.ink, "Privacy", subtitle = "Squad sharing: what your squads see", onClick = { onOpen(ProfilePage.PRIVACY) }) {
                         PrefValue(if (prof.shareStats) "Sharing stats" else "Streaks only")
                     }
                     Hair()
@@ -239,25 +239,40 @@ fun TrackingScreen(vm: AppViewModel, onBack: () -> Unit) {
     if (showLens) LensSheet(prof.lensDefault, onPick = { key -> showLens = false; vm.launch { vm.saveProfile(vm.profile.copy(lensDefault = key)) } }) { showLens = false }
 }
 
-/** Privacy: what squad-mates see on the board. */
+/**
+ * Privacy → Squad sharing (v2.9): one card. "Share my calories & protein" is share_stats (off =
+ * streaks only, and nothing auto-posts, as before); the three auto-post switches are
+ * profiles.auto_share and show once schema_v31 is in (autoShare null = not yet). Per-squad mutes
+ * live on each squad's info page.
+ */
 @Composable
 fun PrivacyScreen(vm: AppViewModel, onBack: () -> Unit) {
     val p = palette
     val prof = vm.profile
     SubPage("Privacy", onBack) {
         Rise(0) { ErrorNote(vm.error) }
+        Rise(0) { GroupLabel("Squad sharing") }
         Rise(0) {
             Card(padding = 0.dp) {
                 Column(Modifier.padding(horizontal = 16.dp)) {
-                    SettingRow(Icons.Outlined.Share, p.ink, "Share stats with squad", subtitle = if (prof.shareStats) "Streaks + protein & calories" else "Streaks only") {
+                    SettingRow(Icons.Outlined.Share, p.ink, "Share my calories & protein", subtitle = if (prof.shareStats) "Squads see today's calories & protein" else "Streaks only, and nothing auto-posts") {
                         Switch(prof.shareStats, { on -> vm.launch { vm.saveProfile(vm.profile.copy(shareStats = on)) } }, colors = switchColors())
+                    }
+                    prof.autoShare?.let { kinds ->
+                        com.sohum.bandlog.util.SquadSharing.KINDS.forEach { k ->
+                            Hair()
+                            val icon = when (k) { "meal" -> com.sohum.bandlog.ui.components.BowlIcon; "workout" -> com.sohum.bandlog.ui.components.DumbbellIcon; else -> FlameIcon }
+                            SettingRow(icon, p.ink, com.sohum.bandlog.util.SquadSharing.LABELS[k].orEmpty(), subtitle = if (prof.shareStats) null else "Off while you share streaks only") {
+                                Switch(prof.shareStats && k in kinds, { on -> vm.setAutoShare(k, on) }, enabled = prof.shareStats, colors = switchColors())
+                            }
+                        }
                     }
                 }
             }
         }
         Rise(1) {
             Text(
-                "Squad-mates always see your streak. Turn this on to also show today's protein and calories on the squad board.",
+                "Your squads always see your name, photo and streak. Auto-posts put what you log in each squad's Feed: meal names with kcal, workouts and gym PRs. To stop posting in one squad, open it, tap its name and turn off \"Auto-post my logs here\". Weight and scans are never shared.",
                 fontSize = 12.sp, color = p.muted, lineHeight = 17.sp, modifier = Modifier.padding(horizontal = 4.dp),
             )
         }

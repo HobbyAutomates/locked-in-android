@@ -178,9 +178,9 @@ fun DeleteLink(label: String = "Delete", enabled: Boolean = true, onClick: () ->
     }
 }
 
-/** Bottom snackbar with an optional Undo (above the tab bar). */
+/** Bottom snackbar with an optional Undo (or another one-word action, e.g. v2.9's "Change"), above the tab bar. */
 @Composable
-fun UndoSnackbar(text: String, modifier: Modifier = Modifier, undoEnabled: Boolean = true, onUndo: (() -> Unit)?) {
+fun UndoSnackbar(text: String, modifier: Modifier = Modifier, undoEnabled: Boolean = true, actionLabel: String = "Undo", onUndo: (() -> Unit)?) {
     val p = palette
     Row(
         modifier.fillMaxWidth().shadow(12.dp, RoundedCornerShape(16.dp), ambientColor = p.shadow, spotColor = p.shadow).background(p.btn, RoundedCornerShape(16.dp)).padding(start = 16.dp, end = 6.dp).heightIn(min = 52.dp),
@@ -188,7 +188,7 @@ fun UndoSnackbar(text: String, modifier: Modifier = Modifier, undoEnabled: Boole
     ) {
         Text(text, fontSize = 14.sp, fontWeight = FontWeight(600), color = p.btnInk, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         if (onUndo != null) Box(Modifier.heightIn(min = 44.dp).clickable(enabled = undoEnabled, onClick = onUndo).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
-            Text("Undo", fontSize = 14.sp, fontWeight = FontWeight(800), color = p.btnInk.copy(alpha = if (undoEnabled) 1f else 0.5f))
+            Text(actionLabel, fontSize = 14.sp, fontWeight = FontWeight(800), color = p.btnInk.copy(alpha = if (undoEnabled) 1f else 0.5f))
         }
     }
 }

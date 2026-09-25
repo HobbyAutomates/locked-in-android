@@ -907,6 +907,47 @@ object Api {
         run(rest("group_posts").header("Prefer", "return=minimal").post(json(arr.toString())).build(), "Post to squad"); Unit
     }
 
+    // ---- v2.9: deleting posts + sharing controls (schema_v31) ----
+
+    /** Deletes one post; RLS lets the author or the squad owner. False when nothing was deleted (not allowed / already gone). */
+    suspend fun deleteGroupPost(id: String): Boolean = withContext(Dispatchers.IO) {
+        JSONArray(run(rest("group_posts?id=eq.$id").header("Prefer", "return=representation").delete().build(), "Delete post")).length() > 0
+    }
+
+    /** The kinds of my posts that point at a log (meal / workout id), to re-post an edit only where it was posted. */
+    suspend fun myPostKinds(refId: String): Set<String> = withContext(Dispatchers.IO) {
+        val uid = Session.userId ?: throw AuthException("Not signed in")
+        val arr = JSONArray(run(rest("group_posts?select=kind&user_id=eq.$uid&ref_id=eq.$refId").get().build(), "Load posts"))
+        (0 until arr.length()).map { arr.getJSONObject(it).optString("kind") }.toSet()
+    }
+
+    /**
+     * Removes my posts that point at a log. schema_v31's delete triggers do this server-side; this
+     * covers a database without them (and a PR that stopped being one, via [kinds]).
+     */
+    suspend fun deleteMyPostsFor(refId: String, kinds: Collection<String>? = null) = withContext(Dispatchers.IO) {
+        val uid = Session.userId ?: throw AuthException("Not signed in")
+        val kindFilter = kinds?.takeIf { it.isNotEmpty() }?.let { "&kind=in.(${it.joinToString(",")})" }.orEmpty()
+        run(rest("group_posts?user_id=eq.$uid&ref_id=eq.$refId$kindFilter").header("Prefer", "return=minimal").delete().build(), "Delete posts"); Unit
+    }
+
+    /** My "Auto-post my logs here" for one squad; null when group_members.auto_post isn't there yet (switch hidden). */
+    suspend fun myAutoPost(groupId: String): Boolean? = withContext(Dispatchers.IO) {
+        val uid = Session.userId ?: return@withContext null
+        runCatching {
+            val arr = JSONArray(run(rest("group_members?select=auto_post&group_id=eq.$groupId&user_id=eq.$uid").get().build(), "Load squad setting"))
+            val o = arr.optJSONObject(0) ?: return@runCatching null
+            if (!o.has("auto_post")) null else !(o.opt("auto_post") == false)
+        }.getOrNull()
+    }
+
+    /** Sets my auto_post for one squad (RLS "members update self"). */
+    suspend fun setAutoPost(groupId: String, on: Boolean) = withContext(Dispatchers.IO) {
+        val uid = Session.userId ?: throw AuthException("Not signed in")
+        val arr = JSONArray(run(rest("group_members?group_id=eq.$groupId&user_id=eq.$uid").header("Prefer", "return=representation").patch(json(JSONObject().put("auto_post", on).toString())).build(), "Save squad setting"))
+        if (arr.length() == 0) throw ApiException("You're not in this squad any more")
+    }
+
     suspend fun groupLeaderboard(groupId: String): List<LeaderRow> {
         val arr = JSONArray(rpc("group_leaderboard", JSONObject().put("g", groupId), "Load leaderboard"))
         return (0 until arr.length()).map { LeaderRow.from(arr.getJSONObject(it)) }

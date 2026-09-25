@@ -213,10 +213,18 @@ class AppViewModel : ViewModel() {
     // ---- v2.6: squad feed posts from the save paths ----
 
     /**
+     * v2.9: bumped when an auto-post really landed in at least one squad. The shell turns the first
+     * one into "Posted to your squads · Change" (once per install, see util/SquadSharing).
+     */
+    var postedTick by mutableStateOf(0); private set
+
+    /**
      * Posts to every squad I'm in, in the background; a failure (no group_posts table yet, no
-     * squads) is silent. Meals are only shared when "share with squads" is on.
+     * squads) is silent. v2.9: a kind whose Squad sharing switch is off doesn't post, and the
+     * server skips squads with "Auto-post my logs here" off.
      */
     private fun shareToSquads(kind: String, body: String, refId: String? = null, mealPhotoPath: String? = null) {
+        if (!com.sohum.bandlog.util.SquadSharing.autoPostAllowed(profile.shareStats, profile.autoShare, kind)) return
         viewModelScope.launch {
             runCatching {
                 // A meal photo lives in the owner-only meal-photos bucket: copy it to group-photos/<uid>/ first.
@@ -228,34 +236,78 @@ class AppViewModel : ViewModel() {
                     }.getOrNull()
                 }
                 // post_to_my_groups fans out server-side; fall back to direct inserts on an older database.
-                runCatching { Api.postToMyGroups(kind, body, refId, path) }.getOrElse {
+                val posted = runCatching { Api.postToMyGroups(kind, body, refId, path) }.getOrElse {
                     val groups = Api.mySquadIds()
                     if (groups.isNotEmpty()) Api.postToGroups(groups, kind, body, refId, path)
+                    groups.size
                 }
+                if (posted > 0) postedTick++
             }.onFailure { android.util.Log.w("LockedIn", "Squad post skipped: ${it.message}") }
         }
     }
 
-    private fun shareMeal(date: String, raw: String, items: List<MealItem>, photoPath: String?, mealId: String? = null) {
-        if (date != today || !profile.shareStats || items.isEmpty()) return
+    /** "logged Dal + 2 roti · 420 kcal" — the meal's feed line (new meals and edits). */
+    private fun mealPostBody(raw: String, items: List<MealItem>): String {
         val names = items.map { it.name.trim() }.filter { it.isNotBlank() }
         val what = (names.take(3).joinToString(" + ") + if (names.size > 3) " + ${names.size - 3} more" else "").ifBlank { raw.take(60) }
         val kcal = items.sumOf { it.calories }.toInt()
-        shareToSquads("meal", "logged $what · $kcal kcal", mealId, photoPath)
+        return "logged $what · $kcal kcal"
+    }
+
+    private fun shareMeal(date: String, raw: String, items: List<MealItem>, photoPath: String?, mealId: String? = null) {
+        if (date != today || !profile.shareStats || items.isEmpty()) return
+        shareToSquads("meal", mealPostBody(raw, items), mealId, photoPath)
     }
 
     private fun fmtKg(kg: Double): String = if (kg % 1.0 == 0.0) kg.toInt().toString() else String.format(java.util.Locale.US, "%.1f", kg)
 
-    /** A new workout's feed line, and a PR post for every lift whose top weight beats its best in the loaded history. */
+    private fun workoutPostBody(w: Workout): String =
+        if (w.isBands) listOfNotNull(w.summary, w.minutes?.let { "$it min" }).joinToString(" · ") else w.summary
+
+    /**
+     * The PR line for [w]: every lift whose top weight beats its best in [previous], joined, or
+     * null. v2.9: one "pr" post per workout with ref_id = the workout, so deleting or editing the
+     * workout reaches it (the unique key is squad + user + kind + ref).
+     */
+    private fun prPostBody(w: Workout, previous: List<Workout>): String? {
+        val lines = w.lifts.mapNotNull { lift ->
+            val top = lift.sets.filter { it.kg != null && (it.reps ?: 0) > 0 }.maxWithOrNull(compareBy({ it.kg }, { it.reps })) ?: return@mapNotNull null
+            val prev = previous.asSequence().filter { it.id != w.id }.flatMap { it.lifts.asSequence() }.filter { it.name.equals(lift.name, ignoreCase = true) }
+                .flatMap { it.sets.asSequence() }.mapNotNull { it.kg }.maxOrNull() ?: return@mapNotNull null
+            if ((top.kg ?: 0.0) > prev) "${lift.name} ${fmtKg(top.kg ?: 0.0)} kg × ${top.reps}" else null
+        }
+        return if (lines.isEmpty()) null else "🏆 " + lines.joinToString(" · ")
+    }
+
+    /** A new workout's feed line, and a PR post when a lift beats its best in the loaded history. */
     private fun shareWorkout(w: Workout, previous: List<Workout>) {
         if (w.date != today) return
-        val body = if (w.isBands) listOfNotNull(w.summary, w.minutes?.let { "$it min" }).joinToString(" · ") else w.summary
-        shareToSquads("workout", body, w.id)
-        w.lifts.forEach { lift ->
-            val top = lift.sets.filter { it.kg != null && (it.reps ?: 0) > 0 }.maxWithOrNull(compareBy({ it.kg }, { it.reps })) ?: return@forEach
-            val prev = previous.asSequence().flatMap { it.lifts.asSequence() }.filter { it.name.equals(lift.name, ignoreCase = true) }
-                .flatMap { it.sets.asSequence() }.mapNotNull { it.kg }.maxOrNull() ?: return@forEach
-            if ((top.kg ?: 0.0) > prev) shareToSquads("pr", "🏆 ${lift.name} ${fmtKg(top.kg ?: 0.0)} kg × ${top.reps}", null)
+        shareToSquads("workout", workoutPostBody(w), w.id)
+        prPostBody(w, previous)?.let { shareToSquads("pr", it, w.id) }
+    }
+
+    /**
+     * v2.9: after an edit saves, the posts that already point at this log get the new body
+     * (post_to_my_groups upserts on ref_id and keeps the photo). A log that never posted stays
+     * unposted; a PR that stopped being one comes down. Background, never fails the save.
+     */
+    private fun repostEdited(refId: String, next: List<Pair<String, String?>>) {
+        viewModelScope.launch {
+            runCatching {
+                val plan = com.sohum.bandlog.util.SquadSharing.editRepostPlan(Api.myPostKinds(refId), next)
+                plan.repost.forEach { (kind, body) -> runCatching { Api.postToMyGroups(kind, body, refId) } }
+                if (plan.remove.isNotEmpty()) Api.deleteMyPostsFor(refId, plan.remove)
+            }.onFailure { android.util.Log.w("LockedIn", "Squad re-post skipped: ${it.message}") }
+        }
+    }
+
+    /** v2.9 Squad sharing: one kind's auto-post switch (profiles.auto_share). */
+    fun setAutoShare(kind: String, on: Boolean) {
+        val before = profile
+        val next = com.sohum.bandlog.util.SquadSharing.withKind(profile.autoShare ?: com.sohum.bandlog.util.SquadSharing.KINDS, kind, on)
+        profile = profile.copy(autoShare = next)
+        viewModelScope.launch {
+            if (!Api.patchProfile(org.json.JSONObject().put("auto_share", org.json.JSONArray(next)))) { profile = before; error = "Couldn't save that. Try again." }
         }
     }
 
@@ -563,6 +615,11 @@ class AppViewModel : ViewModel() {
         if (ok) notice = burnError?.let { "Workout saved, but its calories burned didn't log ($it)." } ?: if (id == null) "Workout saved" else "Workout updated"
         // v2.6: a new session goes on the squads' feed (plus a PR post for any lift beating its best).
         if (ok && id == null) newId?.let { wid -> shareWorkout(Workout(wid, date, muscles, band, kg, minutes, exercises, notes, kind, lifts.orEmpty()), history) }
+        // v2.9: an edit updates the posts it already has.
+        if (ok && id != null) {
+            val w = Workout(id, date, muscles, band, kg, minutes, exercises, notes, kind, lifts.orEmpty())
+            repostEdited(id, listOf("workout" to workoutPostBody(w), "pr" to prPostBody(w, history)))
+        }
         // refresh() runs async inside mutate; wait for it so the counts below are fresh.
         if (ok && id == null) {
             kotlinx.coroutines.delay(50)
@@ -573,7 +630,12 @@ class AppViewModel : ViewModel() {
         return ok
     }
 
-    suspend fun deleteWorkout(id: String) = mutate { runCatching { Api.deleteWorkoutBurn(id) }; Api.deleteWorkout(id) }
+    suspend fun deleteWorkout(id: String) = mutate {
+        runCatching { Api.deleteWorkoutBurn(id) }
+        Api.deleteWorkout(id)
+        // v2.9: schema_v31's trigger does this server-side; this covers a database without it.
+        runCatching { Api.deleteMyPostsFor(id) }
+    }
 
     /** Same delete, but launched on [viewModelScope] so it outlives a screen the user has already
      * left — for an undoable delete whose local timer was cancelled by leaving the screen early. */
@@ -649,13 +711,18 @@ class AppViewModel : ViewModel() {
      */
     suspend fun updateMeal(meal: com.sohum.bandlog.data.Meal, date: String, mealType: String, items: List<MealItem>, rawText: String? = null): Boolean {
         val ok = mutate { Api.updateMeal(meal.id, date, mealType, items, rawText) }
+        if (ok) repostEdited(meal.id, listOf("meal" to mealPostBody(rawText ?: meal.rawText, items)))
         if (ok) { awaitRefresh(); pushRollupFor(listOf(meal.date, date, today)) }
         return ok
     }
 
     suspend fun deleteMeal(id: String): Boolean {
         val day = meals.firstOrNull { it.id == id }?.date
-        val ok = mutate { Api.deleteMeal(id) }
+        val ok = mutate {
+            Api.deleteMeal(id)
+            // v2.9: schema_v31's trigger does this server-side; this covers a database without it.
+            runCatching { Api.deleteMyPostsFor(id) }
+        }
         if (ok && day != null && day != today) { awaitRefresh(); pushRollupFor(listOf(day)) }
         return ok
     }

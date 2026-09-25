@@ -6,7 +6,9 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -181,11 +183,18 @@ fun SquadPage(sq: SquadViewModel, squad: Squad, initialTab: Int? = null, protein
         ErrorNote(sq.error, Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
         Box(Modifier.weight(1f)) {
             when (current) {
-                SquadTab.CHAT -> ChatTab(sq)
+                SquadTab.CHAT -> ChatTab(sq, squad)
                 SquadTab.CHALLENGES -> ChallengesTab(sq, squad, proteinGoal)
-                SquadTab.FEED -> FeedTab(sq)
+                SquadTab.FEED -> FeedTab(sq, squad)
                 SquadTab.BOARD -> LeaderboardTab(sq)
                 SquadTab.BATTLE -> if (vm != null) BattleBoardTab(sq, vm, squad.id) else LeaderboardTab(sq)
+            }
+            // v2.9: "Post deleted · Undo" (the v2.7 undo), above Chat's message bar / Feed's Photo button.
+            sq.deletedSnack?.let { id ->
+                com.sohum.bandlog.ui.log.UndoSnackbar(
+                    "Post deleted", Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 84.dp),
+                    onUndo = { sq.undoDelete(id) },
+                )
             }
         }
     }
@@ -202,17 +211,20 @@ internal fun EmptyState(title: String, sub: String) {
 
 /** Chat: kind=message posts, newest at the bottom; polls every 5 s while on screen. */
 @Composable
-private fun ChatTab(sq: SquadViewModel) {
+private fun ChatTab(sq: SquadViewModel, squad: Squad) {
     val p = palette
     val me = Session.userId
+    val isOwner = squad.ownerId == me
     LaunchedEffect(sq.openId) { while (true) { delay(5_000); sq.refreshFeed() } }
-    val messages = sq.posts.filter { it.kind == "message" }
+    val messages = sq.visiblePosts.filter { it.kind == "message" }
     var text by remember { mutableStateOf("") }
     Column(Modifier.fillMaxSize().imePadding()) {
         Box(Modifier.weight(1f)) {
             if (messages.isEmpty() && !sq.pageLoading) EmptyState("Say hi 👋", "Messages stay in the squad. Plan a session, call out a PR, keep each other honest.")
             LazyColumn(Modifier.fillMaxSize(), reverseLayout = true, contentPadding = PaddingValues(12.dp, 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(messages, key = { it.id }) { m -> ChatBubble(m, mine = m.userId == me) }
+                items(messages, key = { it.id }) { m ->
+                    ChatBubble(m, mine = m.userId == me, onDelete = if (com.sohum.bandlog.util.SquadSharing.canDelete(m.userId, me, isOwner)) ({ sq.deletePost(m) }) else null)
+                }
             }
         }
         Row(
@@ -240,9 +252,12 @@ private fun ChatTab(sq: SquadViewModel) {
     }
 }
 
+/** v2.9: long-press opens a one-item menu, "Delete", for posts you may delete. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ChatBubble(m: GroupPost, mine: Boolean) {
+private fun ChatBubble(m: GroupPost, mine: Boolean, onDelete: (() -> Unit)? = null) {
     val p = palette
+    var menu by remember(m.id) { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start, verticalAlignment = Alignment.Bottom) {
         if (!mine) {
             Avatar(Api.avatarUrl(m.authorAvatar), Names.initials(m.authorName), 30.dp)
@@ -250,10 +265,15 @@ private fun ChatBubble(m: GroupPost, mine: Boolean) {
         }
         Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
             if (!mine) Text(m.authorName, fontSize = 11.sp, fontWeight = FontWeight(700), color = p.muted, modifier = Modifier.padding(start = 4.dp, bottom = 2.dp))
-            Box(
-                Modifier.widthIn(max = 280.dp).background(if (mine) p.btn else p.card2, RoundedCornerShape(18.dp, 18.dp, if (mine) 4.dp else 18.dp, if (mine) 18.dp else 4.dp))
-                    .padding(horizontal = 14.dp, vertical = 9.dp),
-            ) { Text(m.body, fontSize = 15.sp, color = if (mine) p.btnInk else p.ink, lineHeight = 20.sp) }
+            Box {
+                val shape = RoundedCornerShape(18.dp, 18.dp, if (mine) 4.dp else 18.dp, if (mine) 18.dp else 4.dp)
+                Box(
+                    Modifier.widthIn(max = 280.dp).clip(shape).background(if (mine) p.btn else p.card2, shape)
+                        .then(if (onDelete != null) Modifier.combinedClickable(onLongClickLabel = "Post options", onLongClick = { menu = true }, onClick = {}) else Modifier)
+                        .padding(horizontal = 14.dp, vertical = 9.dp),
+                ) { Text(m.body, fontSize = 15.sp, color = if (mine) p.btnInk else p.ink, lineHeight = 20.sp) }
+                if (onDelete != null) PostMenu(menu, { menu = false }, onDelete)
+            }
             Text(timeAgo(m.createdAt), fontSize = 10.sp, color = p.muted, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
         }
     }
@@ -261,12 +281,14 @@ private fun ChatBubble(m: GroupPost, mine: Boolean) {
 
 /** Feed: meals, workouts, PRs and photos from the save paths, plus a "+ Photo" post. */
 @Composable
-private fun FeedTab(sq: SquadViewModel) {
+private fun FeedTab(sq: SquadViewModel, squad: Squad) {
     val p = palette
+    val me = Session.userId
+    val isOwner = squad.ownerId == me
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     LaunchedEffect(sq.openId) { sq.refreshFeed() }
-    val items = sq.posts.filter { it.kind in FEED_KINDS }
+    val items = sq.visiblePosts.filter { it.kind in FEED_KINDS }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) scope.launch {
             val bmp = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { com.sohum.bandlog.ui.scan.decodeScaled(ctx, uri, 1600) }.getOrNull() }
@@ -279,7 +301,10 @@ private fun FeedTab(sq: SquadViewModel) {
             items(items, key = { it.id }) { post ->
                 // A challenge post opens its challenge while it's still listed (open, or ended in the last 30 days).
                 val target = post.refId?.takeIf { post.kind == "challenge" }?.let { ref -> sq.challenges?.firstOrNull { it.id == ref } }
-                FeedCard(post, onClick = target?.let { c -> { sq.openChallenge(c.id) } })
+                FeedCard(
+                    post, onClick = target?.let { c -> { sq.openChallenge(c.id) } },
+                    onDelete = if (com.sohum.bandlog.util.SquadSharing.canDelete(post.userId, me, isOwner)) ({ sq.deletePost(post) }) else null,
+                )
             }
         }
         Box(
@@ -298,10 +323,19 @@ private fun FeedTab(sq: SquadViewModel) {
     }
 }
 
+/** v2.9: long-press opens "Delete" on posts you may delete (yours, or any as the squad owner). */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun FeedCard(post: GroupPost, onClick: (() -> Unit)? = null) {
+private fun FeedCard(post: GroupPost, onClick: (() -> Unit)? = null, onDelete: (() -> Unit)? = null) {
     val p = palette
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(p.card).then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier).padding(14.dp)) {
+    var menu by remember(post.id) { mutableStateOf(false) }
+    val press = when {
+        onDelete != null -> Modifier.combinedClickable(onLongClickLabel = "Post options", onLongClick = { menu = true }, onClick = { onClick?.invoke() })
+        onClick != null -> Modifier.clickable(onClick = onClick)
+        else -> Modifier
+    }
+    Box {
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(p.card).then(press).padding(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Avatar(Api.avatarUrl(post.authorAvatar), Names.initials(post.authorName), 40.dp)
             Spacer(Modifier.width(10.dp))
@@ -362,6 +396,20 @@ private fun FeedCard(post: GroupPost, onClick: (() -> Unit)? = null) {
                 RemoteImage(privatePath = path, bucket = "group-photos", size = 400.dp, radius = 0.dp, modifier = Modifier.fillMaxSize())
             }
         }
+    }
+    if (onDelete != null) PostMenu(menu, { menu = false }, onDelete)
+    }
+}
+
+/** v2.9: the long-press menu on a post: one item, Delete (no confirm, the Undo snackbar covers it). */
+@Composable
+private fun PostMenu(open: Boolean, onDismiss: () -> Unit, onDelete: () -> Unit) {
+    val p = palette
+    androidx.compose.material3.DropdownMenu(open, onDismiss, Modifier.background(p.card)) {
+        androidx.compose.material3.DropdownMenuItem(
+            text = { Text("Delete", fontSize = 15.sp, fontWeight = FontWeight(600), color = p.red) },
+            onClick = { onDismiss(); onDelete() },
+        )
     }
 }
 
@@ -537,6 +585,18 @@ fun SquadInfoPage(sq: SquadViewModel, squad: Squad, onBack: () -> Unit) {
                     }
                 }
                 Box(Modifier.fillMaxWidth().padding(top = 8.dp).height(1.dp).background(p.hair))
+            }
+
+            // v2.9: my per-squad mute (group_members.auto_post); hidden until schema_v31 is in.
+            sq.autoPost?.let { on ->
+                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Auto-post my logs here", fontSize = 16.sp, fontWeight = FontWeight(700), color = p.ink)
+                        Text(if (on) "Your meals, workouts and PRs show in this squad's Feed" else "Nothing you log posts here. Chat and photos still work", fontSize = 12.sp, color = p.muted)
+                    }
+                    androidx.compose.material3.Switch(checked = on, onCheckedChange = { sq.setAutoPost(it) })
+                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(p.hair))
             }
 
             SectionTitle("Members")

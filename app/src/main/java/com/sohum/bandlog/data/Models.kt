@@ -251,6 +251,8 @@ data class Profile(
     val waterReminderEveryMin: Int? = null,
     /** One "glass" in mL (the + / − beside the bottle, the goal in glasses). */
     val waterGlassMl: Int = 250,
+    /** v2.9 Squad sharing: kinds that auto-post (meal / workout / pr); null = column missing (schema_v31 not applied, everything posts). */
+    val autoShare: List<String>? = null,
 ) {
     /** The lens a report opens on: `goal` follows the weight goal (lose → cutting, gain → bulking, else protein). */
     val initialLens: String
@@ -305,6 +307,7 @@ data class Profile(
             waterReminderTo = if (!o.has("water_reminder_to")) null else o.str("water_reminder_to")?.take(5),
             waterReminderEveryMin = if (!o.has("water_reminder_every_min") || o.isNull("water_reminder_every_min")) null else o.optInt("water_reminder_every_min", 0),
             waterGlassMl = if (!o.has("water_glass_ml") || o.isNull("water_glass_ml")) 250 else o.optInt("water_glass_ml", 250).coerceIn(50, 2000),
+            autoShare = if (!o.has("auto_share")) null else com.sohum.bandlog.util.SquadSharing.parseAutoShare(o.optJSONArray("auto_share")) ?: com.sohum.bandlog.util.SquadSharing.KINDS,
         )
     }
 }
