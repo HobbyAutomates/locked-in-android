@@ -158,6 +158,7 @@ fun MealForm(
     var day by rememberSaveable { mutableStateOf(existing?.date ?: date) }
     var pickDate by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf(false) }
+    var voted by remember { mutableStateOf<String?>(null) }
     var deleteJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     // Leaving the editor inside the undo window still deletes (on the view model's scope), like the workout editor.
     androidx.compose.runtime.DisposableEffect(existing?.id) {
@@ -343,6 +344,9 @@ fun MealForm(
             Plate(
                 items = items, pending = pending, notes = notes, fats = fats, presets = vm.presets, saving = saving,
                 editing = existing != null, deleted = pendingDelete,
+                // 👍 / 👎 only for AI-logged meals; the same best-effort Api.feedback write the old Home row used.
+                feedback = existing?.takeIf { MealTypes.aiLogged(it) }?.let { m -> { r: String -> voted = r; vm.launch { runCatching { Api.feedback(r, m.rawText, m.id) } } } },
+                voted = voted,
                 onDelete = { startDelete() }, onUndoDelete = { deleteJob?.cancel(); deleteJob = null; pendingDelete = false },
                 canFix = parsedText != null && items.isNotEmpty(),
                 onFix = { fixOpen = true }, onRepeat = { repeatOpen = true },
@@ -752,6 +756,8 @@ private fun Plate(
     saving: Boolean,
     editing: Boolean,
     deleted: Boolean,
+    feedback: ((String) -> Unit)?,
+    voted: String?,
     onDelete: () -> Unit,
     onUndoDelete: () -> Unit,
     canFix: Boolean,
@@ -800,7 +806,19 @@ private fun Plate(
                 Box(Modifier.heightIn(min = 44.dp).clickable(onClick = onUndoDelete).padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
                     Text("Undo", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.btn)
                 }
-            } else Box(Modifier.fillMaxWidth().padding(top = 4.dp), contentAlignment = Alignment.Center) {
+            } else Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (feedback != null) {
+                    Text(if (voted == null) "AI right?" else "Thanks", fontSize = 12.sp, color = p.muted)
+                    listOf("up" to com.sohum.bandlog.ui.components.ThumbUpIcon, "down" to com.sohum.bandlog.ui.components.ThumbDownIcon).forEach { (r, icon) ->
+                        val sel = voted == r
+                        Box(Modifier.size(44.dp).clickable(enabled = voted == null) { feedback(r) }, contentAlignment = Alignment.Center) {
+                            Box(Modifier.size(30.dp).background(if (sel) p.btn else p.card2, CircleShape), contentAlignment = Alignment.Center) {
+                                Icon(icon, if (r == "up") "The AI got this right" else "The AI got this wrong", tint = if (sel) p.btnInk else p.muted, modifier = Modifier.size(15.dp))
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.weight(1f))
                 Row(
                     Modifier.heightIn(min = 44.dp).background(p.redBg, CircleShape).clickable(enabled = !saving, onClick = onDelete).padding(horizontal = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,

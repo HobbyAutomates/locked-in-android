@@ -61,6 +61,13 @@ object MealTypes {
     /** A saved meal's type: its column when set, else the hour rule on when it was logged (column missing / null). */
     fun of(meal: Meal): String = meal.mealType?.takeIf { isType(it) } ?: forHour(hourOf(meal.createdAt) ?: 12)
 
+    /**
+     * Whether a meal came from the AI (a parsed sentence, a plate photo or a scan) — only those ask
+     * "AI right?" in the editor. Preset / search taps are table rows at confidence 1. Mirrors the web's aiLogged.
+     */
+    fun aiLogged(meal: Meal): Boolean =
+        meal.photoPath != null || meal.items.any { it.source == "estimated" || it.source == "scan" || it.confidence == null || it.confidence < 1.0 }
+
     data class Section(val type: Type, val meals: List<Meal>, val kcal: Int, val protein: Double)
 
     /** A day's meals in the four sections, Home's order; each section's meals oldest first. */
