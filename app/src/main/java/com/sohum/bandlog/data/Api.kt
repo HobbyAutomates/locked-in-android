@@ -513,6 +513,23 @@ object Api {
         )
     }
 
+    /**
+     * v2.9 "Where's this from?" for rows that arrived without it (the meal editor's saved rows, a
+     * search pick): provenance + any "Which one?" variants, same order as [items]. Best-effort.
+     */
+    suspend fun foodSources(items: List<MealItem>): List<Pair<SourceInfo?, List<FoodVariant>>> = withContext(Dispatchers.IO) {
+        val arr = JSONArray()
+        items.take(20).forEach {
+            arr.put(JSONObject().put("food_id", it.foodId ?: JSONObject.NULL).put("name", it.name).put("grams", it.grams).put("calories", it.calories).put("source", it.source))
+        }
+        val o = api("food-source", JSONObject().put("items", arr), "Sources")
+        val out = o.optJSONArray("items") ?: JSONArray()
+        (0 until out.length()).map { i ->
+            val x = out.optJSONObject(i) ?: JSONObject()
+            SourceInfo.from(x.optJSONObject("source_info")) to FoodVariant.list(x.optJSONArray("variants"))
+        }
+    }
+
     /** 👍/👎 on a parsed meal. */
     suspend fun feedback(rating: String, rawText: String, mealId: String?, correction: String = "") = withContext(Dispatchers.IO) {
         api("feedback", JSONObject().put("rating", rating).put("raw_text", rawText).put("meal_id", mealId ?: JSONObject.NULL).put("correction", correction), "Feedback"); Unit

@@ -120,6 +120,10 @@ data class MealItem(
     val imageUrl: String? = null,
     /** v2.5: parse-meal's `default_count` ("2 roti" → 2) — where the Quantity sheet's stepper starts (never saved). */
     val defaultCount: Double? = null,
+    /** v2.9: "Which one?" options when the name is ambiguous (display only, never saved). */
+    val variants: List<FoodVariant> = emptyList(),
+    /** v2.9: where the numbers came from, for the ⓘ sheet (display only, never saved). */
+    val sourceInfo: SourceInfo? = null,
 ) {
     fun toJson(mealId: String, userId: String): JSONObject = JSONObject()
         .put("meal_id", mealId).put("user_id", userId)
@@ -162,6 +166,8 @@ data class MealItem(
             cookedIn = if (o.isNull("cooked_in")) null else o.optString("cooked_in").ifBlank { null },
             imageUrl = urlOf(o),
             defaultCount = if (!o.has("default_count") || o.isNull("default_count")) null else o.optDouble("default_count").takeIf { !it.isNaN() && it > 0 },
+            variants = FoodVariant.list(o.optJSONArray("variants")),
+            sourceInfo = SourceInfo.from(o.optJSONObject("source_info")),
         )
 
         /** `image_url` when present and non-blank, else null. */
@@ -583,6 +589,8 @@ data class LabelReport(
     val infographic: Infographic,
     /** v2.8: deterministic sanity-check flags — never blocks the scan, just a heads-up. */
     val validation: List<ValidationFlag> = emptyList(),
+    /** v2.9: where the numbers came from (label / Open Food Facts + research links). */
+    val sourceInfo: SourceInfo? = null,
 ) {
     companion object {
         fun from(o: JSONObject): LabelReport {
@@ -616,6 +624,7 @@ data class LabelReport(
                 research = strings("research"), suggestions = strings("suggestions"), alternatives = strings("alternatives"),
                 infographic = Infographic.from(o.optJSONObject("infographic")),
                 validation = validation,
+                sourceInfo = SourceInfo.from(o.optJSONObject("source_info")),
             )
         }
     }
@@ -642,6 +651,10 @@ data class PlateItem(
     val gramsHigh: Double? = null,
     /** v2.8: what's uncertain about this item, e.g. "oil amount unclear". */
     val uncertainties: List<String> = emptyList(),
+    /** v2.9: "Which one?" options when the name is ambiguous — empty on older reports. */
+    val variants: List<FoodVariant> = emptyList(),
+    /** v2.9: where the numbers came from, for the ⓘ sheet — null on older reports. */
+    val sourceInfo: SourceInfo? = null,
 ) {
     fun withGrams(g: Double): PlateItem {
         if (grams <= 0.0) return copy(grams = g)
@@ -655,6 +668,7 @@ data class PlateItem(
     fun toMealItem() = MealItem(
         foodId = foodId, name = name, grams = grams, calories = calories, proteinG = proteinG, carbsG = carbsG, fatG = fatG,
         source = source, confidence = when (confidence) { "high" -> 0.9; "medium" -> 0.6; else -> 0.3 }, micros = micros, cookedIn = cookedIn,
+        variants = variants, sourceInfo = sourceInfo,
     )
 
     /** "150 g (120-190)", or just "150 g" when there's no range. */
@@ -681,6 +695,8 @@ data class PlateItem(
             gramsLow = if (o.has("grams_low") && !o.isNull("grams_low")) o.optDouble("grams_low") else null,
             gramsHigh = if (o.has("grams_high") && !o.isNull("grams_high")) o.optDouble("grams_high") else null,
             uncertainties = o.optJSONArray("uncertainties")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList(),
+            variants = FoodVariant.list(o.optJSONArray("variants")),
+            sourceInfo = SourceInfo.from(o.optJSONObject("source_info")),
         )
     }
 }
@@ -1110,5 +1126,62 @@ data class ChallengeBoardRow(
             o.optString("user_id"), o.s("name") ?: "Member", o.s("username"), o.s("avatar_path"),
             o.optInt("progress", 0), o.optBoolean("completed", false), o.s("completed_on")?.take(10), o.optInt("rank", 0),
         )
+    }
+}
+
+/**
+ * v2.9 "Which one?" — one option for an ambiguous item (parse / plate-scan `variants`, or
+ * /api/food-source). Per 100 g; choosing it re-prices the row at the same grams.
+ */
+data class FoodVariant(
+    val foodId: String,
+    val name: String,
+    val kcalPer100g: Double,
+    val proteinPer100g: Double,
+    val carbsPer100g: Double,
+    val fatPer100g: Double,
+    val micros: Map<String, Double> = emptyMap(),
+    val source: String? = null,
+    /** The curated chip label ("Maida roti"), else null → the row's name. */
+    val label: String? = null,
+) {
+    val chip: String get() = label ?: name
+
+    companion object {
+        fun from(o: JSONObject): FoodVariant? {
+            val id = o.optString("food_id").ifBlank { return null }
+            return FoodVariant(
+                foodId = id,
+                name = o.optString("name"),
+                kcalPer100g = o.optDouble("kcal_per_100g", 0.0),
+                proteinPer100g = o.optDouble("protein_per_100g", 0.0).takeIf { !it.isNaN() } ?: 0.0,
+                carbsPer100g = o.optDouble("carbs_per_100g", 0.0).takeIf { !it.isNaN() } ?: 0.0,
+                fatPer100g = o.optDouble("fat_per_100g", 0.0).takeIf { !it.isNaN() } ?: 0.0,
+                micros = MealItem.micros(o.optJSONObject("micros_per_100g")),
+                source = if (o.isNull("source")) null else o.optString("source").ifBlank { null },
+                label = if (o.isNull("label")) null else o.optString("label").ifBlank { null },
+            )
+        }
+
+        fun list(a: JSONArray?): List<FoodVariant> = a?.let { arr -> (0 until arr.length()).mapNotNull { i -> arr.optJSONObject(i)?.let { from(it) } } } ?: emptyList()
+    }
+}
+
+/** v2.9 "Where's this from?" — mirrors src/lib/sourceInfo.ts. */
+data class SourceLink(val label: String, val url: String)
+data class SourceInfo(val kind: String, val label: String, val detail: String, val links: List<SourceLink> = emptyList()) {
+    companion object {
+        fun from(o: JSONObject?): SourceInfo? {
+            if (o == null) return null
+            val label = o.optString("label").ifBlank { return null }
+            val links = o.optJSONArray("links")?.let { arr ->
+                (0 until arr.length()).mapNotNull { i ->
+                    val x = arr.optJSONObject(i) ?: return@mapNotNull null
+                    val url = x.optString("url")
+                    if (url.startsWith("http")) SourceLink(x.optString("label").ifBlank { url }, url) else null
+                }
+            } ?: emptyList()
+            return SourceInfo(o.optString("kind", "custom"), label, o.optString("detail"), links)
+        }
     }
 }

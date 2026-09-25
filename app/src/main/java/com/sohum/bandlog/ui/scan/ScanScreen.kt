@@ -80,6 +80,10 @@ import com.sohum.bandlog.data.Api
 import com.sohum.bandlog.data.LabelReport
 import com.sohum.bandlog.data.PlateEstimate
 import com.sohum.bandlog.data.PlateItem
+import com.sohum.bandlog.ui.components.InfoButton
+import com.sohum.bandlog.ui.components.SourceSheet
+import com.sohum.bandlog.ui.components.VariantChips
+import com.sohum.bandlog.util.Sources
 import com.sohum.bandlog.data.ScanHistoryItem
 import com.sohum.bandlog.ui.AppViewModel
 import com.sohum.bandlog.ui.components.BarcodeIcon
@@ -382,7 +386,7 @@ private fun ScanForm(
             }
             report?.let { ReportView(it, lens, onLogged = { vm.refresh() }, onLogServing = onLogServing) }
             plate?.let { est ->
-                PhotoReview(est, photo, readOnly = false) { items, path ->
+                PhotoReview(est, photo, readOnly = false, onPickAnother = { list -> vm.openAddFood(list.map { it.toMealItem() }) }) { items, path ->
                     scope.launch {
                         busy = true
                         val photoPath = path ?: photo?.let { b -> runCatching { Api.uploadMealPhoto(withContext(Dispatchers.IO) { toJpegBytes(b, 85) }) }.getOrNull() }
@@ -543,7 +547,9 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Uni
             PillButton("Log 1 serving" + (r.servingG?.takeIf { it > 0 }?.let { " · ${it.roundToInt()} g" } ?: ""), {
                 val go = onLogServing
                 if (go == null) logFood = food
-                else go(food.item(if (food.servingGrams != null) com.sohum.bandlog.util.Quantity(com.sohum.bandlog.util.QUnit.SERVING, 1.0) else com.sohum.bandlog.util.Quantity(com.sohum.bandlog.util.QUnit.G, 100.0)))
+                // v2.9: the plate's ⓘ shows where these numbers came from (the label, or Open Food Facts).
+                else go(food.item(if (food.servingGrams != null) com.sohum.bandlog.util.Quantity(com.sohum.bandlog.util.QUnit.SERVING, 1.0) else com.sohum.bandlog.util.Quantity(com.sohum.bandlog.util.QUnit.G, 100.0))
+                    .copy(sourceInfo = r.sourceInfo ?: Sources.forReport(r.nutritionSource, r.barcode)))
             })
             logged?.let { Row(Modifier.padding(top = 8.dp, start = 4.dp), verticalAlignment = Alignment.CenterVertically) { Icon(CheckIcon, null, tint = p.green, modifier = Modifier.size(14.dp)); Text("  $it — on Home", fontSize = 12.sp, fontWeight = FontWeight(600), color = p.green) } }
             logError?.let { Text(it, fontSize = 12.sp, color = p.red, modifier = Modifier.padding(top = 8.dp, start = 4.dp)) }
@@ -912,9 +918,19 @@ private val CONF_RANK = mapOf("low" to 0, "medium" to 1, "high" to 2)
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun PhotoReview(est: PlateEstimate, photo: Bitmap?, readOnly: Boolean, onSave: ((List<PlateItem>, String?) -> Unit)? = null) {
+fun PhotoReview(
+    est: PlateEstimate, photo: Bitmap?, readOnly: Boolean,
+    /** v2.9 "Not right? Pick another" with no variants: open the plate in Add food to change it. */
+    onPickAnother: ((List<PlateItem>) -> Unit)? = null,
+    onSave: ((List<PlateItem>, String?) -> Unit)? = null,
+) {
     val p = palette
     var items by remember(est) { mutableStateOf(est.items) }
+    // v2.9: the row whose "Where's this from?" sheet is open, rows whose variant was picked, reported rows.
+    var infoIdx by remember(est) { mutableStateOf<Int?>(null) }
+    var confirmed by remember(est) { mutableStateOf(setOf<Int>()) }
+    var reported by remember(est) { mutableStateOf(setOf<Int>()) }
+    val scope = rememberCoroutineScope()
     // v2.8: the un-scaled estimate for each row (including any follow-up effect already applied), so
     // a gram edit always rescales from the latest baseline, never from the server's raw estimate.
     var originals by remember(est) { mutableStateOf(est.items) }
@@ -960,6 +976,7 @@ fun PhotoReview(est: PlateEstimate, photo: Bitmap?, readOnly: Boolean, onSave: (
                                 Text(it.name + if (it.source == "estimated") " ~" else "", fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
                                 Spacer(Modifier.width(6.dp))
                                 Box(Modifier.background(cc.copy(alpha = 0.16f), CircleShape).padding(7.dp, 2.dp)) { Text(cl, fontSize = 10.sp, fontWeight = FontWeight(700), color = cc) }
+                                InfoButton(it.name, idx !in confirmed && Sources.needsCheck(it)) { infoIdx = idx }
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text("${it.calories.toInt()} kcal", fontSize = 12.sp, color = p.muted)
@@ -968,6 +985,12 @@ fun PhotoReview(est: PlateEstimate, photo: Bitmap?, readOnly: Boolean, onSave: (
                             }
                             if (it.gramsLow != null && it.gramsHigh != null) Text(it.gramsRangeLabel(), fontSize = 11.sp, color = p.muted)
                             if (it.uncertainties.isNotEmpty()) Text(it.uncertainties.joinToString(" · "), fontSize = 11.sp, color = p.orange)
+                            // v2.9 "Which one?" — one tap swaps the row (and its unscaled original) at the same grams.
+                            if (!readOnly && it.variants.size > 1) VariantChips(it.variants, it.foodId, { v ->
+                                items = items.toMutableList().also { l -> l[idx] = Sources.swap(l[idx], v) }
+                                originals = originals.toMutableList().also { l -> if (idx in l.indices) l[idx] = Sources.swap(l[idx], v) }
+                                confirmed = confirmed + idx
+                            })
                             AnimatedVisibility(open == idx) {
                                 Text(micros.joinToString("  ·  ") { (k, lu) -> "${lu.first} ${fmt(round1(it.micros[k]!!))} ${lu.second}" }, fontSize = 12.sp, color = p.muted, lineHeight = 17.sp)
                             }
@@ -984,6 +1007,8 @@ fun PhotoReview(est: PlateEstimate, photo: Bitmap?, readOnly: Boolean, onSave: (
                             IconButton(onClick = {
                                 items = items.filterIndexed { i, _ -> i != idx }
                                 originals = originals.filterIndexed { i, _ -> i != idx }
+                                confirmed = confirmed.filter { i -> i != idx }.map { i -> if (i > idx) i - 1 else i }.toSet()
+                                reported = reported.filter { i -> i != idx }.map { i -> if (i > idx) i - 1 else i }.toSet()
                             }, Modifier.size(32.dp)) { Icon(Icons.Outlined.Delete, "Remove", tint = p.muted) }
                         } else {
                             Text("${it.grams.roundToInt()} g", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink)
@@ -1019,6 +1044,31 @@ fun PhotoReview(est: PlateEstimate, photo: Bitmap?, readOnly: Boolean, onSave: (
         }
     }
     if (est.notes.isNotEmpty()) Rise(3) { Text(est.notes.joinToString(" · "), fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(horizontal = 4.dp)) }
+    infoIdx?.let { idx ->
+        val row = items.getOrNull(idx)
+        if (row == null) { infoIdx = null; return@let }
+        SourceSheet(
+            name = row.name,
+            info = row.sourceInfo ?: Sources.fallback(row.toMealItem()) ?: Sources.forRow(null, row.name),
+            confidence = Sources.confidenceLabel(row.confidence),
+            per100 = Sources.per100Note(row.grams, row.calories, row.proteinG, row.carbsG, row.fatG),
+            variants = row.variants, currentId = row.foodId,
+            reported = idx in reported,
+            onDismiss = { infoIdx = null },
+            onPickVariant = if (readOnly) null else { v ->
+                items = items.toMutableList().also { l -> l[idx] = Sources.swap(l[idx], v) }
+                originals = originals.toMutableList().also { l -> if (idx in l.indices) l[idx] = Sources.swap(l[idx], v) }
+                confirmed = confirmed + idx
+                infoIdx = null
+            },
+            onPickAnother = if (readOnly || onPickAnother == null) null else ({ infoIdx = null; onPickAnother(items) }),
+            onReport = {
+                reported = reported + idx
+                val note = "[source report] ${row.name} · food_id=${row.foodId ?: "none"} · ${row.sourceInfo?.label ?: row.source} · ${Sources.per100Note(row.grams, row.calories, row.proteinG, row.carbsG, row.fatG)}"
+                scope.launch { runCatching { Api.feedback("down", row.name, null, note) } }
+            },
+        )
+    }
     if (!readOnly && onSave != null) Rise(4) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column {
