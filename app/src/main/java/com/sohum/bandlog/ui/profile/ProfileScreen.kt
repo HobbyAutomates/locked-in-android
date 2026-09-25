@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AdminPanelSettings
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Logout
 import androidx.compose.material.icons.outlined.MailOutline
@@ -234,6 +235,14 @@ fun ProfileScreen(
                     }
                     Hair()
                     SettingRow(Icons.Outlined.NewReleases, p.ink, "What's new", subtitle = "Changelog", onClick = { showChangelog = true }) { Chevron() }
+                    // v2.11: only the owner sees this; the web panel still checks on the server.
+                    val isAdmin = Session.email?.trim()?.lowercase()?.let { e -> BuildConfig.ADMIN_EMAILS.split(",").map { it.trim().lowercase() }.contains(e) } == true
+                    if (isAdmin && BuildConfig.API_BASE.isNotBlank()) {
+                        Hair()
+                        SettingRow(Icons.Outlined.AdminPanelSettings, p.ink, "Admin", subtitle = "Users and usage (opens in your browser)", onClick = {
+                            runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(BuildConfig.API_BASE.trimEnd('/') + "/admin"))) }
+                        }) { Chevron() }
+                    }
                     Hair()
                     SettingRow(Icons.Outlined.Share, p.ink, "Invite friends", subtitle = "Android APK or the iPhone web app", onClick = {
                         runCatching {
