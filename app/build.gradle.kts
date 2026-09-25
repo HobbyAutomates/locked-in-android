@@ -28,7 +28,7 @@ android {
         minSdk = 31
         targetSdk = 34
         versionCode = 21
-        versionName = "2.9"
+        versionName = "2.10"
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
         // The Railway web app; /api/parse-meal holds the Anthropic key server-side.
