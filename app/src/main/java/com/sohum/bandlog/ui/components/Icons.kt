@@ -604,3 +604,79 @@ val SQUAD_ICONS: List<SquadIconPreset> by lazy {
         SquadIconPreset("leaf", "Leaf", LeafMark, Color(0xFF1F7A4C), Color(0xFF6EE7A8)),
     )
 }
+
+/* ---- v2.10: Lucide line icons ----
+ * Path data copied from Lucide (https://lucide.dev), ISC License,
+ * Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2022 as part of Feather (MIT);
+ * all other copyright (c) for Lucide are held by Lucide Contributors 2022.
+ * The strings are the same ones as the web's LUCIDE map in src/components/icons.tsx (circles and
+ * rects written as paths), parsed with Compose's PathParser, so both platforms draw identical icons.
+ * Stroke 2, round caps and joins, as Lucide ships them; tint with the current text colour.
+ */
+object Lucide {
+    val sunrise = listOf("M12 2v8", "M4.93 10.93l1.41 1.41", "M2 18h2", "M20 18h2", "M19.07 10.93l-1.41 1.41", "M22 22H2", "M8 6l4-4 4 4", "M16 18a4 4 0 0 0-8 0")
+    val sun = listOf("M8 12a4 4 0 1 0 8 0a4 4 0 1 0-8 0", "M12 2v2", "M12 20v2", "M4.93 4.93l1.41 1.41", "M17.66 17.66l1.41 1.41", "M2 12h2", "M20 12h2", "M6.34 17.66l-1.41 1.41", "M19.07 4.93l-1.41 1.41")
+    val moon = listOf("M12 3a6 6 0 0 0 9 9a9 9 0 1 1-9-9z")
+    val cookie = listOf("M12 2a10 10 0 1 0 10 10a4 4 0 0 1-5-5a4 4 0 0 1-5-5", "M8.5 8.5v.01", "M16 15.5v.01", "M12 12v.01", "M11 17v.01", "M7 14v.01")
+    val crown = listOf("M2 4l3 12h14l3-12-6 7-4-7-4 7-6-7z", "M5 20h14")
+    val trophy = listOf(
+        "M6 9H4.5a2.5 2.5 0 0 1 0-5H6",
+        "M18 9h1.5a2.5 2.5 0 0 0 0-5H18",
+        "M4 22h16",
+        "M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22",
+        "M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22",
+        "M18 2H6v7a6 6 0 0 0 12 0V2z",
+    )
+    val flag = listOf("M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z", "M4 22v-7")
+    val egg = listOf("M12 22c6.23-.05 7.87-5.57 7.5-10-.36-4.34-3.95-9.96-7.5-10-3.55.04-7.14 5.66-7.5 10-.37 4.43 1.27 9.95 7.5 10z")
+    val clipboardList = listOf(
+        "M9 2h6a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z",
+        "M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2",
+        "M12 11h4", "M12 16h4", "M8 11h.01", "M8 16h.01",
+    )
+    val droplet = listOf("M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z")
+}
+
+/** An ImageVector from Lucide path strings (24 viewBox, stroke 2, round caps / joins). */
+fun lucide(name: String, paths: List<String>): ImageVector =
+    ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f).apply {
+        paths.forEach { d ->
+            addPath(
+                pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(d).toNodes(),
+                stroke = SolidColor(Color.Black), strokeLineWidth = 2f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round,
+            )
+        }
+    }.build()
+
+val SunriseIcon: ImageVector by lazy { lucide("Sunrise", Lucide.sunrise) }
+val SunIcon: ImageVector by lazy { lucide("Sun", Lucide.sun) }
+val MoonLineIcon: ImageVector by lazy { lucide("Moon", Lucide.moon) }
+val CookieIcon: ImageVector by lazy { lucide("Cookie", Lucide.cookie) }
+val CrownIcon: ImageVector by lazy { lucide("Crown", Lucide.crown) }
+val TrophyIcon: ImageVector by lazy { lucide("Trophy", Lucide.trophy) }
+val FlagIcon: ImageVector by lazy { lucide("Flag", Lucide.flag) }
+val EggIcon: ImageVector by lazy { lucide("Egg", Lucide.egg) }
+val ClipboardListIcon: ImageVector by lazy { lucide("ClipboardList", Lucide.clipboardList) }
+val DropletIcon: ImageVector by lazy { lucide("Droplet", Lucide.droplet) }
+
+/** Speech bubble, the same path as the web's Chat icon (WhatsApp invite action). */
+val ChatIcon: ImageVector by lazy { lucide("Chat", listOf("M4 18.5l1.3-3.6A8 8 0 1 1 8.6 19z")) }
+
+/** A meal section's icon: Breakfast sunrise, Lunch sun, Dinner moon, Snacks cookie (the web's MealTypeIcon). */
+fun mealTypeIcon(key: String): ImageVector = when (key) {
+    "breakfast" -> SunriseIcon
+    "lunch" -> SunIcon
+    "dinner" -> MoonLineIcon
+    else -> CookieIcon
+}
+
+/** A challenge kind's tag icon: train days dumbbell, protein days egg, log every day clipboard (the web's ChallengeKindIcon). */
+fun challengeKindIcon(kind: String): ImageVector = when (kind) {
+    "train_days" -> DumbbellIcon
+    "protein_days" -> EggIcon
+    "log_days" -> ClipboardListIcon
+    else -> FlagIcon
+}
+
+/** Plus, the same path as the web's Plus icon ("Start a challenge"). */
+val PlusIcon: ImageVector by lazy { stroke("Plus") { moveTo(12f, 5f); verticalLineTo(19f); moveTo(5f, 12f); horizontalLineTo(19f) } }

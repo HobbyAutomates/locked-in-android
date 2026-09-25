@@ -79,16 +79,16 @@ object ChallengeMath {
         else -> daysLeft(today, endsOn).let { if (it <= 1) "last day 👀" else "$it days left" }
     }
 
-    /** "12/14 days 🔥" (the flame once there's at least one day in). */
-    fun progressLine(progress: Int, target: Int): String = "$progress/$target days" + if (progress > 0) " 🔥" else ""
+    /** "12/14 days" (v2.10: the UI draws a Flame icon beside it once there's a day in, no emoji). */
+    fun progressLine(progress: Int, target: Int): String = "$progress/$target days"
 
     fun fraction(progress: Int, target: Int): Float = if (target <= 0) 0f else (progress.toFloat() / target).coerceIn(0f, 1f)
 
-    /** Emoji + short label for a kind, as on the create sheet's template chips. */
+    /** Short label for a kind (v2.10: its icon is ui.components.challengeKindIcon, not an emoji). */
     fun kindLabel(kind: String): String = when (kind) {
-        PROTEIN -> "💪 Protein days"
-        LOG -> "📝 Log every day"
-        else -> "🏋️ Train days"
+        PROTEIN -> "Protein days"
+        LOG -> "Log every day"
+        else -> "Train days"
     }
 
     fun startedBody(title: String) = "🏁 started \"$title\""

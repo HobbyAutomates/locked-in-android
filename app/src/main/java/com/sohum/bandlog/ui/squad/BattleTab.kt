@@ -1,5 +1,6 @@
 package com.sohum.bandlog.ui.squad
 
+import androidx.compose.material3.Icon
 import android.graphics.Bitmap
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -128,7 +129,7 @@ private fun BattleRow(row: BattleRepo.BattleRow, mine: Boolean, pointsToLead: In
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(row.name + if (mine) " (you)" else "", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                if (leader) Text(" 👑", fontSize = 15.sp)
+                if (leader) { Spacer(Modifier.width(4.dp)); Icon(com.sohum.bandlog.ui.components.CrownIcon, "Leader", tint = p.flame, modifier = Modifier.size(15.dp)) }
                 Spacer(Modifier.width(6.dp))
                 Box(Modifier.background(goalTint(row.goalType).copy(alpha = 0.14f), CircleShape).padding(horizontal = 8.dp, vertical = 2.dp)) {
                     Text(row.goalLabel, fontSize = 10.sp, fontWeight = FontWeight(800), color = goalTint(row.goalType))
@@ -194,7 +195,11 @@ private fun GraffitiCrownCard(crown: BattleRepo.BattleWinner) {
         Modifier.fillMaxWidth().shadow(10.dp, RoundedCornerShape(24.dp)).background(gradient, RoundedCornerShape(24.dp)).padding(18.dp),
     ) {
         Column {
-            Text("👑 GRAFFITI CROWN", fontSize = 12.sp, fontWeight = FontWeight(800), color = Color.White.copy(alpha = 0.85f), letterSpacing = 1.5.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(com.sohum.bandlog.ui.components.CrownIcon, null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(13.dp))
+                Spacer(Modifier.width(5.dp))
+                Text("GRAFFITI CROWN", fontSize = 12.sp, fontWeight = FontWeight(800), color = Color.White.copy(alpha = 0.85f), letterSpacing = 1.5.sp)
+            }
             Text(
                 crown.name, fontSize = 26.sp, fontWeight = FontWeight(900), color = Color.White,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp),

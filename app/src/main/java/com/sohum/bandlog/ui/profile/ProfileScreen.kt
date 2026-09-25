@@ -386,7 +386,9 @@ private fun GraffitiWallCard(g: com.sohum.bandlog.data.BattleRepo.Graffiti) {
     val p = palette
     Card(padding = 0.dp) {
         Row(Modifier.fillMaxWidth().padding(16.dp, 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("👑", fontSize = 22.sp)
+            Box(Modifier.size(40.dp).background(p.card2, CircleShape), contentAlignment = Alignment.Center) {
+                Icon(com.sohum.bandlog.ui.components.CrownIcon, null, tint = p.ink, modifier = Modifier.size(20.dp))
+            }
             Spacer(Modifier.width(12.dp))
             Column {
                 Text("Graffiti wall", fontSize = 15.sp, fontWeight = FontWeight(800), color = p.ink)
