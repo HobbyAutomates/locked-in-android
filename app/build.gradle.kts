@@ -15,6 +15,9 @@ val localProps = Properties().apply {
 val supabaseUrl: String = localProps.getProperty("SUPABASE_URL", "")
 val supabaseAnonKey: String = localProps.getProperty("SUPABASE_ANON_KEY", "")
 val apiBase: String = localProps.getProperty("API_BASE", "")
+// v2.10 beta usage events (bandlog.app_events). Default on for the closed beta; set
+// BETA_ANALYTICS=false in local.properties to build an APK that sends nothing.
+val betaAnalytics: Boolean = localProps.getProperty("BETA_ANALYTICS", "true").trim().lowercase() !in setOf("false", "0", "off", "no")
 
 android {
     namespace = "com.sohum.bandlog"
@@ -30,6 +33,7 @@ android {
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
         // The Railway web app; /api/parse-meal holds the Anthropic key server-side.
         buildConfigField("String", "API_BASE", "\"$apiBase\"")
+        buildConfigField("boolean", "BETA_ANALYTICS", "$betaAnalytics")
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 

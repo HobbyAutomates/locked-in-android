@@ -269,6 +269,7 @@ private fun SnapSheet(vm: AppViewModel, groupId: String, onDismiss: () -> Unit) 
                 val names = items.map { it.name.trim() }.filter { it.isNotBlank() }
                 val what = (names.take(3).joinToString(" + ") + if (names.size > 3) " + ${names.size - 3} more" else "").ifBlank { "Snap" }
                 val mealId = Api.saveMeal(date, "Snap: $what", mealItems, photoPath)
+                com.sohum.bandlog.data.Analytics.track("meal_logged", "method" to "photo", "items" to mealItems.size, "from" to "battle")
                 vm.refresh()
 
                 val kcal = mealItems.sumOf { it.calories }

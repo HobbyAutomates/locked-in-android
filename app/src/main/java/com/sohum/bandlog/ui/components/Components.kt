@@ -202,6 +202,7 @@ fun IconTile(icon: ImageVector, tint: Color, bg: Color) {
 
 @Composable
 fun ErrorNote(text: String?, modifier: Modifier = Modifier) {
+    LaunchedEffect(text) { if (!text.isNullOrBlank()) com.sohum.bandlog.data.Analytics.track("error_shown", "message" to text) }
     if (text.isNullOrBlank()) return
     val p = palette
     Box(modifier.fillMaxWidth().background(p.redBg, RoundedCornerShape(12.dp)).padding(12.dp)) { Text(text, color = p.red, fontSize = 13.sp) }

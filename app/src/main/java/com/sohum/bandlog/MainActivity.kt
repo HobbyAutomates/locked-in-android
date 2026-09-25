@@ -64,6 +64,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.sohum.bandlog.data.Analytics
 import com.sohum.bandlog.data.Session
 import com.sohum.bandlog.data.Workout
 import com.sohum.bandlog.ui.AppViewModel
@@ -135,6 +136,10 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    // v2.10 beta events: every return to the foreground is an app_open; leaving sends what's queued.
+    override fun onStart() { super.onStart(); Analytics.track("app_open") }
+    override fun onStop() { Analytics.flushSoon(); super.onStop() }
 
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
@@ -229,6 +234,8 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
     }
     // v2.0: Squad takes Calendar's slot; since v2.1 Calendar is an icon in Home's header, pushed as a page.
     val tabs = listOf(Tab("Home", Icons.Outlined.Home), Tab("Squad", com.sohum.bandlog.ui.components.PeopleIcon), Tab("Scan", com.sohum.bandlog.ui.components.ScanFilledIcon), Tab("Progress", Icons.Outlined.SignalCellularAlt), Tab("Profile", Icons.Outlined.Person))
+    LaunchedEffect(tab) { Analytics.track("screen_view", "screen" to tabs[tab].label) }
+    LaunchedEffect(log != null || meal != null) { if (log != null || meal != null) Analytics.track("screen_view", "screen" to "Log") }
 
     // v2.2: a rejected refresh token signs out only once no form or page is open, so an open
     // workout form keeps its fields and shows why the save failed instead of vanishing.

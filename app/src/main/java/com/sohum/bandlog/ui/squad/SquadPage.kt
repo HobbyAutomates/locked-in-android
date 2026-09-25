@@ -146,6 +146,7 @@ fun SquadPage(sq: SquadViewModel, squad: Squad, initialTab: Int? = null, protein
         val challenges = sq.challenges ?: return@LaunchedEffect
         tab = if (challenges.any { it.status == "active" }) SquadTab.CHALLENGES else SquadTab.BOARD
     }
+    LaunchedEffect(squad.id) { com.sohum.bandlog.data.Analytics.track("squad_opened", "squad_id" to squad.id) }
     val current = if (tab in tabs) tab else tabs.firstOrNull { it == SquadTab.FEED } ?: tabs.last()
     fun selectTab(t: SquadTab) {
         tab = t
