@@ -32,6 +32,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -85,6 +87,7 @@ import com.sohum.bandlog.ui.components.pressable
 import com.sohum.bandlog.ui.theme.palette
 import com.sohum.bandlog.ui.today.fmt
 import com.sohum.bandlog.util.DictationState
+import com.sohum.bandlog.util.MealTypes
 import com.sohum.bandlog.util.QUnit
 import com.sohum.bandlog.util.Quantity
 import com.sohum.bandlog.util.QuantityFood
@@ -135,18 +138,36 @@ private class Pending(val label: String, val job: Deferred<AppViewModel.MealBatc
  * Tapping a preset or a result adds it at its default serving; the amount on a plate row opens
  * the Quantity sheet. A sentence in the bar gets one "Work it out" button (parse-meal).
  */
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun MealForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
+fun MealForm(
+    vm: AppViewModel,
+    date: String,
+    onClose: () -> Unit,
+    /** v2.8: Home's per-section "+ Add" preselects the type; otherwise the hour rule picks it. */
+    mealType: String? = null,
+    /** v2.8 meal editor: the saved meal being edited (items, type, date; Save updates it, Delete removes it). */
+    existing: com.sohum.bandlog.data.Meal? = null,
+) {
     val p = palette
     val scope = rememberCoroutineScope()
     val focus = LocalFocusManager.current
     var text by rememberSaveable { mutableStateOf("") }
-    var items by remember { mutableStateOf<List<MealItem>>(emptyList()) }
+    var items by remember { mutableStateOf<List<MealItem>>(existing?.items.orEmpty()) }
+    var type by rememberSaveable { mutableStateOf(existing?.let { MealTypes.of(it) } ?: mealType?.takeIf { MealTypes.isType(it) } ?: MealTypes.default()) }
+    var day by rememberSaveable { mutableStateOf(existing?.date ?: date) }
+    var pickDate by remember { mutableStateOf(false) }
+    var pendingDelete by remember { mutableStateOf(false) }
+    var voted by remember { mutableStateOf<String?>(null) }
+    var deleteJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    // Leaving the editor inside the undo window still deletes (on the view model's scope), like the workout editor.
+    androidx.compose.runtime.DisposableEffect(existing?.id) {
+        onDispose { if (pendingDelete && deleteJob?.isActive == true) { deleteJob?.cancel(); existing?.let { vm.deleteMealLater(it.id) } } }
+    }
     val rawParts = remember { mutableStateListOf<String>() }
     var notes by remember { mutableStateOf<List<String>>(emptyList()) }
     var pending by remember { mutableStateOf<List<Pending>>(emptyList()) }
-    var photoPath by remember { mutableStateOf<String?>(null) }
+    var photoPath by remember { mutableStateOf(existing?.photoPath) }
     var parsedText by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
@@ -239,18 +260,51 @@ fun MealForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
 
     fun save() {
         val raw = rawParts.joinToString(", ").ifBlank { items.joinToString(", ") { it.name } }.ifBlank { "Meal" }
+        if (existing != null) {
+            // The editor waits for anything still being worked out (the button says so), then updates in place.
+            if (pending.isNotEmpty() || items.isEmpty()) return
+            scope.launch {
+                saving = true
+                val added = rawParts.toList()
+                val newRaw = if (added.isEmpty()) null else (listOf(existing.rawText) + added).filter { it.isNotBlank() }.joinToString(", ")
+                if (vm.updateMeal(existing, day, type, items, newRaw)) onClose() else { error = vm.error; saving = false }
+            }
+            return
+        }
         // Log now, review later — automatically: Save while a parse / photo is working closes the
         // page, Home shows the pending row, and the meal saves the moment the job lands.
-        if (pending.isNotEmpty()) { vm.saveMealAfter(date, raw, items, photoPath, pending.map { it.job }); onClose(); return }
+        if (pending.isNotEmpty()) { vm.saveMealAfter(date, raw, items, photoPath, pending.map { it.job }, type); onClose(); return }
         scope.launch {
             saving = true
-            if (vm.saveMeal(date, raw, items, photoPath)) onClose() else { error = vm.error; saving = false }
+            if (vm.saveMeal(date, raw, items, photoPath, type)) onClose() else { error = vm.error; saving = false }
+        }
+    }
+
+    /** v2.7 undo pattern: "Deleted · Undo" for 5 s, then the delete. */
+    fun startDelete() {
+        val m = existing ?: return
+        pendingDelete = true; error = null
+        deleteJob = scope.launch {
+            delay(5000)
+            saving = true
+            if (vm.deleteMeal(m.id)) onClose() else { error = vm.error; saving = false; pendingDelete = false }
         }
     }
 
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.weight(1f)) {
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp, 6.dp, 16.dp, 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // v2.8: which meal this is — the hour rule picks, one tap changes it.
+                MealTypeChips(type) { type = it }
+                if (existing != null) {
+                    Card(padding = 0.dp) {
+                        Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable { pickDate = true }.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Date", fontSize = 15.sp, fontWeight = FontWeight(500), color = p.ink, modifier = Modifier.weight(1f))
+                            Text(if (day == com.sohum.bandlog.util.Dates.today()) "Today, ${com.sohum.bandlog.util.Dates.short(day).drop(4)}" else com.sohum.bandlog.util.Dates.short(day), fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink)
+                            Text("  ›", fontSize = 15.sp, color = p.muted)
+                        }
+                    }
+                }
                 FoodBar(
                     text = text, onText = { text = it.take(160) }, dictation = dictation, onMic = toggleMic,
                     onSubmit = { if (looksLikeSentence(text)) workItOut() else focus.clearFocus() },
@@ -286,9 +340,14 @@ fun MealForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = if (toast != null) 56.dp else 12.dp),
             )
         }
-        if (items.isNotEmpty() || pending.isNotEmpty()) {
+        if (items.isNotEmpty() || pending.isNotEmpty() || existing != null) {
             Plate(
                 items = items, pending = pending, notes = notes, fats = fats, presets = vm.presets, saving = saving,
+                editing = existing != null, deleted = pendingDelete,
+                // 👍 / 👎 only for AI-logged meals; the same best-effort Api.feedback write the old Home row used.
+                feedback = existing?.takeIf { MealTypes.aiLogged(it) }?.let { m -> { r: String -> voted = r; vm.launch { runCatching { Api.feedback(r, m.rawText, m.id) } } } },
+                voted = voted,
+                onDelete = { startDelete() }, onUndoDelete = { deleteJob?.cancel(); deleteJob = null; pendingDelete = false },
                 canFix = parsedText != null && items.isNotEmpty(),
                 onFix = { fixOpen = true }, onRepeat = { repeatOpen = true },
                 onQuantity = { idx ->
@@ -300,7 +359,8 @@ fun MealForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
                     val dc = it.defaultCount?.takeIf { n -> n > 0 && !byServing }
                     val servings = preset?.servings.orEmpty().ifEmpty {
                         when {
-                            byServing -> listOf(com.sohum.bandlog.data.Serving("1 serving", it.grams / it.servings!!))
+                            // v2.8: a saved row counts in the unit its name suggests ("Roti" → 1 roti), else "1 serving".
+                            byServing -> listOf(com.sohum.bandlog.util.Counting.savedUnitOf(it) ?: com.sohum.bandlog.data.Serving("1 serving", it.grams / it.servings!!))
                             dc != null && it.grams > 0 -> listOf(com.sohum.bandlog.data.Serving("1 serving", it.grams / dc))
                             else -> emptyList()
                         }
@@ -360,6 +420,25 @@ fun MealForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
         }
     }
 
+    if (pickDate) {
+        val state = androidx.compose.material3.rememberDatePickerState(
+            initialSelectedDateMillis = com.sohum.bandlog.util.Dates.parse(day).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli(),
+        )
+        androidx.compose.material3.DatePickerDialog(
+            onDismissRequest = { pickDate = false },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    state.selectedDateMillis?.let { ms ->
+                        val d = java.time.LocalDate.ofInstant(java.time.Instant.ofEpochMilli(ms), java.time.ZoneOffset.UTC).toString()
+                        if (d <= com.sohum.bandlog.util.Dates.today()) day = d else error = "That date hasn't happened yet"
+                    }
+                    pickDate = false
+                }) { Text("OK") }
+            },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { pickDate = false }) { Text("Cancel") } },
+        ) { androidx.compose.material3.DatePicker(state) }
+    }
+
     if (fixOpen) {
         var fix by remember { mutableStateOf("") }
         var fixing by remember { mutableStateOf(false) }
@@ -393,6 +472,25 @@ fun MealForm(vm: AppViewModel, date: String, onClose: () -> Unit) {
                 }
             },
         ) { SheetField(name, { name = it.take(40) }, "Name it, e.g. Dinner usual") }
+    }
+}
+
+/** v2.8: 🍳 Breakfast · 🍛 Lunch · 🌙 Dinner · 🍿 Snacks — one row of four at the top of add / edit meal. */
+@Composable
+private fun MealTypeChips(selected: String, onSelect: (String) -> Unit) {
+    val p = palette
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        MealTypes.ALL.forEach { t ->
+            val sel = t.key == selected
+            Column(
+                Modifier.weight(1f).heightIn(min = 52.dp).pressable().background(if (sel) p.btn else p.card2, RoundedCornerShape(16.dp))
+                    .selectable(selected = sel, onClick = { onSelect(t.key) }).padding(horizontal = 2.dp, vertical = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
+            ) {
+                Text(t.emoji, fontSize = 16.sp, maxLines = 1)
+                Text(t.label, fontSize = 12.sp, fontWeight = if (sel) FontWeight(700) else FontWeight(600), color = if (sel) p.btnInk else p.ink, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            }
+        }
     }
 }
 
@@ -656,6 +754,12 @@ private fun Plate(
     fats: List<FoodPreset>,
     presets: List<FoodPreset>,
     saving: Boolean,
+    editing: Boolean,
+    deleted: Boolean,
+    feedback: ((String) -> Unit)?,
+    voted: String?,
+    onDelete: () -> Unit,
+    onUndoDelete: () -> Unit,
     canFix: Boolean,
     onFix: () -> Unit,
     onRepeat: () -> Unit,
@@ -691,6 +795,39 @@ private fun Plate(
             }
         }
         if (notes.isNotEmpty()) Text(notes.joinToString(" · "), fontSize = 11.sp, color = p.muted, maxLines = 2, lineHeight = 14.sp, modifier = Modifier.padding(top = 4.dp))
+        if (editing && items.isEmpty() && pending.isEmpty()) Text("Nothing on the plate. Add something, or delete the meal.", fontSize = 13.sp, color = p.muted, modifier = Modifier.padding(vertical = 10.dp))
+        // v2.8 meal editor: Delete lives here, with the v2.7 undo.
+        if (editing) {
+            if (deleted) Row(
+                Modifier.fillMaxWidth().padding(top = 6.dp).heightIn(min = 44.dp).background(p.card2, RoundedCornerShape(14.dp)).padding(start = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Deleted", fontSize = 14.sp, fontWeight = FontWeight(600), color = p.muted, modifier = Modifier.weight(1f))
+                Box(Modifier.heightIn(min = 44.dp).clickable(onClick = onUndoDelete).padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
+                    Text("Undo", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.btn)
+                }
+            } else Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (feedback != null) {
+                    Text(if (voted == null) "AI right?" else "Thanks", fontSize = 12.sp, color = p.muted)
+                    listOf("up" to com.sohum.bandlog.ui.components.ThumbUpIcon, "down" to com.sohum.bandlog.ui.components.ThumbDownIcon).forEach { (r, icon) ->
+                        val sel = voted == r
+                        Box(Modifier.size(44.dp).clickable(enabled = voted == null) { feedback(r) }, contentAlignment = Alignment.Center) {
+                            Box(Modifier.size(30.dp).background(if (sel) p.btn else p.card2, CircleShape), contentAlignment = Alignment.Center) {
+                                Icon(icon, if (r == "up") "The AI got this right" else "The AI got this wrong", tint = if (sel) p.btnInk else p.muted, modifier = Modifier.size(15.dp))
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                Row(
+                    Modifier.heightIn(min = 44.dp).background(p.redBg, CircleShape).clickable(enabled = !saving, onClick = onDelete).padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(androidx.compose.material.icons.Icons.Outlined.Delete, null, tint = p.red, modifier = Modifier.size(16.dp))
+                    Text(" Delete", fontSize = 13.sp, fontWeight = FontWeight(700), color = p.red)
+                }
+            }
+        }
         Row(Modifier.padding(top = 8.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column {
                 Text("${items.sumOf { it.calories }.roundToInt()} kcal", fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.5).sp, color = p.ink)
@@ -698,8 +835,14 @@ private fun Plate(
             }
             Spacer(Modifier.width(12.dp))
             PillButton(
-                when { saving -> "Saving…"; pending.isNotEmpty() -> "Save"; else -> "Save · ${items.size} item${if (items.size == 1) "" else "s"}" },
-                onSave, Modifier.weight(1f), enabled = !saving,
+                when {
+                    saving -> "Saving…"
+                    editing && pending.isNotEmpty() -> "Working it out…"
+                    editing -> "Save changes"
+                    pending.isNotEmpty() -> "Save"
+                    else -> "Save · ${items.size} item${if (items.size == 1) "" else "s"}"
+                },
+                onSave, Modifier.weight(1f), enabled = !saving && !deleted && (!editing || (items.isNotEmpty() && pending.isEmpty())),
             )
         }
     }

@@ -136,9 +136,12 @@ data class MealItem(
         return copy(grams = g, calories = calories * k, proteinG = proteinG * k, carbsG = carbsG * k, fatG = fatG * k, micros = micros.mapValues { it.value * k }, servings = servings?.let { it * k })
     }
 
-    /** "1.5 servings" when logged by serving, else "150 g". */
+    /**
+     * v2.8 (B4): how the amount reads — "2 roti", "1½ katori", "180 g". Restaurant portions and
+     * anything not counted read in grams, never "1.4 servings".
+     */
     val quantityLabel: String
-        get() = if (unit == "serving" && servings != null && servings > 0) "${com.sohum.bandlog.ui.today.fmt(servings)} serving${if (servings == 1.0) "" else "s"}" else "${grams.toInt()} g"
+        get() = com.sohum.bandlog.util.Counting.itemLabel(this)
 
     companion object {
         fun from(o: JSONObject) = MealItem(
@@ -180,6 +183,8 @@ data class Meal(
     val items: List<MealItem>,
     /** Storage path under meal-photos/ when the meal came from a plate photo. */
     val photoPath: String? = null,
+    /** v2.8: breakfast | lunch | dinner | snack (schema_v30); null / no column → the hour rule (util/MealTypes). */
+    val mealType: String? = null,
 ) {
     val calories get() = items.sumOf { it.calories }
     val protein get() = items.sumOf { it.proteinG }
@@ -194,6 +199,7 @@ data class Meal(
                 createdAt = o.optString("created_at", ""),
                 items = (0 until arr.length()).map { MealItem.from(arr.getJSONObject(it)) },
                 photoPath = if (o.isNull("photo_path")) null else o.optString("photo_path").ifBlank { null },
+                mealType = if (!o.has("meal_type") || o.isNull("meal_type")) null else o.optString("meal_type").takeIf { com.sohum.bandlog.util.MealTypes.isType(it) },
             )
         }
     }

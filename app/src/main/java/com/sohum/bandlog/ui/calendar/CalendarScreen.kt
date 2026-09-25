@@ -42,7 +42,6 @@ import com.sohum.bandlog.ui.components.Rise
 import com.sohum.bandlog.ui.components.RowSpaceBetween
 import com.sohum.bandlog.ui.components.ScreenTitle
 import com.sohum.bandlog.ui.theme.palette
-import com.sohum.bandlog.ui.today.MealRow
 import com.sohum.bandlog.ui.today.WorkoutRow
 import com.sohum.bandlog.util.Dates
 import java.time.YearMonth
@@ -50,7 +49,11 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 @Composable
-fun CalendarScreen(vm: AppViewModel, onOpenWorkout: (Workout?, String) -> Unit) {
+fun CalendarScreen(
+    vm: AppViewModel, onOpenWorkout: (Workout?, String) -> Unit,
+    /** v2.8: a meal section's "+ Add" (date, meal type) and a tapped meal (the editor). */
+    onAddMeal: (String, String) -> Unit = { _, _ -> }, onOpenMeal: (com.sohum.bandlog.data.Meal) -> Unit = {},
+) {
     val p = palette
     var month by remember { mutableStateOf(YearMonth.now(com.sohum.bandlog.util.Dates.ZONE)) }
     var selected by remember { mutableStateOf(Dates.today()) }
@@ -113,7 +116,10 @@ fun CalendarScreen(vm: AppViewModel, onOpenWorkout: (Workout?, String) -> Unit) 
         val dayMeals = vm.meals.filter { it.date == selected }
         if (dayWorkouts.isEmpty() && dayMeals.isEmpty()) item { Text("Nothing logged.", color = p.muted, fontSize = 13.sp) }
         items(dayWorkouts, key = { "w" + it.id }) { w -> Rise(3) { WorkoutRow(w) { onOpenWorkout(w, selected) } } }
-        items(dayMeals, key = { "m" + it.id }) { m -> Rise(4) { MealRow(m, onDelete = { vm.launch { vm.deleteMeal(m.id) } }) } }
+        // v2.8: the day's meals grouped like Home (Breakfast · Lunch · Dinner · Snacks); tap one to edit it.
+        if (dayMeals.isNotEmpty()) items(com.sohum.bandlog.util.MealTypes.group(dayMeals), key = { "s" + it.type.key }) { s ->
+            Rise(4) { com.sohum.bandlog.ui.today.MealSection(s, onAdd = { t -> onAddMeal(selected, t) }, onOpen = onOpenMeal) }
+        }
     }
 }
 

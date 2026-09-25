@@ -171,6 +171,9 @@ object Restaurant {
             carbsG = (scaled.carbsG * 10).roundToInt() / 10.0,
             fatG = ((scaled.fatG + oil) * 10).roundToInt() / 10.0,
             micros = scaled.micros.mapValues { (it.value * 10).roundToInt() / 10.0 },
+            // v2.8 (B4): a restaurant portion is stored by grams ("180 g"), never as "1.4 servings".
+            unit = "g",
+            servings = null,
             cookedIn = "restaurant",
         )
     }
@@ -256,6 +259,63 @@ object Counting {
     }
 
     fun unitFor(food: QuantityFood): CountUnit? = unitFor(food.servings, food.defaultServing)
+
+    /** "2 roti", "1½ katori", "1 × 5-6 pieces" — how a count reads with its unit (mirrors the web's countLabel). */
+    fun countLabel(cu: CountUnit, n: Double): String = if (cu.label != null) "${countText(n)} × ${cu.label}" else "${countText(n)} ${plural(cu.noun, n)}"
+
+    /** "1½", "2", "½". */
+    fun countText(n: Double): String {
+        val whole = kotlin.math.floor(n).toLong()
+        if (kotlin.math.abs(n - whole - 0.5) < 1e-6) return if (whole > 0) "$whole½" else "½"
+        return com.sohum.bandlog.ui.today.fmt((n * 100).roundToInt() / 100.0)
+    }
+
+    private val PLURAL = mapOf(
+        "egg" to "eggs", "slice" to "slices", "piece" to "pieces", "scoop" to "scoops", "biscuit" to "biscuits", "banana" to "bananas", "apple" to "apples",
+        "orange" to "oranges", "date" to "dates", "glass" to "glasses", "cup" to "cups", "bowl" to "bowls", "white" to "whites", "sandwich" to "sandwiches",
+        "burger" to "burgers", "guava" to "guavas", "kiwi" to "kiwis", "momo" to "momos", "bar" to "bars", "almond" to "almonds", "plate" to "plates",
+        "pack" to "packs", "serving" to "servings", "tablet" to "tablets", "capsule" to "capsules",
+    )
+
+    /** "egg" × 2 → "eggs"; Hindi nouns stay as they are ("2 roti", "2 katori"). Mirrors the web's nounFor. */
+    fun plural(noun: String, n: Double): String {
+        if (n <= 1) return noun
+        if (noun.equals("egg white", ignoreCase = true)) return "egg whites"
+        val first = noun.substringBefore(' ')
+        return (PLURAL[first.lowercase()] ?: first) + noun.substring(first.length)
+    }
+
+    /** Words a food's own name counts in ("Roti", "Boiled egg", "Idli") — how a saved row with no serving label still reads "2 roti". Same list as the web. */
+    private val NAME_NOUNS = setOf(
+        "roti", "chapati", "phulka", "paratha", "naan", "thepla", "idli", "dosa", "uttapam", "pesarattu", "vada", "chilla", "egg", "eggs", "white", "whites",
+        "slice", "slices", "piece", "pieces", "pcs", "scoop", "scoops", "banana", "bananas", "apple", "apples", "orange", "oranges", "mosambi", "guava", "guavas", "kiwi", "kiwis",
+        "mango", "chikoo", "date", "dates", "biscuit", "biscuits", "samosa", "pav", "momo", "momos", "ladoo", "sandwich", "sandwiches", "burger", "bar", "almond", "almonds", "tablet", "capsule",
+        "katori", "bowl", "bowls", "glass", "cup", "cups", "tumbler", "plate", "ladle", "tbsp", "tsp", "handful", "pack", "packs", "serving", "can", "bottle", "regular", "large", "tub",
+    )
+
+    /**
+     * The one-piece serving a saved row was counted in (unit = serving): grams per piece and the
+     * noun its name suggests ("Roti" → roti), else "serving". Null for rows by weight and restaurant portions.
+     */
+    fun savedUnitOf(item: MealItem): Serving? {
+        val n = item.servings ?: return null
+        if (item.unit != "serving" || n <= 0 || item.grams <= 0 || item.cookedIn == "restaurant") return null
+        val words = item.name.lowercase().replace(Regex("\\(.*?\\)"), " ").split(Regex("[\\s,]+")).filter { it.isNotBlank() }
+        val noun = words.lastOrNull { it in NAME_NOUNS }
+        return Serving("1 ${noun?.let { singular(it) } ?: "serving"}", (item.grams / n * 10).roundToInt() / 10.0)
+    }
+
+    /** A logged row's amount: "2 roti", "1½ katori", "180 g" (B4: restaurant portions and odd counts read in grams). */
+    fun itemLabel(item: MealItem, servingLabel: String? = null): String {
+        val grams = "${item.grams.roundToInt()} g"
+        val n = item.servings ?: return grams
+        if (item.unit != "serving" || n <= 0 || item.cookedIn == "restaurant") return grams
+        val label = servingLabel ?: savedUnitOf(item)?.label ?: return grams
+        val cu = unitFor(listOf(Serving(label, item.grams / n)), label) ?: return grams
+        val count = (n * 100).roundToInt() / 100.0
+        if (kotlin.math.abs(count * 2 - kotlin.math.round(count * 2)) > 0.02) return grams
+        return countLabel(cu, kotlin.math.round(count * 2) / 2.0)
+    }
 
     /** Whey and other supplements: counted in scoops, stepper only (no chips, no restaurant portion). */
     fun isSupplement(food: QuantityFood, unit: CountUnit?): Boolean =

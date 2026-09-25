@@ -201,6 +201,8 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
     val sq: com.sohum.bandlog.ui.squad.SquadViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var log by remember { mutableStateOf<LogRequest?>(null) }
+    // v2.8: Add food for a meal type, or a logged meal opened in the editor (ui/log/MealScreen).
+    var meal by remember { mutableStateOf<com.sohum.bandlog.ui.log.MealRequest?>(null) }
     var page by remember { mutableStateOf<Page?>(null) }
     // Reminders is reachable from Preferences; remember that so Back returns there.
     var fromPrefs by remember { mutableStateOf(false) }
@@ -282,7 +284,10 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             Box(Modifier.weight(1f)) {
                 when (tab) {
-                    0 -> TodayScreen(vm, onOpenWorkout = { w -> log = LogRequest(w, Dates.today(), false) }, onLogExercise = { log = LogRequest(null, Dates.today(), false, exercise = true) }, onOpenCalendar = { page = Page.CALENDAR }, onLog = { d -> log = LogRequest(null, d, false) }, wrapTick = openWrapTick, onLogWater = { page = Page.WATER })
+                    0 -> TodayScreen(
+                        vm, onOpenWorkout = { w -> log = LogRequest(w, Dates.today(), false) }, onLogExercise = { log = LogRequest(null, Dates.today(), false, exercise = true) }, onOpenCalendar = { page = Page.CALENDAR }, onLog = { d -> log = LogRequest(null, d, false) }, wrapTick = openWrapTick, onLogWater = { page = Page.WATER },
+                        onAddMeal = { d, t -> meal = com.sohum.bandlog.ui.log.MealRequest(d, mealType = t) }, onOpenMeal = { m -> meal = com.sohum.bandlog.ui.log.MealRequest(m.date, meal = m) },
+                    )
                     1 -> com.sohum.bandlog.ui.squad.SquadScreen(vm, onOpenProfile = { tab = 4 })
                     2 -> com.sohum.bandlog.ui.scan.ScanTab(vm)
                     3 -> ProgressScreen(vm, onOpenBadges = { page = Page.BADGES }, onLogWeight = { page = Page.WEIGHT_LOG })
@@ -379,7 +384,11 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
                     Page.WEIGHT_HISTORY -> WeightHistoryScreen(vm, back)
                     Page.WEIGHT_LOG -> WeightHistoryScreen(vm, back, openLog = true)
                     Page.BADGES -> BadgesScreen(vm, back)
-                    Page.CALENDAR -> CalendarPage(vm, back) { w, d -> log = LogRequest(w, d, false) }
+                    Page.CALENDAR -> CalendarPage(
+                        vm, back,
+                        onAddMeal = { d, t -> meal = com.sohum.bandlog.ui.log.MealRequest(d, mealType = t) },
+                        onOpenMeal = { m -> meal = com.sohum.bandlog.ui.log.MealRequest(m.date, meal = m) },
+                    ) { w, d -> log = LogRequest(w, d, false) }
                     Page.PREFERENCES -> com.sohum.bandlog.ui.profile.PreferencesScreen(vm, themeMode, back) { target ->
                         fromPrefs = true
                         page = when (target) {
@@ -408,6 +417,17 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
             }
         }
 
+        // v2.8: the meal page (a section's "+ Add", or the meal editor), over Home or Calendar.
+        AnimatedContent(
+            targetState = meal, label = "meal",
+            transitionSpec = { (slideInVertically(Motion.spatial()) { it / 3 } + fadeIn(Motion.effects())).togetherWith(slideOutVertically(Motion.spatialFast()) { it / 3 } + fadeOut(Motion.effectsFast())) },
+        ) { req ->
+            if (req != null) {
+                BackHandler { meal = null }
+                com.sohum.bandlog.ui.log.MealScreen(vm, req) { meal = null }
+            }
+        }
+
         // v2.6 squads: the profile / create flows and the open squad, full screen over the tabs.
         com.sohum.bandlog.ui.squad.SquadOverlays(vm)
 
@@ -417,7 +437,11 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
 
 /** The Calendar, pushed from the calendar icon in Home's header, with a back pill over it. */
 @Composable
-private fun CalendarPage(vm: AppViewModel, onBack: () -> Unit, onOpen: (Workout?, String) -> Unit) {
+private fun CalendarPage(
+    vm: AppViewModel, onBack: () -> Unit,
+    onAddMeal: (String, String) -> Unit = { _, _ -> }, onOpenMeal: (com.sohum.bandlog.data.Meal) -> Unit = {},
+    onOpen: (Workout?, String) -> Unit,
+) {
     val p = palette
     Box(Modifier.fillMaxSize().background(p.bg).statusBarsPadding()) {
         Column(Modifier.fillMaxSize()) {
@@ -427,7 +451,7 @@ private fun CalendarPage(vm: AppViewModel, onBack: () -> Unit, onOpen: (Workout?
                     contentAlignment = Alignment.Center,
                 ) { Icon(Icons.Outlined.ArrowBack, "Back", tint = p.ink, modifier = Modifier.size(18.dp)) }
             }
-            Box(Modifier.weight(1f)) { CalendarScreen(vm) { w, d -> onOpen(w, d) } }
+            Box(Modifier.weight(1f)) { CalendarScreen(vm, { w, d -> onOpen(w, d) }, onAddMeal = onAddMeal, onOpenMeal = onOpenMeal) }
         }
     }
 }

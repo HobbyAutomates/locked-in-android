@@ -368,23 +368,64 @@ object Api {
 
     // ---- meals ----
 
+    private const val MEAL_ITEM_COLS = "id,food_id,name,grams,calories,protein_g,carbs_g,fat_g,source,confidence,micros,unit,servings,cooked_in"
+
+    /** v2.8: selects meal_type, and again without it while schema_v30 isn't applied. */
     suspend fun meals(from: String, to: String): List<Meal> = withContext(Dispatchers.IO) {
-        val sel = "id,date,raw_text,created_at,photo_path,meal_items(id,food_id,name,grams,calories,protein_g,carbs_g,fat_g,source,confidence,micros,unit,servings,cooked_in)"
-        val body = run(rest("meals?select=$sel&date=gte.$from&date=lte.$to&order=created_at.desc").get().build(), "Load meals")
+        fun sel(withType: Boolean) = "id,date,raw_text,created_at,photo_path${if (withType) ",meal_type" else ""},meal_items($MEAL_ITEM_COLS)"
+        val body = try {
+            run(rest("meals?select=${sel(true)}&date=gte.$from&date=lte.$to&order=created_at.desc").get().build(), "Load meals")
+        } catch (e: ApiException) {
+            if (!com.sohum.bandlog.util.MealTypes.missingColumn(e.message)) throw e
+            run(rest("meals?select=${sel(false)}&date=gte.$from&date=lte.$to&order=created_at.desc").get().build(), "Load meals")
+        }
         val arr = JSONArray(body)
         (0 until arr.length()).map { Meal.from(arr.getJSONObject(it)) }
     }
 
-    suspend fun saveMeal(date: String, rawText: String, items: List<MealItem>, photoPath: String? = null): String = withContext(Dispatchers.IO) {
+    /**
+     * [mealType] (v2.8) defaults to the hour rule; while schema_v30 isn't applied the insert is
+     * retried without the column, and Home falls back to the same hour rule.
+     */
+    suspend fun saveMeal(date: String, rawText: String, items: List<MealItem>, photoPath: String? = null, mealType: String? = null): String = withContext(Dispatchers.IO) {
         val uid = Session.userId ?: throw AuthException("Not signed in")
-        val mealPayload = JSONObject().put("user_id", uid).put("date", date).put("raw_text", rawText).put("photo_path", photoPath ?: JSONObject.NULL).toString()
-        val created = run(rest("meals").header("Prefer", "return=representation").post(json(mealPayload)).build(), "Save meal")
+        val base = JSONObject().put("user_id", uid).put("date", date).put("raw_text", rawText).put("photo_path", photoPath ?: JSONObject.NULL)
+        val typed = JSONObject(base.toString()).put("meal_type", mealType?.takeIf { com.sohum.bandlog.util.MealTypes.isType(it) } ?: com.sohum.bandlog.util.MealTypes.default())
+        val created = try {
+            run(rest("meals").header("Prefer", "return=representation").post(json(typed.toString())).build(), "Save meal")
+        } catch (e: ApiException) {
+            if (!com.sohum.bandlog.util.MealTypes.missingColumn(e.message)) throw e
+            run(rest("meals").header("Prefer", "return=representation").post(json(base.toString())).build(), "Save meal")
+        }
         val mealId = JSONArray(created).getJSONObject(0).getString("id")
         if (items.isNotEmpty()) {
             val arr = JSONArray().apply { items.forEach { put(it.toJson(mealId, uid)) } }
             run(rest("meal_items").post(json(arr.toString())).build(), "Save meal items")
         }
         mealId
+    }
+
+    /**
+     * v2.8 meal editor: the meal's date / type (and raw text), then its items replaced. The caller
+     * reruns the daily_stats rollup for the old and the new date.
+     */
+    suspend fun updateMeal(id: String, date: String, mealType: String, items: List<MealItem>, rawText: String? = null) = withContext(Dispatchers.IO) {
+        val uid = Session.userId ?: throw AuthException("Not signed in")
+        val patch = JSONObject().put("date", date).apply { if (rawText != null) put("raw_text", rawText) }
+        val typed = JSONObject(patch.toString()).put("meal_type", if (com.sohum.bandlog.util.MealTypes.isType(mealType)) mealType else JSONObject.NULL)
+        try {
+            run(rest("meals?id=eq.$id").header("Prefer", "return=minimal").patch(json(typed.toString())).build(), "Update meal")
+        } catch (e: ApiException) {
+            if (!com.sohum.bandlog.util.MealTypes.missingColumn(e.message)) throw e
+            run(rest("meals?id=eq.$id").header("Prefer", "return=minimal").patch(json(patch.toString())).build(), "Update meal")
+        }
+        run(rest("meal_items?meal_id=eq.$id").delete().build(), "Update meal items")
+        val keep = items.filter { it.grams > 0 }
+        if (keep.isNotEmpty()) {
+            val arr = JSONArray().apply { keep.forEach { put(it.toJson(id, uid)) } }
+            run(rest("meal_items").post(json(arr.toString())).build(), "Update meal items")
+        }
+        Unit
     }
 
     suspend fun deleteMeal(id: String) = withContext(Dispatchers.IO) {
