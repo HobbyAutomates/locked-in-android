@@ -277,6 +277,7 @@ class SquadViewModel : ViewModel() {
             busy = true; error = null
             try {
                 Api.createChallenge(id, kind, title, targetDays, if (kind == com.sohum.bandlog.util.ChallengeMath.PROTEIN) proteinTarget else null, startsOn, endsOn)
+                com.sohum.bandlog.data.Analytics.track("challenge_created", "kind" to kind, "days" to targetDays)
                 runCatching { challenges = Api.groupChallenges(id); challengesSupported = true }
                 refreshFeed()
                 onDone()
@@ -331,6 +332,7 @@ class SquadViewModel : ViewModel() {
             deleteJobs.remove(id)
             try {
                 if (!Api.deleteGroupPost(id)) throw IllegalStateException("Only the author or the squad owner can delete this")
+                com.sohum.bandlog.data.Analytics.track("post_deleted")
                 posts = posts.filter { it.id != id }
             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (e: Exception) { error = friendly(e.message) }

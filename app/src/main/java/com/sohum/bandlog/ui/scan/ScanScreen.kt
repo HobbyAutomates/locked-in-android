@@ -255,6 +255,7 @@ private fun ScanForm(
                     }
                 }
                 onScanned()
+                com.sohum.bandlog.data.Analytics.track("scan_done", "kind" to (if (plate != null) "plate" else kind ?: k), "found" to (report != null || plate != null), "forced" to k)
                 storeThumb(vm, report, plate, bmp, onScanned)
             } catch (e: Exception) { error = e.message } finally { busy = false }
         }
@@ -386,11 +387,11 @@ private fun ScanForm(
             }
             report?.let { ReportView(it, lens, onLogged = { vm.refresh() }, onLogServing = onLogServing) }
             plate?.let { est ->
-                PhotoReview(est, photo, readOnly = false, onPickAnother = { list -> vm.openAddFood(list.map { it.toMealItem() }) }) { items, path ->
+                PhotoReview(est, photo, readOnly = false, onPickAnother = { list -> com.sohum.bandlog.data.Analytics.hintMealMethod("photo"); vm.openAddFood(list.map { it.toMealItem() }) }) { items, path ->
                     scope.launch {
                         busy = true
                         val photoPath = path ?: photo?.let { b -> runCatching { Api.uploadMealPhoto(withContext(Dispatchers.IO) { toJpegBytes(b, 85) }) }.getOrNull() }
-                        val ok = vm.saveMeal(Dates.today(), est.plateNote.ifBlank { items.joinToString(", ") { it.name } }, items.map { it.toMealItem() }, photoPath)
+                        val ok = vm.saveMeal(Dates.today(), est.plateNote.ifBlank { items.joinToString(", ") { it.name } }, items.map { it.toMealItem() }, photoPath, method = "photo")
                         busy = false
                         if (ok) { plate = null; photo = null; kind = null } else error = vm.error
                     }
@@ -546,6 +547,7 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Uni
             // v2.4: opens Add food with one serving already on the plate (the amount stays editable there).
             PillButton("Log 1 serving" + (r.servingG?.takeIf { it > 0 }?.let { " · ${it.roundToInt()} g" } ?: ""), {
                 val go = onLogServing
+                com.sohum.bandlog.data.Analytics.hintMealMethod(if (r.kind == "barcode") "barcode" else "label")
                 if (go == null) logFood = food
                 // v2.9: the plate's ⓘ shows where these numbers came from (the label, or Open Food Facts).
                 else go(food.item(if (food.servingGrams != null) com.sohum.bandlog.util.Quantity(com.sohum.bandlog.util.QUnit.SERVING, 1.0) else com.sohum.bandlog.util.Quantity(com.sohum.bandlog.util.QUnit.G, 100.0))
@@ -722,6 +724,7 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Uni
                 logFood = null
                 scope.launch {
                     runCatching { Api.saveMeal(Dates.today(), "${r.product.ifBlank { "Scanned product" }} (scan)", listOf(item)) }
+                        .onSuccess { com.sohum.bandlog.data.Analytics.track("meal_logged", "method" to (if (r.kind == "barcode") "barcode" else "label"), "items" to 1, "from" to "scan") }
                         .onSuccess { logged = "Logged ${item.quantityLabel} · ${item.calories.roundToInt()} kcal"; logError = null; onLogged() }
                         .onFailure { logError = it.message }
                 }

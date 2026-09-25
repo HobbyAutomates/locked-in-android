@@ -97,6 +97,13 @@ object Api {
         runCatching { run(rest("profiles?id=eq.$uid").header("Prefer", "return=minimal").patch(json(fields.toString())).build(), "Save preference") }.isSuccess
     }
 
+    // ---- v2.10 beta usage events (see Analytics) ----
+
+    /** Insert-only table (no select policy), so ask for nothing back. */
+    suspend fun insertAppEvents(rows: JSONArray) = withContext(Dispatchers.IO) {
+        run(rest("app_events").header("Prefer", "return=minimal").post(json(rows.toString())).build(), "Send events"); Unit
+    }
+
     // ---- weight log ----
 
     suspend fun weights(): List<WeightEntry> = withContext(Dispatchers.IO) {

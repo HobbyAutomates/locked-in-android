@@ -8,6 +8,7 @@ import kotlinx.coroutines.withContext
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.sohum.bandlog.data.Analytics
 import com.sohum.bandlog.data.Api
 import com.sohum.bandlog.data.AuthException
 import com.sohum.bandlog.data.ExerciseEntry
@@ -162,6 +163,7 @@ class AppViewModel : ViewModel() {
         water = listOf(temp) + water
         return try {
             Api.logWater(date, ml, vessel)
+            Analytics.track("water_added", "ml" to ml, "vessel" to vessel)
             runCatching { water = Api.water(Dates.addDays(today, -30), today) }
             if (!quiet) notice = "Logged $ml mL water"
             if (date == today && before < goal && waterToday >= goal) waterGoalTick++
@@ -460,7 +462,7 @@ class AppViewModel : ViewModel() {
      * Save pressed while a parse / photo is still working: the page closes, Home shows the pending
      * row, and the meal is saved with everything already on the plate plus whatever the jobs add.
      */
-    fun saveMealAfter(date: String, raw: String, items: List<MealItem>, photoPath: String?, jobs: List<Deferred<MealBatch>>, mealType: String? = null) {
+    fun saveMealAfter(date: String, raw: String, items: List<MealItem>, photoPath: String?, jobs: List<Deferred<MealBatch>>, mealType: String? = null, method: String = "text") {
         val label = raw.ifBlank { "Meal" }
         pendingMeals = pendingMeals + label
         viewModelScope.launch {
@@ -470,6 +472,7 @@ class AppViewModel : ViewModel() {
                 if (all.isNotEmpty()) {
                     val photo = photoPath ?: batches.firstNotNullOfOrNull { it.photoPath }
                     val mid = Api.saveMeal(date, label, all, photo, mealType)
+                    Analytics.track("meal_logged", "method" to method, "items" to all.size, "pending" to true)
                     shareMeal(date, label, all, photo, mid)
                 }
                 else error = "Couldn't find any food in “${label.take(40)}”"
@@ -612,6 +615,7 @@ class AppViewModel : ViewModel() {
                 burnError = e.message ?: "unknown error"
             }
         }
+        if (ok && id == null) Analytics.track("activity_logged", "kind" to kind, "minutes" to minutes)
         if (ok) notice = burnError?.let { "Workout saved, but its calories burned didn't log ($it)." } ?: if (id == null) "Workout saved" else "Workout updated"
         // v2.6: a new session goes on the squads' feed (plus a PR post for any lift beating its best).
         if (ok && id == null) newId?.let { wid -> shareWorkout(Workout(wid, date, muscles, band, kg, minutes, exercises, notes, kind, lifts.orEmpty()), history) }
@@ -645,7 +649,10 @@ class AppViewModel : ViewModel() {
     suspend fun saveExercise(
         date: String, activityCode: String?, name: String, minutes: Int, intensity: String, kcal: Double, source: String,
         note: String = "", extras: Api.ExerciseExtras = Api.ExerciseExtras(),
-    ) = mutate { Api.saveExercise(date, activityCode, name, minutes, intensity, kcal, source, note, extras) }
+    ) = mutate {
+        Api.saveExercise(date, activityCode, name, minutes, intensity, kcal, source, note, extras)
+        Analytics.track("activity_logged", "kind" to "exercise", "source" to source, "activity" to activityCode, "minutes" to minutes)
+    }
     suspend fun deleteExercise(id: String): Boolean {
         exercises.firstOrNull { it.id == id }?.date?.let { rollupExtra = rollupExtra + it }
         return mutate { Api.deleteExercise(id) }
@@ -696,10 +703,12 @@ class AppViewModel : ViewModel() {
     /** Every activity Haiku found in a description, saved as its own row. */
     suspend fun saveDescribed(date: String, items: List<com.sohum.bandlog.data.DescribedExercise>) = mutate {
         items.forEach { Api.saveExercise(date, it.activityCode, it.name, it.minutes, it.intensity, it.kcal, "describe") }
+        Analytics.track("activity_logged", "kind" to "exercise", "source" to "describe", "count" to items.size)
     }
-    suspend fun saveMeal(date: String, raw: String, items: List<MealItem>, photoPath: String? = null, mealType: String? = null): Boolean {
+    suspend fun saveMeal(date: String, raw: String, items: List<MealItem>, photoPath: String? = null, mealType: String? = null, method: String = "search"): Boolean {
         var mid: String? = null
         val ok = mutate { mid = Api.saveMeal(date, raw, items, photoPath, mealType) }
+        if (ok) Analytics.track("meal_logged", "method" to method, "items" to items.size)
         if (ok) shareMeal(date, raw, items, photoPath, mid)
         if (ok && date != today) { awaitRefresh(); pushRollupFor(listOf(date)) }
         return ok
@@ -711,6 +720,7 @@ class AppViewModel : ViewModel() {
      */
     suspend fun updateMeal(meal: com.sohum.bandlog.data.Meal, date: String, mealType: String, items: List<MealItem>, rawText: String? = null): Boolean {
         val ok = mutate { Api.updateMeal(meal.id, date, mealType, items, rawText) }
+        if (ok) Analytics.track("meal_edited", "items" to items.size, "moved" to (meal.date != date))
         if (ok) repostEdited(meal.id, listOf("meal" to mealPostBody(rawText ?: meal.rawText, items)))
         if (ok) { awaitRefresh(); pushRollupFor(listOf(meal.date, date, today)) }
         return ok
@@ -720,6 +730,7 @@ class AppViewModel : ViewModel() {
         val day = meals.firstOrNull { it.id == id }?.date
         val ok = mutate {
             Api.deleteMeal(id)
+            Analytics.track("meal_deleted")
             // v2.9: schema_v31's trigger does this server-side; this covers a database without it.
             runCatching { Api.deleteMyPostsFor(id) }
         }
@@ -754,6 +765,7 @@ class AppViewModel : ViewModel() {
 
     suspend fun logWeight(date: String, kg: Double, note: String): Boolean {
         val ok = mutate { Api.logWeight(date, kg, note) }
+        if (ok) Analytics.track("weight_logged")
         if (ok) runCatching { weights = Api.weights() }
         return ok
     }

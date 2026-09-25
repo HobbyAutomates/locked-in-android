@@ -174,6 +174,8 @@ fun MealForm(
     var pending by remember { mutableStateOf<List<Pending>>(emptyList()) }
     var photoPath by remember { mutableStateOf(existing?.photoPath) }
     var parsedText by remember { mutableStateOf<String?>(null) }
+    /** v2.10 beta events: how this meal reached the plate (voice / text / a scan); search when nothing else. */
+    var via by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
     var toast by remember { mutableStateOf<String?>(null) }
@@ -208,6 +210,7 @@ fun MealForm(
         // A scan's "Log 1 serving" lands here with the item already on the plate.
         vm.takeAddFoodPrefill()?.takeIf { it.isNotEmpty() }?.let { pre ->
             items = items + pre; pre.forEach { rawParts += it.name }
+            via = com.sohum.bandlog.data.Analytics.takeMealMethodHint() ?: via
             toast = "From your scan · ${pre.sumOf { it.calories }.roundToInt()} kcal"; toastTick++
         }
     }
@@ -278,10 +281,12 @@ fun MealForm(
         rawParts += t
         parsedText = (parsedText?.let { "$it, " } ?: "") + t
         text = ""
+        if (via == null) via = "text"
         track(t, vm.parseAsync(t))
     }
 
     val (dictation, toggleMic) = rememberDictation { chunk ->
+        if (via == null || via == "text") via = "voice"
         val base = text.trimEnd()
         text = if (base.isEmpty()) chunk else base + (if (base.endsWith(",") || base.endsWith("।")) " " else ", ") + chunk
         // A spoken meal is always a description — work it out straight away.
@@ -303,10 +308,11 @@ fun MealForm(
         }
         // Log now, review later — automatically: Save while a parse / photo is working closes the
         // page, Home shows the pending row, and the meal saves the moment the job lands.
-        if (pending.isNotEmpty()) { vm.saveMealAfter(date, raw, items, photoPath, pending.map { it.job }, type); onClose(); return }
+        val method = via ?: if (photoPath != null) "photo" else "search"
+        if (pending.isNotEmpty()) { vm.saveMealAfter(date, raw, items, photoPath, pending.map { it.job }, type, method); onClose(); return }
         scope.launch {
             saving = true
-            if (vm.saveMeal(date, raw, items, photoPath, type)) onClose() else { error = vm.error; saving = false }
+            if (vm.saveMeal(date, raw, items, photoPath, type, method)) onClose() else { error = vm.error; saving = false }
         }
     }
 
