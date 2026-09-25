@@ -65,6 +65,8 @@ fun TodayScreen(
     vm: AppViewModel, onOpenWorkout: (Workout?) -> Unit, onLogExercise: () -> Unit = {}, onOpenCalendar: () -> Unit = {}, onLog: (String) -> Unit = {}, wrapTick: Int = 0, onLogWater: () -> Unit = {},
     /** v2.8: a meal section's "+ Add" (date, meal type) and a tapped meal row (the editor). */
     onAddMeal: (String, String) -> Unit = { _, _ -> }, onOpenMeal: (Meal) -> Unit = {},
+    /** v2.8: a tapped exercise row opens its editor. */
+    onOpenExercise: (com.sohum.bandlog.data.ExerciseEntry) -> Unit = {},
 ) {
     val p = palette
     val today = vm.today
@@ -212,7 +214,7 @@ fun TodayScreen(
         }
         // v2.8: no "Log something" button here — the + button logs; each meal section has its own "+ Add".
         items(todayWorkouts, key = { "w" + it.id }) { w -> Rise(5) { WorkoutRow(w, burnKcal = workoutBurn[w.id]) { onOpenWorkout(w) } } }
-        items(todayExercises, key = { "e" + it.id }) { e -> Rise(5) { ExerciseRow(e) { vm.launch { vm.deleteExercise(e.id) } } } }
+        items(todayExercises, key = { "e" + it.id }) { e -> Rise(5) { com.sohum.bandlog.ui.log.ActivityExerciseRow(e) { onOpenExercise(e) } } }
         // v2.8: Breakfast · Lunch · Dinner · Snacks, each with its totals and "+ Add"; tap a meal to edit it.
         items(com.sohum.bandlog.util.MealTypes.group(todayMeals), key = { "s" + it.type.key }) { s -> Rise(6) { MealSection(s, onAdd = { t -> onAddMeal(selected, t) }, onOpen = onOpenMeal) } }
     }
@@ -470,90 +472,6 @@ fun WorkoutRow(w: Workout, burnKcal: Double? = null, onClick: () -> Unit) {
         },
         open = false, onClick = onClick,
     )
-}
-
-/** A logged burn (run / activity / described / manual). Details: intensity, minutes, delete. */
-@Composable
-fun ExerciseRow(e: com.sohum.bandlog.data.ExerciseEntry, onDelete: () -> Unit) {
-    val p = palette
-    var open by androidx.compose.runtime.remember(e.id) { androidx.compose.runtime.mutableStateOf(false) }
-    var pendingDelete by androidx.compose.runtime.remember(e.id) { androidx.compose.runtime.mutableStateOf(false) }
-    if (pendingDelete) { com.sohum.bandlog.ui.components.UndoRow(onUndo = { pendingDelete = false }, onExpire = onDelete); return }
-    val isBands = e.activityCode?.startsWith("LI-BAND") == true || e.name.contains("lifting", ignoreCase = true) || e.name.contains("band", ignoreCase = true)
-    CompactRow(
-        tile = { SmallTile(if (isBands) DumbbellIcon else com.sohum.bandlog.ui.components.activityIcon(e.name, e.activityCode), p.green, p.greenBg) },
-        title = e.name.replaceFirstChar { it.uppercase() },
-        value = "${e.kcal.toInt()} kcal",
-        open = open, onClick = { open = !open },
-    ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                (if (e.source == "manual" && e.activityCode == null && e.intensityPct == null) "Entered by hand"
-                else "Intensity: ${e.intensityPct?.let { com.sohum.bandlog.util.Burn.pctShort(it) } ?: com.sohum.bandlog.util.Burn.intensityLabel(e.intensity)}") +
-                    " · ${e.minutes} min" + (e.distanceKm?.let { " · ${fmt(it)} km" } ?: "") + (e.steps?.let { " · $it steps" } ?: "") +
-                    " · ${timeOf(e.startedAt ?: e.createdAt)}" + (if (e.note.isNotBlank() && e.source != "workout") "\n${e.note}" else ""),
-                fontSize = 12.sp, color = p.muted, modifier = Modifier.weight(1f),
-            )
-            DeleteButton { pendingDelete = true }
-        }
-    }
-}
-
-/** A meal: what was in it and the calories; details list every item, macros, thumbs up / down and delete. */
-@Composable
-fun MealRow(m: Meal, onDelete: () -> Unit, onFeedback: ((String) -> Unit)? = null) {
-    val p = palette
-    var open by androidx.compose.runtime.remember(m.id) { androidx.compose.runtime.mutableStateOf(false) }
-    var voted by androidx.compose.runtime.remember(m.id) { androidx.compose.runtime.mutableStateOf<String?>(null) }
-    var pendingDelete by androidx.compose.runtime.remember(m.id) { androidx.compose.runtime.mutableStateOf(false) }
-    if (pendingDelete) { com.sohum.bandlog.ui.components.UndoRow(onUndo = { pendingDelete = false }, onExpire = onDelete); return }
-    CompactRow(
-        tile = {
-            // Plate photo when the meal has one; else a picture of its biggest item (v2.4).
-            if (m.photoPath != null) com.sohum.bandlog.ui.components.RemoteImage(storagePath = m.photoPath, size = 40.dp, radius = 12.dp, fallback = BowlIcon, fallbackTint = p.orange, fallbackBg = p.orangeBg)
-            else {
-                val big = m.items.maxByOrNull { it.calories }
-                if (big == null) SmallTile(BowlIcon, p.orange, p.orangeBg)
-                else com.sohum.bandlog.ui.components.FoodImage(
-                    big.name, big.imageUrl, kind = com.sohum.bandlog.ui.components.FoodImages.kindFor(big.source), size = 40.dp,
-                    foodId = big.foodId, fallbackBg = p.orangeBg,
-                )
-            }
-        },
-        title = m.items.joinToString(", ") { it.name }.ifBlank { "Meal" },
-        value = "${m.calories.toInt()} kcal",
-        open = open, onClick = { open = !open },
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            m.items.forEach { it ->
-                RowSpaceBetween {
-                    Text(it.name, fontSize = 13.sp, color = p.ink, maxLines = 1, modifier = Modifier.weight(1f))
-                    Text("${it.quantityLabel} · ${it.calories.toInt()} kcal", fontSize = 12.sp, color = p.muted)
-                }
-            }
-            Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                MacroDot("${fmt(m.protein)}g", p.red)
-                MacroDot("${fmt(m.items.sumOf { it.carbsG })}g", p.orange)
-                MacroDot("${fmt(m.items.sumOf { it.fatG })}g", p.blue)
-                Spacer(Modifier.weight(1f))
-                Text(timeOf(m.createdAt), fontSize = 12.sp, color = p.muted)
-            }
-            RowSpaceBetween {
-                if (onFeedback != null) Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (voted == null) "How did the AI do?" else "Thanks — noted", fontSize = 12.sp, color = p.muted)
-                    listOf("up" to com.sohum.bandlog.ui.components.ThumbUpIcon, "down" to com.sohum.bandlog.ui.components.ThumbDownIcon).forEach { (r, icon) ->
-                        val sel = voted == r
-                        Box(Modifier.size(44.dp).clickable(enabled = voted == null) { voted = r; onFeedback(r) }, contentAlignment = Alignment.Center) {
-                            Box(Modifier.size(30.dp).background(if (sel) p.btn else p.card2, CircleShape), contentAlignment = Alignment.Center) {
-                                Icon(icon, r, tint = if (sel) p.btnInk else p.muted, modifier = Modifier.size(15.dp))
-                            }
-                        }
-                    }
-                } else Spacer(Modifier.width(1.dp))
-                DeleteButton { pendingDelete = true }
-            }
-        }
-    }
 }
 
 @Composable

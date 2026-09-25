@@ -286,7 +286,7 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
                 when (tab) {
                     0 -> TodayScreen(
                         vm, onOpenWorkout = { w -> log = LogRequest(w, Dates.today(), false) }, onLogExercise = { log = LogRequest(null, Dates.today(), false, exercise = true) }, onOpenCalendar = { page = Page.CALENDAR }, onLog = { d -> log = LogRequest(null, d, false) }, wrapTick = openWrapTick, onLogWater = { page = Page.WATER },
-                        onAddMeal = { d, t -> meal = com.sohum.bandlog.ui.log.MealRequest(d, mealType = t) }, onOpenMeal = { m -> meal = com.sohum.bandlog.ui.log.MealRequest(m.date, meal = m) },
+                        onAddMeal = { d, t -> meal = com.sohum.bandlog.ui.log.MealRequest(d, mealType = t) }, onOpenMeal = { m -> meal = com.sohum.bandlog.ui.log.MealRequest(m.date, meal = m) }, onOpenExercise = { e -> log = LogRequest(null, e.date, false, exercise = true, entry = e) },
                     )
                     1 -> com.sohum.bandlog.ui.squad.SquadScreen(vm, onOpenProfile = { tab = 4 })
                     2 -> com.sohum.bandlog.ui.scan.ScanTab(vm)
