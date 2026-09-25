@@ -19,7 +19,11 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -111,6 +115,8 @@ import com.sohum.bandlog.ui.today.fmt
 import com.sohum.bandlog.util.Dates
 import com.sohum.bandlog.util.LabelParse
 import com.sohum.bandlog.util.QuantityFood
+import com.sohum.bandlog.util.applyFollowUpEffect
+import com.sohum.bandlog.util.totalKcalRange
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -514,6 +520,19 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Uni
         }
     }
 
+    // v2.8: deterministic sanity-check flags (kJ read as kcal, decimal slips, ...) — non-blocking.
+    if (r.validation.isNotEmpty()) Rise(1) {
+        Card(padding = 14.dp) {
+            Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("!", fontSize = 14.sp, fontWeight = FontWeight(800), color = p.orange)
+                Column {
+                    Text("Check this 👀", fontSize = 13.sp, fontWeight = FontWeight(700), color = p.ink)
+                    r.validation.forEach { f -> Text(f.issue, fontSize = 13.sp, color = p.muted, lineHeight = 18.sp, modifier = Modifier.padding(top = 4.dp)) }
+                }
+            }
+        }
+    }
+
     // ---- v2.2: the numbers at a glance (2x2), then how it fits each way of eating ----
     SummaryGrid(r)?.let { cells -> Rise(1) { cells() } }
     if (r.fits.isNotEmpty()) Rise(1) { FitPills(r.fits) }
@@ -884,19 +903,28 @@ private val MICRO_LABELS = listOf(
     "vitamin_a_ug" to ("Vit A" to "µg"), "magnesium_mg" to ("Magnesium" to "mg"), "zinc_mg" to ("Zinc" to "mg"),
 )
 
+/** Low confidence sorts first — the rows that most need a second look. */
+private val CONF_RANK = mapOf("low" to 0, "medium" to 1, "high" to 2)
+
 /**
  * The Cal AI-style review: each item with editable grams, calories, P/C/F, a Micros expander and a
  * confidence chip. [onSave] gets the edited items plus the server-stored photo path (if any).
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PhotoReview(est: PlateEstimate, photo: Bitmap?, readOnly: Boolean, onSave: ((List<PlateItem>, String?) -> Unit)? = null) {
     val p = palette
     var items by remember(est) { mutableStateOf(est.items) }
+    // v2.8: the un-scaled estimate for each row (including any follow-up effect already applied), so
+    // a gram edit always rescales from the latest baseline, never from the server's raw estimate.
+    var originals by remember(est) { mutableStateOf(est.items) }
     var open by remember(est) { mutableStateOf<Int?>(null) }
+    var pickedEffect by remember(est) { mutableStateOf<String?>(null) }
     if (est.items.isEmpty()) {
         Rise(1) { Card { Text("Couldn't find food in that photo", fontWeight = FontWeight(700), color = p.ink); Text(est.plateNote, fontSize = 13.sp, color = p.muted) } }
         return
     }
+    val kcalTotal = totalKcalRange(items)
     Rise(1) {
         Card {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -918,11 +946,15 @@ fun PhotoReview(est: PlateEstimate, photo: Bitmap?, readOnly: Boolean, onSave: (
     Rise(2) {
         Card(padding = 0.dp) {
             Column(Modifier.padding(horizontal = 16.dp)) {
-                items.forEachIndexed { idx, it ->
-                    if (idx > 0) Hair()
-                    val (cc, cl) = when (it.confidence) { "high" -> p.green to "High"; "medium" -> p.orange to "Med"; else -> p.muted to "Low" }
+                val order = items.indices.sortedBy { CONF_RANK[items[it].confidence] ?: 1 }
+                order.forEachIndexed { pos, idx ->
+                    val it = items[idx]
+                    val low = it.confidence == "low"
+                    if (pos > 0) Hair()
+                    val (cc, cl) = when (it.confidence) { "high" -> p.green to "High"; "medium" -> p.orange to "Med"; else -> p.orange to "Low" }
                     val micros = MICRO_LABELS.filter { (k, _) -> it.micros[k] != null }
-                    Row(Modifier.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val rowMod = if (low) Modifier.border(BorderStroke(1.dp, p.orange), RoundedCornerShape(12.dp)).padding(horizontal = 4.dp) else Modifier
+                    Row(rowMod.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(it.name + if (it.source == "estimated") " ~" else "", fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
@@ -934,6 +966,8 @@ fun PhotoReview(est: PlateEstimate, photo: Bitmap?, readOnly: Boolean, onSave: (
                                 MacroDot("${fmt(it.proteinG)}g", p.red); MacroDot("${fmt(it.carbsG)}g", p.orange); MacroDot("${fmt(it.fatG)}g", p.blue)
                                 if (micros.isNotEmpty()) Text(if (open == idx) "Hide" else "Micros", fontSize = 12.sp, fontWeight = FontWeight(600), color = p.ink, modifier = Modifier.clickable { open = if (open == idx) null else idx })
                             }
+                            if (it.gramsLow != null && it.gramsHigh != null) Text(it.gramsRangeLabel(), fontSize = 11.sp, color = p.muted)
+                            if (it.uncertainties.isNotEmpty()) Text(it.uncertainties.joinToString(" · "), fontSize = 11.sp, color = p.orange)
                             AnimatedVisibility(open == idx) {
                                 Text(micros.joinToString("  ·  ") { (k, lu) -> "${lu.first} ${fmt(round1(it.micros[k]!!))} ${lu.second}" }, fontSize = 12.sp, color = p.muted, lineHeight = 17.sp)
                             }
@@ -945,11 +979,39 @@ fun PhotoReview(est: PlateEstimate, photo: Bitmap?, readOnly: Boolean, onSave: (
                                 // Always scale from the ORIGINAL estimate, never the already-scaled item — and
                                 // ignore empty/unparsable/≤0 input so the previous value sticks instead of zeroing.
                                 val d = g.toDoubleOrNull()
-                                if (d != null && d > 0) items = items.toMutableList().also { l -> l[idx] = est.items[idx].withGrams(d) }
+                                if (d != null && d > 0) items = items.toMutableList().also { l -> l[idx] = originals[idx].withGrams(d) }
                             }, "g")
-                            IconButton(onClick = { items = items.filterIndexed { i, _ -> i != idx } }, Modifier.size(32.dp)) { Icon(Icons.Outlined.Delete, "Remove", tint = p.muted) }
+                            IconButton(onClick = {
+                                items = items.filterIndexed { i, _ -> i != idx }
+                                originals = originals.filterIndexed { i, _ -> i != idx }
+                            }, Modifier.size(32.dp)) { Icon(Icons.Outlined.Delete, "Remove", tint = p.muted) }
                         } else {
                             Text("${it.grams.roundToInt()} g", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    est.followUp?.takeIf { it.options.isNotEmpty() }?.let { fu ->
+        Rise(3) {
+            Column {
+                Text(fu.question, fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted, modifier = Modifier.padding(horizontal = 4.dp))
+                Spacer(Modifier.height(6.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    fu.options.forEach { o ->
+                        val picked = pickedEffect == o.effect
+                        Box(
+                            Modifier
+                                .background(if (picked) p.ink else p.card2, CircleShape)
+                                .clickable {
+                                    pickedEffect = o.effect
+                                    items = applyFollowUpEffect(items, o.effect, fu.question)
+                                    originals = applyFollowUpEffect(originals, o.effect, fu.question)
+                                }
+                                .padding(horizontal = 14.dp, vertical = 9.dp),
+                        ) {
+                            Text(o.label, fontSize = 13.sp, fontWeight = FontWeight(600), color = if (picked) p.card else p.ink)
                         }
                     }
                 }
@@ -960,7 +1022,8 @@ fun PhotoReview(est: PlateEstimate, photo: Bitmap?, readOnly: Boolean, onSave: (
     if (!readOnly && onSave != null) Rise(4) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column {
-                Text("${items.sumOf { it.calories }.toInt()} kcal", fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.5).sp, color = p.ink)
+                val kcalText = if (kcalTotal.plusMinus > 0) "~${kcalTotal.center} kcal ±${kcalTotal.plusMinus}" else "${kcalTotal.center} kcal"
+                Text(kcalText, fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.5).sp, color = p.ink)
                 Text("${fmt(round1(items.sumOf { it.proteinG }))} g protein", fontSize = 12.sp, color = p.muted)
             }
             Spacer(Modifier.width(12.dp))

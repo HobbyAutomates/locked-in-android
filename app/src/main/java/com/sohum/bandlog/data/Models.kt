@@ -530,6 +530,14 @@ data class Infographic(
 /** How a product fits one way of eating: great | ok | weak, and the number that decides it. */
 data class Fit(val verdict: String, val why: String)
 
+/** v2.8: one deterministic sanity-check flag from the server's src/lib/ai/validate/label.ts
+ *  (kJ read as kcal, a decimal slip, ...) — shown as a small non-blocking "Check this" banner. */
+data class ValidationFlag(val field: String, val issue: String, val suggestion: String) {
+    companion object {
+        fun from(o: JSONObject) = ValidationFlag(o.optString("field"), o.optString("issue"), o.optString("suggestion"))
+    }
+}
+
 /** Result of scanning a packaged food's label or barcode. */
 data class LabelReport(
     val id: String?,
@@ -564,6 +572,8 @@ data class LabelReport(
     val suggestions: List<String>,
     val alternatives: List<String>,
     val infographic: Infographic,
+    /** v2.8: deterministic sanity-check flags — never blocks the scan, just a heads-up. */
+    val validation: List<ValidationFlag> = emptyList(),
 ) {
     companion object {
         fun from(o: JSONObject): LabelReport {
@@ -574,6 +584,7 @@ data class LabelReport(
             val p = o.optJSONObject("protein") ?: JSONObject()
             val n = o.optJSONObject("per_100g") ?: JSONObject()
             val f = o.optJSONObject("fits") ?: JSONObject()
+            val validation = o.optJSONArray("validation")?.let { arr -> (0 until arr.length()).map { ValidationFlag.from(arr.getJSONObject(it)) } } ?: emptyList()
             return LabelReport(
                 id = o.optString("id").ifBlank { null },
                 kind = o.optString("kind", "label").ifBlank { "label" },
@@ -595,6 +606,7 @@ data class LabelReport(
                 claims = triples("claims", "claim", "status", "why"),
                 research = strings("research"), suggestions = strings("suggestions"), alternatives = strings("alternatives"),
                 infographic = Infographic.from(o.optJSONObject("infographic")),
+                validation = validation,
             )
         }
     }
@@ -616,17 +628,33 @@ data class PlateItem(
     val foodId: String?,
     /** v2.0: "restaurant" when the server scaled the portion and added the hidden oil. */
     val cookedIn: String? = null,
+    /** v2.8: a plausible gram range for this portion, from the model — null on older reports. */
+    val gramsLow: Double? = null,
+    val gramsHigh: Double? = null,
+    /** v2.8: what's uncertain about this item, e.g. "oil amount unclear". */
+    val uncertainties: List<String> = emptyList(),
 ) {
     fun withGrams(g: Double): PlateItem {
         if (grams <= 0.0) return copy(grams = g)
         val k = g / grams
-        return copy(grams = g, calories = calories * k, proteinG = proteinG * k, carbsG = carbsG * k, fatG = fatG * k, micros = micros.mapValues { it.value * k })
+        return copy(
+            grams = g, calories = calories * k, proteinG = proteinG * k, carbsG = carbsG * k, fatG = fatG * k, micros = micros.mapValues { it.value * k },
+            gramsLow = gramsLow?.let { it * k }, gramsHigh = gramsHigh?.let { it * k },
+        )
     }
 
     fun toMealItem() = MealItem(
         foodId = foodId, name = name, grams = grams, calories = calories, proteinG = proteinG, carbsG = carbsG, fatG = fatG,
         source = source, confidence = when (confidence) { "high" -> 0.9; "medium" -> 0.6; else -> 0.3 }, micros = micros, cookedIn = cookedIn,
     )
+
+    /** "150 g (120-190)", or just "150 g" when there's no range. */
+    fun gramsRangeLabel(): String {
+        val g = Math.round(grams)
+        val lo = gramsLow; val hi = gramsHigh
+        if (lo == null || hi == null || hi <= lo) return "$g g"
+        return "$g g (${Math.round(lo)}–${Math.round(hi)})"
+    }
 
     companion object {
         fun from(o: JSONObject) = PlateItem(
@@ -641,7 +669,27 @@ data class PlateItem(
             source = o.optString("source", "estimated"),
             foodId = if (o.isNull("food_id")) null else o.optString("food_id").ifBlank { null },
             cookedIn = if (o.isNull("cooked_in")) null else o.optString("cooked_in").ifBlank { null },
+            gramsLow = if (o.has("grams_low") && !o.isNull("grams_low")) o.optDouble("grams_low") else null,
+            gramsHigh = if (o.has("grams_high") && !o.isNull("grams_high")) o.optDouble("grams_high") else null,
+            uncertainties = o.optJSONArray("uncertainties")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList(),
         )
+    }
+}
+
+/** v2.8: one clarifying question the server can ask after a plate scan, with a fixed effect
+ *  vocabulary the client applies deterministically (see util/ScanFollowUp.kt). */
+data class FollowUpOption(val label: String, val effect: String)
+data class FollowUp(val question: String, val options: List<FollowUpOption>) {
+    companion object {
+        fun from(o: JSONObject?): FollowUp? {
+            if (o == null) return null
+            val question = o.optString("question").trim()
+            val options = (o.optJSONArray("options") ?: JSONArray()).let { arr ->
+                (0 until arr.length()).map { i -> val x = arr.getJSONObject(i); FollowUpOption(x.optString("label"), x.optString("effect")) }
+            }.filter { it.label.isNotBlank() && it.effect.isNotBlank() }
+            if (question.isBlank() || options.size < 2) return null
+            return FollowUp(question, options)
+        }
     }
 }
 
@@ -657,6 +705,8 @@ data class PlateEstimate(
     val photoUrl: String? = null,
     /** v2.0: "restaurant" when the note / plate description said it was eaten out. */
     val portionHint: String? = null,
+    /** v2.8: one optional clarifying question, shown as quick-reply chips. */
+    val followUp: FollowUp? = null,
 ) {
     companion object {
         fun from(o: JSONObject): PlateEstimate {
@@ -670,6 +720,7 @@ data class PlateEstimate(
                 photoPath = if (o.isNull("photo_path")) null else o.optString("photo_path").ifBlank { null },
                 photoUrl = if (o.isNull("photo_url")) null else o.optString("photo_url").ifBlank { null },
                 portionHint = if (o.isNull("portion_hint")) null else o.optString("portion_hint").ifBlank { null },
+                followUp = FollowUp.from(o.optJSONObject("follow_up")),
             )
         }
     }
