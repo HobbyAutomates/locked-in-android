@@ -126,7 +126,7 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(Unit) { updateVm.checkOnce(); vm.localBurned = ThemePrefs.burned(this@MainActivity); vm.localRollover = ThemePrefs.rollover(this@MainActivity); vm.celebrationsOn = ThemePrefs.celebrations(this@MainActivity); if (vm.signedIn) { vm.refresh(); vm.refreshHealth(this@MainActivity) } }
                 Surface(Modifier.fillMaxSize(), color = palette.bg) {
                     when {
-                        !vm.signedIn -> LoginScreen(reason = vm.signOutReason, onSignedIn = { vm.onSignedIn() })
+                        !vm.signedIn -> LoginScreen(reason = vm.signOutReason, onInviteCode = { joinCode.value = it }, onSignedIn = { vm.onSignedIn() })
                         // Hold the mark up for the moment between sign-in and the first profile read,
                         // so a brand-new account never flashes the empty tab shell.
                         !vm.loadedOnce && vm.error == null -> BootSplash()
