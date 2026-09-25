@@ -285,7 +285,7 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
                     0 -> TodayScreen(vm, onOpenWorkout = { w -> log = LogRequest(w, Dates.today(), false) }, onLogExercise = { log = LogRequest(null, Dates.today(), false, exercise = true) }, onOpenCalendar = { page = Page.CALENDAR }, onLog = { d -> log = LogRequest(null, d, false) }, wrapTick = openWrapTick, onLogWater = { page = Page.WATER })
                     1 -> com.sohum.bandlog.ui.squad.SquadScreen(vm, onOpenProfile = { tab = 4 })
                     2 -> com.sohum.bandlog.ui.scan.ScanTab(vm)
-                    3 -> ProgressScreen(vm) { page = Page.BADGES }
+                    3 -> ProgressScreen(vm, onOpenBadges = { page = Page.BADGES }, onLogWeight = { page = Page.WEIGHT_LOG })
                     else -> ProfileScreen(vm, updateVm, themeMode, onThemeMode) { target ->
                         page = when (target) {
                             ProfilePage.PERSONAL -> Page.PERSONAL
