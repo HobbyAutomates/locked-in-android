@@ -93,6 +93,11 @@ import com.sohum.bandlog.util.Quantity
 import com.sohum.bandlog.util.QuantityFood
 import com.sohum.bandlog.util.Restaurant
 import com.sohum.bandlog.util.rememberDictation
+import com.sohum.bandlog.util.Sources
+import com.sohum.bandlog.data.FoodVariant
+import com.sohum.bandlog.ui.components.InfoButton
+import com.sohum.bandlog.ui.components.SourceSheet
+import com.sohum.bandlog.ui.components.VariantChips
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -180,6 +185,24 @@ fun MealForm(
     var repeatOpen by remember { mutableStateOf(false) }
     var waterNotice by remember { mutableStateOf<com.sohum.bandlog.data.ParsedWater?>(null) }
     var waterUndone by remember { mutableStateOf(false) }
+    // v2.9: the row whose "Where's this from?" sheet is open, the row "Pick another" is replacing via
+    // search, foods the user picked from "Which one?" (their ⓘ stops asking), and reported rows.
+    var infoIdx by remember { mutableStateOf<Int?>(null) }
+    var swapIdx by remember { mutableStateOf<Int?>(null) }
+    var confirmedIds by remember { mutableStateOf(setOf<String>()) }
+    var reported by remember { mutableStateOf(setOf<String>()) }
+    // v2.9 meal editor: saved rows carry no provenance — one lookup brings the ⓘ source and any variants.
+    LaunchedEffect(existing?.id) {
+        val saved = existing?.items.orEmpty()
+        if (saved.isEmpty()) return@LaunchedEffect
+        runCatching { Api.foodSources(saved) }.onSuccess { found ->
+            items = items.map { it ->
+                val i = saved.indexOfFirst { s -> s.id != null && s.id == it.id }
+                val f = found.getOrNull(i)
+                if (i < 0 || f == null || it.sourceInfo != null) it else it.copy(sourceInfo = f.first, variants = f.second)
+            }
+        }
+    }
     LaunchedEffect(Unit) {
         vm.loadSavedMeals(); vm.loadPresets()
         // A scan's "Log 1 serving" lands here with the item already on the plate.
@@ -213,6 +236,13 @@ fun MealForm(
         say("Added · $amount · ${item.calories.roundToInt()} kcal")
     }
 
+
+    /** v2.9 "Which one?": swap the row to that food at the same grams (it keeps its chips). */
+    fun pickVariant(idx: Int, v: FoodVariant, keepChips: Boolean = true) {
+        items = items.toMutableList().also { l -> if (idx in l.indices) l[idx] = Sources.swap(l[idx], v, keepChips) }
+        confirmedIds = confirmedIds + v.foodId
+        say("Swapped to ${v.chip}")
+    }
 
     fun addSaved(sm: SavedMeal) {
         items = items + sm.items; rawParts += sm.name; error = null
@@ -314,9 +344,24 @@ fun MealForm(
                 ErrorNote(error)
 
                 val q = text.trim()
+                val swapping = swapIdx?.let { items.getOrNull(it) }
+                if (swapping != null) Row(
+                    Modifier.fillMaxWidth().background(p.card2, RoundedCornerShape(14.dp)).padding(start = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Pick a food to replace ${swapping.name}", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1, modifier = Modifier.weight(1f))
+                    TextLink("Cancel") { swapIdx = null }
+                }
                 if (q.length >= 2 || looksLikeSentence(q)) {
                     SearchResults(q, looksLikeSentence(q), onWorkItOut = { workItOut() }) { h ->
                         focus.clearFocus()
+                        val si = swapIdx
+                        if (si != null && si in items.indices) {
+                            // "Not right? Pick another": the pick replaces that row at the same grams.
+                            pickVariant(si, Sources.variantOf(h), keepChips = false)
+                            swapIdx = null; text = ""
+                            return@SearchResults
+                        }
                         sheet = SheetReq(QuantityFood.from(h), null, -1, raw = h.name)
                         text = ""
                     }
@@ -368,9 +413,12 @@ fun MealForm(
                     val food = QuantityFood.from(it, servings).copy(defaultServing = preset?.defaultServing, category = preset?.category)
                     sheet = SheetReq(food, Quantity(QUnit.G, it.grams), idx)
                 },
-                onRemove = { idx -> items = items.filterIndexed { i, _ -> i != idx } },
+                onRemove = { idx -> items = items.filterIndexed { i, _ -> i != idx }; if (swapIdx == idx) swapIdx = null },
                 onCookedIn = { idx -> cookedFor = idx },
                 onSave = { save() },
+                checkOf = { it.foodId !in confirmedIds && Sources.needsCheck(it) },
+                onInfo = { idx -> infoIdx = idx },
+                onPickVariant = { idx, v -> pickVariant(idx, v) },
             )
         }
     }
@@ -387,6 +435,37 @@ fun MealForm(
                 items = items.toMutableList().also { l ->
                     if (req.replace in l.indices) { val old = l[req.replace]; l[req.replace] = item.copy(cookedIn = item.cookedIn ?: old.cookedIn, source = old.source, foodId = old.foodId) }
                 }
+            },
+        )
+    }
+
+    // v2.9 "Where's this from?" — a row without provenance looks it up once when opened.
+    infoIdx?.let { idx ->
+        val row = items.getOrNull(idx)
+        if (row == null) { infoIdx = null; return@let }
+        val needLookup = row.sourceInfo == null && row.foodId != null
+        LaunchedEffect(idx, row.foodId, row.name) {
+            if (!needLookup) return@LaunchedEffect
+            val f = runCatching { Api.foodSources(listOf(row)).firstOrNull() }.getOrNull()
+            val info = f?.first ?: com.sohum.bandlog.data.SourceInfo("custom", "Locked In food table", "Couldn't load the source just now — try again in a moment.")
+            items = items.toMutableList().also { l -> if (idx in l.indices && l[idx].sourceInfo == null) l[idx] = l[idx].copy(sourceInfo = info, variants = l[idx].variants.ifEmpty { f?.second.orEmpty() }) }
+        }
+        val key = "${row.foodId}|${row.name}"
+        SourceSheet(
+            name = row.name,
+            info = row.sourceInfo ?: Sources.fallback(row),
+            confidence = Sources.confidenceLabel(row.confidence, row.source),
+            per100 = Sources.per100Note(row.grams, row.calories, row.proteinG, row.carbsG, row.fatG),
+            variants = row.variants, currentId = row.foodId,
+            reported = key in reported,
+            onDismiss = { infoIdx = null },
+            onPickVariant = { v -> pickVariant(idx, v); infoIdx = null },
+            onPickAnother = { infoIdx = null; swapIdx = idx; text = row.name.removeSuffix(" (restaurant)") },
+            onReport = {
+                reported = reported + key
+                val info = row.sourceInfo?.label ?: row.source
+                val note = "[source report] ${row.name} · food_id=${row.foodId ?: "none"} · $info · ${Sources.per100Note(row.grams, row.calories, row.proteinG, row.carbsG, row.fatG)}"
+                vm.launch { runCatching { Api.feedback("down", row.name, existing?.id, note) } }
             },
         )
     }
@@ -767,6 +846,9 @@ private fun Plate(
     onRemove: (Int) -> Unit,
     onCookedIn: (Int) -> Unit,
     onSave: () -> Unit,
+    checkOf: (MealItem) -> Boolean,
+    onInfo: (Int) -> Unit,
+    onPickVariant: (Int, FoodVariant) -> Unit,
 ) {
     val p = palette
     val shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp)
@@ -791,6 +873,7 @@ private fun Plate(
                     cookedInLabel = it.cookedIn?.let { id -> if (id == "restaurant") "Restaurant portion · oil included" else "Cooked in ${fats.firstOrNull { f -> f.id == id }?.label ?: id}" },
                     showCookedIn = it.cookedIn == null && it.source != "scan" && !isFat && fats.isNotEmpty() && QuantityFood.wantsCookedIn(it.name),
                     onCookedIn = { onCookedIn(idx) }, onQuantity = { onQuantity(idx) }, onRemove = { onRemove(idx) },
+                    check = checkOf(it), onInfo = { onInfo(idx) }, onPickVariant = { v -> onPickVariant(idx, v) },
                 )
             }
         }
@@ -869,7 +952,10 @@ private fun PendingPlateRow(label: String) {
 }
 
 @Composable
-private fun PlateRow(item: MealItem, amount: String, cookedInLabel: String?, showCookedIn: Boolean, onCookedIn: () -> Unit, onQuantity: () -> Unit, onRemove: () -> Unit) {
+private fun PlateRow(
+    item: MealItem, amount: String, cookedInLabel: String?, showCookedIn: Boolean, onCookedIn: () -> Unit, onQuantity: () -> Unit, onRemove: () -> Unit,
+    check: Boolean = false, onInfo: () -> Unit = {}, onPickVariant: (FoodVariant) -> Unit = {},
+) {
     val p = palette
     // Delta badge: "+99 kcal" for a moment after the amount changes.
     var last by remember { mutableStateOf(item.calories) }
@@ -886,8 +972,10 @@ private fun PlateRow(item: MealItem, amount: String, cookedInLabel: String?, sho
             Spacer(Modifier.width(10.dp))
             Text(
                 item.name + if (item.source == "estimated") " ~" else "", fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink,
-                maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
             )
+            InfoButton(item.name, check, onInfo)
+            Spacer(Modifier.weight(1f))
             // The amount opens the Quantity sheet.
             Box(Modifier.heightIn(min = 44.dp).padding(start = 6.dp).clickable(onClick = onQuantity), contentAlignment = Alignment.Center) {
                 Box(Modifier.heightIn(min = 34.dp).widthIn(max = 120.dp).background(p.card2, RoundedCornerShape(10.dp)).padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
@@ -916,6 +1004,8 @@ private fun PlateRow(item: MealItem, amount: String, cookedInLabel: String?, sho
                 Icon(DropIcon, null, tint = p.orange, modifier = Modifier.size(12.dp))
                 Text(" Cooked in…", fontSize = 12.sp, fontWeight = FontWeight(700), color = p.ink)
             }
+            // v2.9 "Which one?" — the name was ambiguous; one tap swaps the row at the same grams.
+            if (item.variants.size > 1) VariantChips(item.variants, item.foodId, onPickVariant)
         }
     }
 }
