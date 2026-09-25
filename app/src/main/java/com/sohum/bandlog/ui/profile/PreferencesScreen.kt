@@ -341,6 +341,7 @@ internal fun ChangelogSheet(onDismiss: () -> Unit) {
 }
 
 private val CHANGELOG = listOf(
+    "2.9" to listOf("Deleting a meal or workout also removes its squad posts; delete your own posts with a long-press", "Choose what auto-posts to squads in Privacy → Squad sharing, and mute any squad", "Not sure which roti? Pick the right one, and tap ⓘ to see where the numbers come from"),
     "2.8" to listOf("Home groups your food into Breakfast, Lunch, Dinner and Snacks", "Tap anything you logged to edit it: meals, activities, water, weigh-ins", "One Log activity button, one-tap water, simpler Progress, gram ranges on photo scans"),
     "2.7" to listOf("Squad Challenges: train days, protein days or log every day, with a ranked board and 🏆 when you finish", "Squad Food Battle: a daily crown for whoever eats closest to their own goal", "Fixes: editing grams on a scan keeps the macros, \"4 idli\" logs 4, deletes can be undone, sharper label and barcode scans"),
     "2.6" to listOf("Water page with a filling bottle, vessels and reminders", "Squads v2: usernames, photos, invites, Chat · Feed · Leaderboard"),
