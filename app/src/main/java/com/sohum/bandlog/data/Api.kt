@@ -918,6 +918,51 @@ object Api {
         return rpc("post_to_my_groups", payload, "Post to squads").trim().trim('"').toIntOrNull() ?: 0
     }
 
+    // ---- v2.11: reactions + read receipts (schema_v35) ----
+
+    /**
+     * Sets my reaction on a post (one per person: the upsert replaces it) or removes it ([emoji]
+     * null). RLS only lets me touch my own row on posts in my squads.
+     */
+    suspend fun setReaction(postId: String, emoji: String?) = withContext(Dispatchers.IO) {
+        val uid = Session.userId ?: throw AuthException("Not signed in")
+        if (emoji == null) {
+            run(rest("post_reactions?post_id=eq.$postId&user_id=eq.$uid").header("Prefer", "return=minimal").delete().build(), "Remove reaction")
+        } else {
+            val row = JSONObject().put("post_id", postId).put("user_id", uid).put("emoji", emoji).put("created_at", java.time.Instant.now().toString())
+            run(
+                rest("post_reactions?on_conflict=post_id,user_id").header("Prefer", "resolution=merge-duplicates,return=minimal").post(json(row.toString())).build(),
+                "Save reaction",
+            )
+        }
+        Unit
+    }
+
+    /** `post_reactors(p)`: who reacted with what (members only). */
+    suspend fun postReactors(postId: String): List<PostReactor> {
+        val arr = JSONArray(rpc("post_reactors", JSONObject().put("p", postId), "Load reactions"))
+        return (0 until arr.length()).map { PostReactor.from(arr.getJSONObject(it)) }
+    }
+
+    /** `mark_read(g)`: I've read this squad's Chat up to now. */
+    suspend fun markRead(groupId: String) { rpc("mark_read", JSONObject().put("g", groupId), "Mark read") }
+
+    /** `group_read_status(g)`: every member's last_read_at (for "Seen by"). Throws when v35 isn't applied. */
+    suspend fun groupReadStatus(groupId: String): List<com.sohum.bandlog.util.Reactions.ReadRow> {
+        val arr = JSONArray(rpc("group_read_status", JSONObject().put("g", groupId), "Load read status"))
+        return (0 until arr.length()).map { i ->
+            val o = arr.getJSONObject(i)
+            fun s(k: String) = if (!o.has(k) || o.isNull(k)) null else o.optString(k).ifBlank { null }
+            com.sohum.bandlog.util.Reactions.ReadRow(o.optString("user_id"), s("name") ?: "Member", s("username"), s("avatar_path"), s("last_read_at"))
+        }
+    }
+
+    /** `my_unread_counts()`: unread Chat posts per squad id (squads with none are left out). */
+    suspend fun myUnreadCounts(): Map<String, Int> {
+        val arr = JSONArray(rpc("my_unread_counts", JSONObject(), "Load unread"))
+        return (0 until arr.length()).associate { i -> arr.getJSONObject(i).let { it.optString("group_id") to it.optInt("unread", 0) } }
+    }
+
     /** Inserts one post (message / meal / workout / pr / photo) into each of [groupIds]. */
     suspend fun postToGroups(groupIds: List<String>, kind: String, body: String, refId: String? = null, photoPath: String? = null) = withContext(Dispatchers.IO) {
         val uid = Session.userId ?: throw AuthException("Not signed in")

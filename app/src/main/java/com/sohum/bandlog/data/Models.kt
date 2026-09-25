@@ -957,6 +957,10 @@ data class GroupPost(
     val authorName: String,
     val authorUsername: String?,
     val authorAvatar: String?,
+    /** v2.11 (schema_v35, appended to group_feed): counts per emoji; empty when none / v35 not applied. */
+    val reactions: Map<String, Int> = emptyMap(),
+    /** v2.11: my own emoji on this post, or null. */
+    val myReaction: String? = null,
 ) {
     companion object {
         private fun JSONObject.s(k: String): String? = if (!has(k) || isNull(k)) null else optString(k).ifBlank { null }
@@ -967,6 +971,19 @@ data class GroupPost(
             authorName = o.s("name") ?: o.s("author_name") ?: "Member",
             authorUsername = o.s("username") ?: o.s("author_username"),
             authorAvatar = o.s("avatar_path") ?: o.s("author_avatar_path"),
+            reactions = com.sohum.bandlog.util.Reactions.parseCounts(o.optJSONObject("reactions")),
+            myReaction = com.sohum.bandlog.util.Reactions.normalize(o.s("my_reaction")),
+        )
+    }
+}
+
+/** v2.11: one row of `bandlog.post_reactors(p)` — who reacted with what. */
+data class PostReactor(val userId: String, val name: String, val username: String?, val avatarPath: String?, val emoji: String, val createdAt: String) {
+    companion object {
+        private fun JSONObject.s(k: String): String? = if (!has(k) || isNull(k)) null else optString(k).ifBlank { null }
+        fun from(o: JSONObject) = PostReactor(
+            o.optString("user_id"), o.s("name") ?: "Member", o.s("username"), o.s("avatar_path"),
+            com.sohum.bandlog.util.Reactions.normalize(o.s("emoji")) ?: o.optString("emoji"), o.optString("created_at"),
         )
     }
 }

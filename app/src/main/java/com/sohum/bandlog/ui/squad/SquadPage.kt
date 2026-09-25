@@ -49,6 +49,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
@@ -174,7 +175,12 @@ fun SquadPage(sq: SquadViewModel, squad: Squad, initialTab: Int? = null, protein
                 tabs.forEach { t ->
                     val sel = t == current
                     Column(Modifier.weight(t.weight).clickable { selectTab(t) }, horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(t.label, fontSize = 15.sp, fontWeight = if (sel) FontWeight(800) else FontWeight(500), color = if (sel) p.ink else p.muted, modifier = Modifier.padding(vertical = 12.dp), maxLines = 1, softWrap = false)
+                        Row(Modifier.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(t.label, fontSize = 15.sp, fontWeight = if (sel) FontWeight(800) else FontWeight(500), color = if (sel) p.ink else p.muted, maxLines = 1, softWrap = false)
+                            // v2.11: unread Chat posts (schema_v35), until Chat is opened.
+                            val badge = if (t == SquadTab.CHAT && !sel) com.sohum.bandlog.util.Reactions.unreadLabel(sq.unread[squad.id]) else null
+                            if (badge != null) { Spacer(Modifier.width(4.dp)); UnreadBadge(badge, "${sq.unread[squad.id]} unread") }
+                        }
                         Box(Modifier.fillMaxWidth().height(3.dp).background(if (sel) p.ink else Color.Transparent))
                     }
                 }
@@ -189,6 +195,12 @@ fun SquadPage(sq: SquadViewModel, squad: Squad, initialTab: Int? = null, protein
                 SquadTab.FEED -> FeedTab(sq, squad)
                 SquadTab.BOARD -> LeaderboardTab(sq)
                 SquadTab.BATTLE -> if (vm != null) BattleBoardTab(sq, vm, squad.id) else LeaderboardTab(sq)
+            }
+            // v2.11: who reacted (tap the chips under a post / message).
+            sq.reactorsFor?.let { id ->
+                ReactorsSheet(sq.reactors, Session.userId, onRemoveMine = {
+                    sq.visiblePosts.firstOrNull { it.id == id }?.let { post -> sq.reactionState(post).mine?.let { sq.react(post, it, "sheet") } }
+                }, onDismiss = { sq.closeReactors() })
             }
             // v2.9: "Post deleted · Undo" (the v2.7 undo), above Chat's message bar / Feed's Photo button.
             sq.deletedSnack?.let { id ->
@@ -210,21 +222,50 @@ internal fun EmptyState(title: String, sub: String) {
     }
 }
 
-/** Chat: kind=message posts, newest at the bottom; polls every 5 s while on screen. */
+/** Chat's kinds, as on the web (CHAT_KINDS): messages and shared photos. */
+val CHAT_KINDS = setOf("message", "photo")
+
+/**
+ * Chat: messages and photos, newest at the bottom; polls every 5 s while on screen (with the read
+ * receipts). v2.11: WhatsApp-style runs (name once, avatar on the last message), long-press for
+ * reactions (+ Delete), "Seen by" under my latest message, and mark-read while it's open.
+ */
 @Composable
 private fun ChatTab(sq: SquadViewModel, squad: Squad) {
     val p = palette
     val me = Session.userId
     val isOwner = squad.ownerId == me
-    LaunchedEffect(sq.openId) { while (true) { delay(5_000); sq.refreshFeed() } }
-    val messages = sq.visiblePosts.filter { it.kind == "message" }
+    LaunchedEffect(sq.openId) { sq.refreshFeed(withReads = true); while (true) { delay(5_000); sq.refreshFeed(withReads = true) } }
+    val messages = sq.visiblePosts.filter { it.kind in CHAT_KINDS }
+    // Mark read (debounced) whenever the newest message changes while Chat is on screen and the app is in front.
+    val lifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current.lifecycle
+    val newestId = messages.firstOrNull()?.id
+    LaunchedEffect(sq.openId, newestId) {
+        delay(1_200)
+        if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) sq.markRead()
+    }
+    val oldestFirst = messages.asReversed()
+    val runs = remember(oldestFirst) {
+        val r = com.sohum.bandlog.util.Reactions.runs(oldestFirst.map { it.userId }, oldestFirst.map { com.sohum.bandlog.util.Reactions.millis(it.createdAt) ?: 0L })
+        oldestFirst.indices.associate { oldestFirst[it].id to r[it] }
+    }
+    val myLatest = messages.firstOrNull { it.userId == me }
+    val reads = sq.reads
+    val seen = if (myLatest != null && reads != null) com.sohum.bandlog.util.Reactions.seenBy(reads, me, myLatest.createdAt) else null
+    var seenOpen by remember(sq.openId) { mutableStateOf(false) }
     var text by remember { mutableStateOf("") }
     Column(Modifier.fillMaxSize().imePadding()) {
         Box(Modifier.weight(1f)) {
             if (messages.isEmpty() && !sq.pageLoading) EmptyState("Say hi 👋", "Messages stay in the squad. Plan a session, call out a PR, keep each other honest.")
-            LazyColumn(Modifier.fillMaxSize(), reverseLayout = true, contentPadding = PaddingValues(12.dp, 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            LazyColumn(Modifier.fillMaxSize(), reverseLayout = true, contentPadding = PaddingValues(12.dp, 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 items(messages, key = { it.id }) { m ->
-                    ChatBubble(m, mine = m.userId == me, onDelete = if (com.sohum.bandlog.util.SquadSharing.canDelete(m.userId, me, isOwner)) ({ sq.deletePost(m) }) else null)
+                    val (first, last) = runs[m.id] ?: (true to true)
+                    ChatBubble(
+                        m, mine = m.userId == me, first = first, last = last, state = sq.reactionState(m),
+                        onReact = { e -> sq.react(m, e) }, onOpenReactors = { sq.openReactors(m.id) },
+                        onDelete = if (com.sohum.bandlog.util.SquadSharing.canDelete(m.userId, me, isOwner)) ({ sq.deletePost(m) }) else null,
+                        receipt = if (seen != null && m.id == myLatest?.id) seen else null, onOpenReceipt = { seenOpen = true },
+                    )
                 }
             }
         }
@@ -251,31 +292,63 @@ private fun ChatTab(sq: SquadViewModel, squad: Squad) {
             }
         }
     }
+    if (seenOpen && seen != null) SeenSheet(seen) { seenOpen = false }
 }
 
-/** v2.9: long-press opens a one-item menu, "Delete", for posts you may delete. */
+/**
+ * One chat message. Someone else's shows their name on the first message of a run and their
+ * avatar (plus the time) on the last; mine sit on the right with no name. Long-press opens the
+ * reaction bar above it, with Delete below the emojis for posts you may delete.
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ChatBubble(m: GroupPost, mine: Boolean, onDelete: (() -> Unit)? = null) {
+private fun ChatBubble(
+    m: GroupPost, mine: Boolean, first: Boolean, last: Boolean, state: com.sohum.bandlog.util.Reactions.State,
+    onReact: (String) -> Unit, onOpenReactors: () -> Unit, onDelete: (() -> Unit)?,
+    receipt: com.sohum.bandlog.util.Reactions.SeenBy?, onOpenReceipt: () -> Unit,
+) {
     val p = palette
     var menu by remember(m.id) { mutableStateOf(false) }
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start, verticalAlignment = Alignment.Bottom) {
+    Row(
+        Modifier.fillMaxWidth().padding(top = if (first) 6.dp else 0.dp),
+        horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start, verticalAlignment = Alignment.Bottom,
+    ) {
         if (!mine) {
-            Avatar(Api.avatarUrl(m.authorAvatar), Names.initials(m.authorName), 30.dp)
+            Box(Modifier.width(30.dp).padding(bottom = if (last) 16.dp else 0.dp)) { if (last) Avatar(Api.avatarUrl(m.authorAvatar), Names.initials(m.authorName), 30.dp) }
             Spacer(Modifier.width(8.dp))
         }
         Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
-            if (!mine) Text(m.authorName, fontSize = 11.sp, fontWeight = FontWeight(700), color = p.muted, modifier = Modifier.padding(start = 4.dp, bottom = 2.dp))
+            if (!mine && first) Text(m.authorName, fontSize = 11.sp, fontWeight = FontWeight(700), color = p.muted, modifier = Modifier.padding(start = 4.dp, bottom = 2.dp))
             Box {
-                val shape = RoundedCornerShape(18.dp, 18.dp, if (mine) 4.dp else 18.dp, if (mine) 18.dp else 4.dp)
-                Box(
+                val shape = RoundedCornerShape(18.dp, 18.dp, if (mine && last) 4.dp else 18.dp, if (!mine && last) 4.dp else 18.dp)
+                Column(
                     Modifier.widthIn(max = 280.dp).clip(shape).background(if (mine) p.btn else p.card2, shape)
-                        .then(if (onDelete != null) Modifier.combinedClickable(onLongClickLabel = "Post options", onLongClick = { menu = true }, onClick = {}) else Modifier)
-                        .padding(horizontal = 14.dp, vertical = 9.dp),
-                ) { Text(m.body, fontSize = 15.sp, color = if (mine) p.btnInk else p.ink, lineHeight = 20.sp) }
-                if (onDelete != null) PostMenu(menu, { menu = false }, onDelete)
+                        .combinedClickable(onLongClickLabel = "React", onLongClick = { menu = true }, onClick = {}),
+                ) {
+                    m.photoPath?.let { path ->
+                        Box(Modifier.width(240.dp).height(240.dp).background(p.card2)) {
+                            RemoteImage(privatePath = path, bucket = "group-photos", size = 240.dp, radius = 0.dp, modifier = Modifier.fillMaxSize())
+                        }
+                    }
+                    val body = if (m.kind == "photo" && m.body == "shared a photo") "" else m.body
+                    if (body.isNotBlank()) Text(body, fontSize = 15.sp, color = if (mine) p.btnInk else p.ink, lineHeight = 20.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp))
+                }
+                if (menu) ReactionPopup(state.mine, alignEnd = mine, onPick = onReact, onDelete = onDelete, onDismiss = { menu = false })
             }
-            Text(timeAgo(m.createdAt), fontSize = 10.sp, color = p.muted, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+            ReactionChipsRow(state, alignEnd = mine, onOpen = onOpenReactors, modifier = Modifier.padding(top = 4.dp))
+            if (last || receipt != null) {
+                Row(Modifier.padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(timeAgo(m.createdAt), fontSize = 10.sp, color = p.muted)
+                    if (receipt != null) {
+                        val sent = receipt.state == com.sohum.bandlog.util.Reactions.Seen.SENT
+                        Row(Modifier.clickable(onClick = onOpenReceipt).padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("· ", fontSize = 10.sp, color = p.muted)
+                            Ticks(receipt.state, 12.dp)
+                            if (!sent) Text(" ${receipt.label}", fontSize = 10.sp, fontWeight = FontWeight(700), color = p.blue)
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -303,7 +376,8 @@ private fun FeedTab(sq: SquadViewModel, squad: Squad) {
                 // A challenge post opens its challenge while it's still listed (open, or ended in the last 30 days).
                 val target = post.refId?.takeIf { post.kind == "challenge" }?.let { ref -> sq.challenges?.firstOrNull { it.id == ref } }
                 FeedCard(
-                    post, onClick = target?.let { c -> { sq.openChallenge(c.id) } },
+                    post, state = sq.reactionState(post), onClick = target?.let { c -> { sq.openChallenge(c.id) } },
+                    onReact = { e, via -> sq.react(post, e, via) }, onOpenReactors = { sq.openReactors(post.id) },
                     onDelete = if (com.sohum.bandlog.util.SquadSharing.canDelete(post.userId, me, isOwner)) ({ sq.deletePost(post) }) else null,
                 )
             }
@@ -324,17 +398,29 @@ private fun FeedTab(sq: SquadViewModel, squad: Squad) {
     }
 }
 
-/** v2.9: long-press opens "Delete" on posts you may delete (yours, or any as the squad owner). */
+/**
+ * One Feed post. v2.11: long-press opens the reaction bar (with Delete below it for posts you may
+ * delete), double-tap is a quick ❤️, and the chips + "+😊" sit under the post.
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun FeedCard(post: GroupPost, onClick: (() -> Unit)? = null, onDelete: (() -> Unit)? = null) {
+private fun FeedCard(
+    post: GroupPost, state: com.sohum.bandlog.util.Reactions.State, onClick: (() -> Unit)? = null,
+    onReact: (String, String) -> Unit, onOpenReactors: () -> Unit, onDelete: (() -> Unit)? = null,
+) {
     val p = palette
     var menu by remember(post.id) { mutableStateOf(false) }
-    val press = when {
-        onDelete != null -> Modifier.combinedClickable(onLongClickLabel = "Post options", onLongClick = { menu = true }, onClick = { onClick?.invoke() })
-        onClick != null -> Modifier.clickable(onClick = onClick)
-        else -> Modifier
+    var hearts by remember(post.id) { mutableIntStateOf(0) }
+    val heartAlpha = remember(post.id) { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(hearts) {
+        if (hearts == 0) return@LaunchedEffect
+        heartAlpha.snapTo(1f); delay(450); heartAlpha.animateTo(0f, androidx.compose.animation.core.tween(350))
     }
+    val press = Modifier.combinedClickable(
+        onLongClickLabel = "React", onLongClick = { menu = true },
+        onDoubleClick = { hearts++; onReact(com.sohum.bandlog.util.Reactions.HEART, "double_tap") },
+        onClick = { onClick?.invoke() },
+    )
     Box {
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(p.card).then(press).padding(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -400,20 +486,10 @@ private fun FeedCard(post: GroupPost, onClick: (() -> Unit)? = null, onDelete: (
                 RemoteImage(privatePath = path, bucket = "group-photos", size = 400.dp, radius = 0.dp, modifier = Modifier.fillMaxSize())
             }
         }
+        ReactionChipsRow(state, onOpen = onOpenReactors, modifier = Modifier.padding(top = 10.dp)) { AddReactionChip { menu = true } }
     }
-    if (onDelete != null) PostMenu(menu, { menu = false }, onDelete)
-    }
-}
-
-/** v2.9: the long-press menu on a post: one item, Delete (no confirm, the Undo snackbar covers it). */
-@Composable
-private fun PostMenu(open: Boolean, onDismiss: () -> Unit, onDelete: () -> Unit) {
-    val p = palette
-    androidx.compose.material3.DropdownMenu(open, onDismiss, Modifier.background(p.card)) {
-        androidx.compose.material3.DropdownMenuItem(
-            text = { Text("Delete", fontSize = 15.sp, fontWeight = FontWeight(600), color = p.red) },
-            onClick = { onDismiss(); onDelete() },
-        )
+    if (heartAlpha.value > 0f) Text("❤️", fontSize = 72.sp, modifier = Modifier.align(Alignment.Center).alpha(heartAlpha.value))
+    if (menu) ReactionPopup(state.mine, alignEnd = false, onPick = { e -> onReact(e, "bar") }, onDelete = onDelete, onDismiss = { menu = false })
     }
 }
 

@@ -112,6 +112,63 @@ class SquadViewModel : ViewModel() {
     /** My group_members.auto_post for the open squad; null while unknown or when the column isn't there yet (switch hidden). */
     var autoPost by mutableStateOf<Boolean?>(null); private set
     /** What Chat / Feed show: everything except posts inside their undo window. */
+    // ---- v2.11: reactions, read receipts, unread (schema_v35; all hidden until it's applied) ----
+    /** Unread Chat posts per squad id (squad list + the Chat tab's badge). */
+    var unread by mutableStateOf<Map<String, Int>>(emptyMap()); private set
+    /** The open squad's members with last_read_at; null = unknown / v35 not applied (no ticks). */
+    var reads by mutableStateOf<List<com.sohum.bandlog.util.Reactions.ReadRow>?>(null); private set
+    /** Optimistic reactions: shown over the server's until the save lands (or fails and reverts). */
+    private var reactOverrides by mutableStateOf<Map<String, com.sohum.bandlog.util.Reactions.State>>(emptyMap())
+    /** The "who reacted" sheet: its post id and rows (null while loading). */
+    var reactorsFor by mutableStateOf<String?>(null); private set
+    var reactors by mutableStateOf<List<com.sohum.bandlog.data.PostReactor>?>(null); private set
+
+    fun reactionState(post: GroupPost): com.sohum.bandlog.util.Reactions.State =
+        reactOverrides[post.id] ?: com.sohum.bandlog.util.Reactions.State(post.reactions, post.myReaction)
+
+    /**
+     * Tap an emoji (bar, or "double_tap" for the Feed's quick ❤️, or "sheet" to remove mine): same
+     * one removes it, another replaces it. Shows at once; reverts with an error if the save fails.
+     */
+    fun react(post: GroupPost, emoji: String, via: String = "bar") {
+        val cur = reactionState(post)
+        val change = (if (via == "double_tap") com.sohum.bandlog.util.Reactions.quickHeart(cur) else com.sohum.bandlog.util.Reactions.toggle(cur, emoji)) ?: return
+        error = null
+        reactOverrides = reactOverrides + (post.id to change.state)
+        viewModelScope.launch {
+            try {
+                Api.setReaction(post.id, change.save)
+                if (change.save != null) com.sohum.bandlog.data.Analytics.track("reaction_added", "emoji" to change.save, "kind" to post.kind, "replaced" to (cur.mine != null), "via" to via)
+                posts = posts.map { if (it.id == post.id) it.copy(reactions = change.state.counts, myReaction = change.state.mine) else it }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) {
+                error = if (com.sohum.bandlog.util.Reactions.missingV35(e.message)) "Reactions are coming with the next server update. Try again soon." else friendly(e.message)
+            } finally {
+                if (reactOverrides[post.id] === change.state) reactOverrides = reactOverrides - post.id
+            }
+        }
+    }
+
+    fun openReactors(postId: String) {
+        reactorsFor = postId; reactors = null
+        viewModelScope.launch {
+            runCatching { Api.postReactors(postId) }
+                .onSuccess { if (reactorsFor == postId) reactors = it }
+                .onFailure { e -> if (reactorsFor == postId) { reactorsFor = null; error = if (com.sohum.bandlog.util.Reactions.missingV35(e.message)) "Reactions are coming with the next server update." else friendly(e.message) } }
+        }
+    }
+
+    fun closeReactors() { reactorsFor = null; reactors = null }
+
+    /** Chat is open and visible with new messages: mark the squad read (the caller debounces) and clear its badge. */
+    fun markRead() {
+        val id = openId ?: return
+        if ((unread[id] ?: 0) > 0) unread = unread - id
+        viewModelScope.launch { runCatching { Api.markRead(id) } }
+    }
+
+    fun loadUnread() { viewModelScope.launch { runCatching { Api.myUnreadCounts() }.onSuccess { unread = it } } }
+
     val visiblePosts: List<GroupPost> get() = if (pendingDeletes.isEmpty()) posts else posts.filter { it.id !in pendingDeletes }
 
     // ---- v2.7: Squad Food Battle (docs/food-battle-spec.md) ----
@@ -146,6 +203,7 @@ class SquadViewModel : ViewModel() {
             try {
                 squads = Api.mySquads()
                 loaded = true
+                loadUnread()
             } catch (e: Exception) { error = e.message ?: "Couldn't load your squads" } finally { loading = false }
         }
     }
@@ -153,13 +211,13 @@ class SquadViewModel : ViewModel() {
     private suspend fun reloadSquads() { runCatching { squads = Api.mySquads() }; loaded = true }
 
     fun openSquad(id: String, info: Boolean = false) {
-        if (openId != id) { posts = emptyList(); leaders = emptyList(); members = emptyList(); requests = emptyList(); board = emptyList(); challenges = null; challengeOpenId = null; challengeBoard = emptyList(); battleBoard = emptyList(); battleCrown = null }
+        if (openId != id) { reads = null; reactOverrides = emptyMap(); posts = emptyList(); leaders = emptyList(); members = emptyList(); requests = emptyList(); board = emptyList(); challenges = null; challengeOpenId = null; challengeBoard = emptyList(); battleBoard = emptyList(); battleCrown = null }
         openId = id; infoOpen = info
         loadPage(id)
         loadBattle(id)
     }
 
-    fun close() { openId = null; infoOpen = false; challengeOpenId = null; autoPost = null }
+    fun close() { openId = null; infoOpen = false; challengeOpenId = null; autoPost = null; closeReactors(); loadUnread() }
 
     fun loadPage(id: String = openId ?: "") {
         if (id.isBlank()) return
@@ -173,6 +231,7 @@ class SquadViewModel : ViewModel() {
                 val n = async { runCatching { Api.sentNudges() }.getOrDefault(sent) }
                 val ch = async { runCatching { Api.groupChallenges(id) } }
                 val ap = async { Api.myAutoPost(id) }
+                val rd = async { runCatching { Api.groupReadStatus(id) }.getOrNull() }
                 val sq = squads.firstOrNull { it.id == id }
                 val r = async { if (sq != null && sq.ownerId == Session.userId) runCatching { Api.joinRequests(id) }.getOrDefault(emptyList()) else emptyList() }
                 f.await().onSuccess { posts = it; feedSupported = true }.onFailure { if (feedSupported != true) feedSupported = false }
@@ -182,7 +241,7 @@ class SquadViewModel : ViewModel() {
                     ?: board.map { LeaderRow(it.userId, it.name, null, it.avatarPath, it.weekStreak, 0) }.sortedByDescending { it.flames }
                 members = m.await() ?: board.map { MemberDetail(it.userId, it.name, null, it.avatarPath, it.isOwner, it.weekStreak, "") }
                 ch.await().onSuccess { if (openId == id) { challenges = it; challengesSupported = true } }.onFailure { if (challengesSupported != true) challengesSupported = false }
-                if (openId == id) autoPost = ap.await()
+                if (openId == id) { autoPost = ap.await(); rd.await()?.let { reads = it } }
             }
             pageLoading = false
         }
@@ -232,11 +291,14 @@ class SquadViewModel : ViewModel() {
         }
     }
 
-    /** Chat polls this every 5 s while it's on screen. */
-    fun refreshFeed() {
+    /** Chat polls this every 5 s while it's on screen ([withReads]: also the read receipts). */
+    fun refreshFeed(withReads: Boolean = false) {
         val id = openId ?: return
         if (feedSupported == false) return
-        viewModelScope.launch { runCatching { Api.groupFeed(id) }.onSuccess { if (openId == id) { posts = it; feedSupported = true } } }
+        viewModelScope.launch {
+            runCatching { Api.groupFeed(id) }.onSuccess { if (openId == id) { posts = it; feedSupported = true } }
+            if (withReads) runCatching { Api.groupReadStatus(id) }.onSuccess { if (openId == id) reads = it }
+        }
     }
 
     /**
@@ -561,7 +623,10 @@ fun SquadScreen(vm: AppViewModel, onOpenProfile: () -> Unit) {
                                 )
                             }
                             Spacer(Modifier.width(8.dp))
-                            Box(Modifier.background(p.card2, CircleShape).padding(horizontal = 10.dp, vertical = 4.dp)) {
+                            // v2.11: unread Chat posts (schema_v35); the Private/Public pill otherwise.
+                            val badge = com.sohum.bandlog.util.Reactions.unreadLabel(sq.unread[s.id])
+                            if (badge != null) UnreadBadge(badge, "${sq.unread[s.id]} unread")
+                            else Box(Modifier.background(p.card2, CircleShape).padding(horizontal = 10.dp, vertical = 4.dp)) {
                                 Text(if (s.isPrivate) "Private" else "Public", fontSize = 11.sp, fontWeight = FontWeight(700), color = p.muted)
                             }
                         }
