@@ -56,7 +56,8 @@ import com.sohum.bandlog.ui.components.Flame
 import com.sohum.bandlog.ui.components.FlameIcon
 import com.sohum.bandlog.ui.components.MacroDot
 import com.sohum.bandlog.ui.components.Ring
-import com.sohum.bandlog.ui.components.Rise
+import com.sohum.bandlog.ui.motion.Entrance
+import com.sohum.bandlog.ui.motion.MotionScreen
 import com.sohum.bandlog.ui.components.RowSpaceBetween
 import com.sohum.bandlog.ui.theme.palette
 import com.sohum.bandlog.util.Dates
@@ -127,9 +128,11 @@ fun TodayScreen(
     val caloriesLeft = (budget - totals.calories).toInt().coerceAtLeast(0)
     if (isToday && vm.loadedOnce) androidx.compose.runtime.LaunchedEffect(caloriesLeft) { com.sohum.bandlog.widget.CaloriesWidget.publish(ctx, caloriesLeft, if (prof.hideNumbers == true) com.sohum.bandlog.util.Goals.calorieWords(totals.calories, budget.toDouble()) else null) }
 
+    // v2.12: cards rise out of a soft blur one after another, once per visit (ui/motion).
+    MotionScreen {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 110.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
-            Rise(0) {
+            Entrance(0, key = "header") {
                 RowSpaceBetween {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(com.sohum.bandlog.ui.components.LockIcon, null, tint = p.ink, modifier = Modifier.size(26.dp))
@@ -144,7 +147,7 @@ fun TodayScreen(
             }
         }
         if (banners.isNotEmpty()) item(key = "banner") {
-            Rise(1) {
+            Entrance(1, key = "card1") {
                 BannerPager(banners) { banner ->
                     when (banner) {
                         "nudge" -> NudgeBanner(vm.nudges) { latestNudge?.let { com.sohum.bandlog.util.Wrap.dismissNudge(ctx, it.id) }; nudgeHidden = true }
@@ -154,10 +157,10 @@ fun TodayScreen(
                 }
             }
         }
-        item(key = "streak") { Rise(1) { DayStreakRow(vm.dayStreak, vm.notice) { vm.dismissNotice() } } }
-        item { Rise(1) { WeekStrip(today, selected, trained) { selected = it } } }
+        item(key = "streak") { Entrance(1, key = "streak") { DayStreakRow(vm.dayStreak, vm.notice) { vm.dismissNotice() } } }
+        item { Entrance(1, key = "weekStrip") { WeekStrip(today, selected, trained) { selected = it } } }
         item {
-            Rise(2) {
+            Entrance(2, key = "card2") {
                 val kcalOver = kotlin.math.round(totals.calories - budget).toInt()
                 val (kcalValue, kcalWord) = when {
                     eatenMode -> kotlin.math.round(totals.calories).toInt() to "eaten"
@@ -188,7 +191,7 @@ fun TodayScreen(
             }
         }
         item {
-            Rise(3) {
+            Entrance(3, key = "card3") {
                 Column {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         MacroCard(Modifier.weight(1f), "Protein", totals.protein, prof.proteinTargetG.toDouble(), p.red, eatenMode, flipped, flip)
@@ -206,7 +209,7 @@ fun TodayScreen(
             val h = vm.healthToday
             val burned = vm.burnedToday
             item {
-                Rise(4) { Column {
+                Entrance(4, key = "card4") { Column {
                     // v2.1: steps and calories burned are one card, split down the middle.
                     Card(padding = 0.dp) {
                         Row(Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically) {
@@ -242,7 +245,7 @@ fun TodayScreen(
             }
         }
         item {
-            Rise(4) {
+            Entrance(4, key = "card5") {
                 RowSpaceBetween {
                     Text(if (isToday) "Today" else Dates.long(selected), fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.5).sp, color = p.ink)
                     if (vm.loading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = p.muted)
@@ -250,10 +253,11 @@ fun TodayScreen(
             }
         }
         // v2.8: no "Log something" button here — the + button logs; each meal section has its own "+ Add".
-        items(todayWorkouts, key = { "w" + it.id }) { w -> Rise(5) { WorkoutRow(w, burnKcal = workoutBurn[w.id]) { onOpenWorkout(w) } } }
-        items(todayExercises, key = { "e" + it.id }) { e -> Rise(5) { com.sohum.bandlog.ui.log.ActivityExerciseRow(e) { onOpenExercise(e) } } }
+        items(todayWorkouts, key = { "w" + it.id }) { w -> Entrance(5, key = "w" + w.id) { WorkoutRow(w, burnKcal = workoutBurn[w.id]) { onOpenWorkout(w) } } }
+        items(todayExercises, key = { "e" + it.id }) { e -> Entrance(5, key = "e" + e.id) { com.sohum.bandlog.ui.log.ActivityExerciseRow(e) { onOpenExercise(e) } } }
         // v2.8: Breakfast · Lunch · Dinner · Snacks, each with its totals and "+ Add"; tap a meal to edit it.
-        items(com.sohum.bandlog.util.MealTypes.group(todayMeals), key = { "s" + it.type.key }) { s -> Rise(6) { MealSection(s, onAdd = { t -> onAddMeal(selected, t) }, onOpen = onOpenMeal) } }
+        items(com.sohum.bandlog.util.MealTypes.group(todayMeals), key = { "s" + it.type.key }) { s -> Entrance(6, key = "s" + s.type.key) { MealSection(s, onAdd = { t -> onAddMeal(selected, t) }, onOpen = onOpenMeal) } }
+    }
     }
 }
 
