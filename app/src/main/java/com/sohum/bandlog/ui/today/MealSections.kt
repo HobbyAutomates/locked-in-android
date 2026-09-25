@@ -54,7 +54,9 @@ fun MealSection(section: MealTypes.Section, onAdd: (String) -> Unit, onOpen: (Me
     if (section.meals.isEmpty()) {
         Card(padding = 0.dp) {
             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(start = 16.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("${t.emoji}  ${t.label}", fontSize = 15.sp, fontWeight = FontWeight(600), color = p.muted, modifier = Modifier.weight(1f), maxLines = 1)
+                Icon(com.sohum.bandlog.ui.components.mealTypeIcon(t.key), null, tint = p.muted, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(t.label, fontSize = 15.sp, fontWeight = FontWeight(600), color = p.muted, modifier = Modifier.weight(1f), maxLines = 1)
                 AddPill(t.label) { onAdd(t.key) }
             }
         }
@@ -62,7 +64,9 @@ fun MealSection(section: MealTypes.Section, onAdd: (String) -> Unit, onOpen: (Me
     }
     Card(padding = 0.dp) {
         Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(start = 16.dp, end = 6.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("${t.emoji}  ${t.label}", fontSize = 16.sp, fontWeight = FontWeight(800), letterSpacing = (-0.3).sp, color = p.ink, maxLines = 1)
+            Icon(com.sohum.bandlog.ui.components.mealTypeIcon(t.key), null, tint = p.ink, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(t.label, fontSize = 16.sp, fontWeight = FontWeight(800), letterSpacing = (-0.3).sp, color = p.ink, maxLines = 1)
             Spacer(Modifier.width(8.dp))
             Text(
                 "${section.kcal} kcal · ${fmt(section.protein)} g protein", fontSize = 13.sp, color = p.muted, maxLines = 1, overflow = TextOverflow.Ellipsis,

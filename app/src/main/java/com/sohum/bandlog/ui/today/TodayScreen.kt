@@ -5,6 +5,8 @@ import androidx.compose.runtime.setValue
 import com.sohum.bandlog.ui.components.PillButton
 import com.sohum.bandlog.ui.components.Chevron
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.layout
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -87,14 +89,26 @@ fun TodayScreen(
     val showWrap = com.sohum.bandlog.util.Wrap.inWindow() && !wrapHidden && vm.loadedOnce
     val latestNudge = vm.nudges.firstOrNull()
     var nudgeHidden by androidx.compose.runtime.remember(latestNudge?.id) { androidx.compose.runtime.mutableStateOf(latestNudge?.let { com.sohum.bandlog.util.Wrap.nudgeDismissed(ctx, it.id) } ?: true) }
-    // v2.8: one card, never a carousel — the most relevant of a meal still being saved, a squad
-    // nudge, then the 9 pm wrap (a tapped wrap notification puts the wrap first). Dismissing one lets the next show.
-    val banner = when {
-        wrapTick > 0 && showWrap -> "wrap"
-        vm.pendingMeals.isNotEmpty() -> "pending"
-        latestNudge != null && !nudgeHidden -> "nudge"
-        showWrap -> "wrap"
-        else -> null
+    // v2.10: the cards above the hero are a swipeable pager — a meal still being saved, a squad
+    // nudge, the 9 pm wrap (a tapped wrap notification puts the wrap first). Dismissing one takes it
+    // out; no cards, no pager; one card, no dots. Mirrors the web's BannerCarousel.
+    val banners = buildList {
+        if (wrapTick > 0 && showWrap) add("wrap")
+        if (vm.pendingMeals.isNotEmpty()) add("pending")
+        if (latestNudge != null && !nudgeHidden) add("nudge")
+        if (wrapTick == 0 && showWrap) add("wrap")
+    }
+    // v2.10: the calorie + macro cards show "left" or "eaten"; tapping any one flips them all.
+    // Remembered per device; a "Tap a card…" hint shows until the first tap (the web keeps both in localStorage).
+    val homePrefs = androidx.compose.runtime.remember { ctx.getSharedPreferences(HOME_PREFS, android.content.Context.MODE_PRIVATE) }
+    var eatenMode by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(homePrefs.getString(MACRO_MODE, "left") == "eaten") }
+    var hintSeen by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(homePrefs.getBoolean(MACRO_HINT_SEEN, false)) }
+    var flipped by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    val flip: () -> Unit = {
+        flipped = true
+        eatenMode = !eatenMode
+        hintSeen = true
+        homePrefs.edit().putString(MACRO_MODE, if (eatenMode) "eaten" else "left").putBoolean(MACRO_HINT_SEEN, true).apply()
     }
     // Steps and burned calories go stale while the app is backgrounded; re-read on every resume.
     val owner = androidx.compose.ui.platform.LocalLifecycleOwner.current
@@ -128,12 +142,14 @@ fun TodayScreen(
                 ErrorNote(vm.error, Modifier.padding(top = 8.dp))
             }
         }
-        if (banner != null) item(key = "banner") {
+        if (banners.isNotEmpty()) item(key = "banner") {
             Rise(1) {
-                when (banner) {
-                    "nudge" -> NudgeBanner(vm.nudges) { latestNudge?.let { com.sohum.bandlog.util.Wrap.dismissNudge(ctx, it.id) }; nudgeHidden = true }
-                    "wrap" -> WrapCard(vm.wrap()) { com.sohum.bandlog.util.Wrap.dismiss(ctx, wrapDate); wrapHidden = true }
-                    else -> PendingBanner(vm.pendingMeals)
+                BannerPager(banners) { banner ->
+                    when (banner) {
+                        "nudge" -> NudgeBanner(vm.nudges) { latestNudge?.let { com.sohum.bandlog.util.Wrap.dismissNudge(ctx, it.id) }; nudgeHidden = true }
+                        "wrap" -> WrapCard(vm.wrap()) { com.sohum.bandlog.util.Wrap.dismiss(ctx, wrapDate); wrapHidden = true }
+                        else -> PendingBanner(vm.pendingMeals)
+                    }
                 }
             }
         }
@@ -141,11 +157,17 @@ fun TodayScreen(
         item { Rise(1) { WeekStrip(today, selected, trained) { selected = it } } }
         item {
             Rise(2) {
-                Card(padding = 20.dp) {
+                val kcalOver = kotlin.math.round(totals.calories - budget).toInt()
+                val (kcalValue, kcalWord) = when {
+                    eatenMode -> kotlin.math.round(totals.calories).toInt() to "eaten"
+                    kcalOver > 0 -> kcalOver to "over"
+                    else -> caloriesLeft to "left"
+                }
+                Card(padding = 20.dp, onClick = flip) {
                     RowSpaceBetween {
-                        Column {
-                            Text("$caloriesLeft", fontSize = 40.sp, fontWeight = FontWeight(800), letterSpacing = (-1.5).sp, color = p.ink, lineHeight = 40.sp)
-                            Text(if (isToday) "Calories left" else "Calories left · ${Dates.short(selected)}", fontSize = 14.sp, fontWeight = FontWeight(500), color = p.muted)
+                        FlipFace(eatenMode, flipped) {
+                            Text(String.format(Locale.US, "%,d", kcalValue), fontSize = 40.sp, fontWeight = FontWeight(800), letterSpacing = (-1.5).sp, color = p.ink, lineHeight = 40.sp)
+                            Text(if (isToday) "Calories $kcalWord" else "Calories $kcalWord · ${Dates.short(selected)}", fontSize = 14.sp, fontWeight = FontWeight(500), color = p.muted)
                             if (isToday && (vm.burnedKcal > 0 || vm.rolloverKcal > 0)) Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 if (vm.burnedKcal > 0) Box(Modifier.background(p.card2, CircleShape).padding(8.dp, 3.dp)) { Text("+${vm.burnedKcal.toInt()} burned", fontSize = 11.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1) }
                                 if (vm.rolloverKcal > 0) Box(Modifier.background(p.card2, CircleShape).padding(8.dp, 3.dp)) { Text("+${vm.rolloverKcal.toInt()} rollover", fontSize = 11.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1) }
@@ -158,10 +180,16 @@ fun TodayScreen(
         }
         item {
             Rise(3) {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    MacroCard(Modifier.weight(1f), "Protein", totals.protein, prof.proteinTargetG.toDouble(), p.red)
-                    MacroCard(Modifier.weight(1f), "Carbs", totals.carbs, prof.carbTargetG.toDouble(), p.orange)
-                    MacroCard(Modifier.weight(1f), "Fat", totals.fat, prof.fatTargetG.toDouble(), p.blue)
+                Column {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        MacroCard(Modifier.weight(1f), "Protein", totals.protein, prof.proteinTargetG.toDouble(), p.red, eatenMode, flipped, flip)
+                        MacroCard(Modifier.weight(1f), "Carbs", totals.carbs, prof.carbTargetG.toDouble(), p.orange, eatenMode, flipped, flip)
+                        MacroCard(Modifier.weight(1f), "Fat", totals.fat, prof.fatTargetG.toDouble(), p.blue, eatenMode, flipped, flip)
+                    }
+                    if (!hintSeen) Text(
+                        "Tap a card to switch between left and eaten", fontSize = 12.sp, color = p.muted,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                    )
                 }
             }
         }
@@ -373,29 +401,33 @@ private fun WeekStrip(today: String, selected: String, trained: Set<String>, onS
 }
 
 /**
- * One macro card. Below target it counts down ("34g / Protein left"); once the target is passed
- * it flips to the overshoot ("12g / Protein **over**") in the macro's own colour, like Cal AI.
+ * One macro card. In "left" mode it counts down ("34g / Protein left"); once the target is passed
+ * it shows the overshoot ("12g / Protein **over**") in the macro's own colour, like Cal AI. In
+ * "eaten" mode it shows what's been eaten ("58g / Protein eaten"). Tapping flips every card.
  */
 @Composable
-private fun MacroCard(modifier: Modifier, macro: String, consumed: Double, target: Double, color: Color) {
+private fun MacroCard(modifier: Modifier, macro: String, consumed: Double, target: Double, color: Color, eaten: Boolean, animate: Boolean, onFlip: () -> Unit) {
     val p = palette
     val safeTarget = target.coerceAtLeast(1.0)
-    val over = consumed > target && target > 0
-    val amount = if (over) consumed - target else target - consumed
-    Card(modifier, padding = 12.dp) {
-        Text(
-            "${amount.toInt().coerceAtLeast(0)}g",
-            fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp,
-            color = if (over) color else p.ink,
-        )
-        Row {
-            Text("$macro ", fontSize = 12.sp, color = p.muted)
+    val over = !eaten && consumed > target && target > 0
+    val amount = when { eaten -> kotlin.math.round(consumed); over -> kotlin.math.round(consumed - target); else -> kotlin.math.round(target - consumed) }
+    val word = when { eaten -> "eaten"; over -> "over"; else -> "left" }
+    Card(modifier, padding = 12.dp, onClick = onFlip) {
+        FlipFace(eaten, animate) {
             Text(
-                if (over) "over" else "left",
-                fontSize = 12.sp,
-                fontWeight = if (over) FontWeight(700) else FontWeight(400),
-                color = if (over) color else p.muted,
+                "${amount.toInt().coerceAtLeast(0)}g",
+                fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp,
+                color = if (over) color else p.ink,
             )
+            Row {
+                Text("$macro ", fontSize = 12.sp, color = p.muted)
+                Text(
+                    word,
+                    fontSize = 12.sp,
+                    fontWeight = if (over) FontWeight(700) else FontWeight(400),
+                    color = if (over) color else p.muted,
+                )
+            }
         }
         Spacer(Modifier.height(10.dp))
         Ring((consumed / safeTarget).toFloat(), color, 56.dp, 6.dp, Modifier.align(Alignment.CenterHorizontally)) {
@@ -487,3 +519,70 @@ private fun timeOf(iso: String): String = runCatching {
 }.getOrDefault("")
 
 fun fmt(d: Double): String = if (d == d.toLong().toDouble()) d.toLong().toString() else String.format(Locale.US, "%.1f", d)
+
+private const val HOME_PREFS = "home_prefs"
+private const val MACRO_MODE = "macro_mode"
+private const val MACRO_HINT_SEEN = "macro_hint_seen"
+
+/** The number + label of a Home card: a short flip-in whenever the left / eaten mode changes (not on first paint), as on the web. */
+@Composable
+private fun FlipFace(eaten: Boolean, animate: Boolean, modifier: Modifier = Modifier, content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+    val rot = androidx.compose.runtime.remember { androidx.compose.animation.core.Animatable(0f) }
+    androidx.compose.runtime.LaunchedEffect(eaten) {
+        if (animate) {
+            rot.snapTo(-75f)
+            rot.animateTo(0f, androidx.compose.animation.core.tween(260, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f)))
+        }
+    }
+    Column(
+        modifier.graphicsLayer {
+            rotationX = rot.value
+            alpha = 1f - kotlin.math.abs(rot.value) / 75f
+            cameraDistance = 10f * density
+        },
+        content = content,
+    )
+}
+
+/**
+ * v2.10: Home's top cards as a HorizontalPager with small dots (none for a single card). The pager
+ * bleeds into the screen gutter so card shadows aren't clipped and the next card peeks while swiping.
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun BannerPager(keys: List<String>, card: @Composable (String) -> Unit) {
+    val p = palette
+    val pager = androidx.compose.foundation.pager.rememberPagerState { keys.size }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    Column {
+        androidx.compose.foundation.pager.HorizontalPager(
+            state = pager,
+            modifier = Modifier.bleed(16.dp, 10.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+            pageSpacing = 26.dp,
+            verticalAlignment = Alignment.Top,
+            key = { keys.getOrElse(it) { "gone$it" } },
+        ) { i -> keys.getOrNull(i)?.let { card(it) } }
+        if (keys.size > 1) Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+            keys.forEachIndexed { i, k ->
+                val active = i == pager.currentPage.coerceAtMost(keys.size - 1)
+                val w by androidx.compose.animation.core.animateDpAsState(if (active) 14.dp else 6.dp, label = "dot")
+                Box(
+                    Modifier.size(16.dp).clickable(onClickLabel = "Show card ${i + 1}: $k") { scope.launch { pager.animateScrollToPage(i) } },
+                    contentAlignment = Alignment.Center,
+                ) { Box(Modifier.size(w, 6.dp).background(if (active) p.ink else p.hair, CircleShape)) }
+            }
+        }
+    }
+}
+
+/** Draw [h] / [v] past this item's bounds on each side without taking layout space (so shadows and swipes can use the gutter). */
+private fun Modifier.bleed(h: androidx.compose.ui.unit.Dp, v: androidx.compose.ui.unit.Dp) = this.then(
+    Modifier.layout { measurable, constraints ->
+        val hp = h.roundToPx()
+        val vp = v.roundToPx()
+        val wide = if (constraints.hasBoundedWidth) constraints.copy(minWidth = constraints.minWidth + 2 * hp, maxWidth = constraints.maxWidth + 2 * hp) else constraints
+        val placeable = measurable.measure(wide)
+        layout((placeable.width - 2 * hp).coerceAtLeast(0), (placeable.height - 2 * vp).coerceAtLeast(0)) { placeable.place(-hp, -vp) }
+    },
+)

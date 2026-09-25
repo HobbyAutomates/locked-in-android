@@ -365,17 +365,20 @@ private fun FeedCard(post: GroupPost, onClick: (() -> Unit)? = null, onDelete: (
                 fontSize = 15.sp, color = p.ink, lineHeight = 20.sp,
             )
             "photo" -> if (post.body.isNotBlank() && post.body != "shared a photo") Text(post.body, fontSize = 15.sp, color = p.ink)
-            // 🏁 started "Title" / 🏆 completed "Title": the emoji in a disc, the verb as a kicker, the title as the headline.
+            // 🏁 started "Title" / 🏆 completed "Title": a flag / trophy icon in a disc, the verb as a kicker, the title as the headline.
             "challenge" -> {
                 val lead = post.body.substringBefore(' ')
                 val verb = post.body.substringAfter(' ', "").substringBefore(' ')
                 val title = post.body.substringAfter('"', "").substringBeforeLast('"').ifBlank { post.body.substringAfter(' ', post.body) }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(44.dp).background(p.orange.copy(alpha = 0.14f), CircleShape), contentAlignment = Alignment.Center) { Text(lead, fontSize = 22.sp) }
+                    // v2.10: the post's leading emoji picks a line icon for the disc (trophy / flag) instead of drawing the emoji.
+                    Box(Modifier.size(44.dp).background(p.orange.copy(alpha = 0.14f), CircleShape), contentAlignment = Alignment.Center) {
+                        Icon(if (lead.startsWith("🏆")) com.sohum.bandlog.ui.components.TrophyIcon else com.sohum.bandlog.ui.components.FlagIcon, null, tint = p.orange, modifier = Modifier.size(22.dp))
+                    }
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(
-                            when (verb.lowercase()) { "started" -> "Started a challenge"; "completed" -> "Finished a challenge 🔥"; else -> "Challenge" },
+                            when (verb.lowercase()) { "started" -> "Started a challenge"; "completed" -> "Finished a challenge"; else -> "Challenge" },
                             fontSize = 13.sp, fontWeight = FontWeight(700), color = p.muted,
                         )
                         Text(title, fontSize = 18.sp, fontWeight = FontWeight(800), letterSpacing = (-0.3).sp, color = p.ink, lineHeight = 22.sp)
@@ -559,7 +562,7 @@ fun SquadInfoPage(sq: SquadViewModel, squad: Squad, onBack: () -> Unit) {
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
                 InviteAction("Share", p.card, p.ink, { Icon(ShareIcon, null, tint = p.ink, modifier = Modifier.size(24.dp)) }) { shareInvite(ctx, invite) }
-                InviteAction("WhatsApp", Color(0xFF25D366), Color.White, { Text("💬", fontSize = 24.sp) }) { shareInvite(ctx, invite, whatsapp = true) }
+                InviteAction("WhatsApp", Color(0xFF25D366), Color.White, { Icon(com.sohum.bandlog.ui.components.ChatIcon, null, tint = Color.White, modifier = Modifier.size(26.dp)) }) { shareInvite(ctx, invite, whatsapp = true) }
                 InviteAction(if (copied) "Copied" else "Copy", p.card, p.ink, { Icon(if (copied) CheckIcon else CopyIcon, null, tint = if (copied) p.green else p.ink, modifier = Modifier.size(24.dp)) }) {
                     clip.setText(AnnotatedString(link)); copied = true; scope.launch { delay(1500); copied = false }
                 }

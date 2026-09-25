@@ -89,13 +89,18 @@ fun Rise(index: Int = 0, modifier: Modifier = Modifier, content: @Composable () 
 
 /** Black pill button (or any tint). */
 @Composable
-fun PillButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, height: Dp = 52.dp, bg: Color? = null, fg: Color? = null) {
+fun PillButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, height: Dp = 52.dp, bg: Color? = null, fg: Color? = null, icon: androidx.compose.ui.graphics.vector.ImageVector? = null) {
     val p = palette
     Box(
         modifier.fillMaxWidth().height(height).pressable().alpha(if (enabled) 1f else 0.5f)
             .background(bg ?: p.btn, CircleShape).clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { Text(text, color = fg ?: p.btnInk, fontSize = 15.sp, fontWeight = FontWeight(700)) }
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (icon != null) { Icon(icon, null, tint = fg ?: p.btnInk, modifier = Modifier.size(18.dp)); androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp)) }
+            Text(text, color = fg ?: p.btnInk, fontSize = 15.sp, fontWeight = FontWeight(700))
+        }
+    }
 }
 
 /**
@@ -124,14 +129,19 @@ fun UndoRow(onUndo: () -> Unit, onExpire: () -> Unit) {
 
 /** Selectable chip: black when selected, soft grey otherwise (or a tint when [color] is given). */
 @Composable
-fun Chip(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, color: Color? = null, colorBg: Color? = null) {
+fun Chip(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, color: Color? = null, colorBg: Color? = null, icon: androidx.compose.ui.graphics.vector.ImageVector? = null) {
     val p = palette
     val bg = when { selected && color != null -> colorBg ?: color.copy(alpha = 0.16f); selected -> p.btn; else -> p.card2 }
     val fg = when { selected && color != null -> color; selected -> p.btnInk; else -> p.ink }
     Box(
         modifier.height(44.dp).pressable().background(bg, CircleShape).clickable(onClick = onClick).padding(horizontal = 14.dp),
         contentAlignment = Alignment.Center,
-    ) { Text(label, color = fg, fontSize = 13.sp, fontWeight = if (selected) FontWeight(600) else FontWeight(500), maxLines = 1, softWrap = false) }
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (icon != null) { Icon(icon, null, tint = fg, modifier = Modifier.size(15.dp)); androidx.compose.foundation.layout.Spacer(Modifier.size(6.dp)) }
+            Text(label, color = fg, fontSize = 13.sp, fontWeight = if (selected) FontWeight(600) else FontWeight(500), maxLines = 1, softWrap = false)
+        }
+    }
 }
 
 /** iOS-style segmented control on a grey track. Never more than three options; four or more are chips. */

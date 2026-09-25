@@ -554,7 +554,7 @@ fun MealForm(
     }
 }
 
-/** v2.8: 🍳 Breakfast · 🍛 Lunch · 🌙 Dinner · 🍿 Snacks — one row of four at the top of add / edit meal. */
+/** v2.8: Breakfast · Lunch · Dinner · Snacks (v2.10: Lucide line icons, not emoji) — one row of four at the top of add / edit meal. */
 @Composable
 private fun MealTypeChips(selected: String, onSelect: (String) -> Unit) {
     val p = palette
@@ -566,7 +566,7 @@ private fun MealTypeChips(selected: String, onSelect: (String) -> Unit) {
                     .selectable(selected = sel, onClick = { onSelect(t.key) }).padding(horizontal = 2.dp, vertical = 6.dp),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
             ) {
-                Text(t.emoji, fontSize = 16.sp, maxLines = 1)
+                androidx.compose.material3.Icon(com.sohum.bandlog.ui.components.mealTypeIcon(t.key), null, tint = if (sel) p.btnInk else p.ink, modifier = Modifier.size(18.dp))
                 Text(t.label, fontSize = 12.sp, fontWeight = if (sel) FontWeight(700) else FontWeight(600), color = if (sel) p.btnInk else p.ink, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }
         }
@@ -584,7 +584,7 @@ private fun Toast(text: String?, modifier: Modifier) {
     }
 }
 
-/** "💧 +2 glasses to Water (500 mL) · Undo" — shown right after a dictated water phrase is logged. */
+/** "+2 glasses to Water (500 mL) · Undo" with a droplet icon — shown right after a dictated water phrase is logged. */
 @Composable
 private fun WaterToast(water: com.sohum.bandlog.data.ParsedWater?, undone: Boolean, onUndo: () -> Unit, modifier: Modifier) {
     val p = palette
@@ -595,8 +595,10 @@ private fun WaterToast(water: com.sohum.bandlog.data.ParsedWater?, undone: Boole
         ) {
             val glasses = water?.glasses ?: 0.0
             val g = if (glasses % 1.0 == 0.0) glasses.toInt().toString() else String.format("%.1f", glasses)
+            androidx.compose.material3.Icon(com.sohum.bandlog.ui.components.DropletIcon, null, tint = p.blue, modifier = Modifier.size(15.dp))
+            Spacer(Modifier.width(6.dp))
             Text(
-                if (undone) "💧 Undone" else "💧 +$g glass${if (glasses == 1.0) "" else "es"} to Water (${water?.ml ?: 0} mL)",
+                if (undone) "Undone" else "+$g glass${if (glasses == 1.0) "" else "es"} to Water (${water?.ml ?: 0} mL)",
                 fontSize = 13.sp, fontWeight = FontWeight(700), color = p.blue, maxLines = 1,
             )
             if (!undone) {

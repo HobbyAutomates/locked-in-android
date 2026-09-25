@@ -112,7 +112,7 @@ internal fun ChallengesTab(sq: SquadViewModel, squad: Squad, proteinGoal: Int?) 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 14.dp, 16.dp, 40.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item(key = "start") {
             Column {
-                PillButton("🏁  Start a challenge", { sq.error = null; creating = true }, enabled = !full)
+                PillButton("Start a challenge", { sq.error = null; creating = true }, enabled = !full, icon = com.sohum.bandlog.ui.components.PlusIcon)
                 if (full) Text(
                     "3 challenges running already, that's the max. Start the next one when one wraps.",
                     fontSize = 12.sp, color = p.muted, textAlign = TextAlign.Center, lineHeight = 16.sp,
@@ -160,7 +160,9 @@ private fun leaderAvatar(sq: SquadViewModel, c: Challenge): String? {
 private fun KindTag(kind: String) {
     val p = palette
     val tint = p.kindColor(kind)
-    Box(Modifier.background(tint.copy(alpha = 0.14f), CircleShape).padding(horizontal = 10.dp, vertical = 4.dp)) {
+    Row(Modifier.background(tint.copy(alpha = 0.14f), CircleShape).padding(horizontal = 10.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(com.sohum.bandlog.ui.components.challengeKindIcon(kind), null, tint = tint, modifier = Modifier.size(13.dp))
+        Spacer(Modifier.width(5.dp))
         Text(ChallengeMath.kindLabel(kind), fontSize = 11.sp, fontWeight = FontWeight(800), color = tint, maxLines = 1)
     }
 }
@@ -177,10 +179,10 @@ private fun ChallengeCard(sq: SquadViewModel, c: Challenge, today: String, onCli
                 KindTag(c.kind)
                 Text(c.title, fontSize = 18.sp, fontWeight = FontWeight(800), letterSpacing = (-0.4).sp, color = p.ink, lineHeight = 22.sp, modifier = Modifier.padding(top = 8.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(ChallengeMath.timeLine(today, c.startsOn, c.endsOn), fontSize = 13.sp, fontWeight = FontWeight(600), color = if (c.status == "upcoming") p.muted else tint, modifier = Modifier.padding(top = 4.dp))
-                Text(
-                    if (done) "You did it 🏆" else ChallengeMath.progressLine(c.myProgress, c.targetDays),
-                    fontSize = 13.sp, color = p.muted, modifier = Modifier.padding(top = 2.dp),
-                )
+                Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (done) "You did it" else ChallengeMath.progressLine(c.myProgress, c.targetDays), fontSize = 13.sp, color = p.muted)
+                    StatusIcon(done, c.myProgress, 13.dp)
+                }
             }
             Spacer(Modifier.width(12.dp))
             Ring(ChallengeMath.fraction(c.myProgress, c.targetDays), if (done) p.green else tint, 84.dp, 9.dp) {
@@ -208,8 +210,12 @@ private fun ChallengeCard(sq: SquadViewModel, c: Challenge, today: String, onCli
                     fontSize = 13.sp, color = p.muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                 )
             }
+            if (c.completedCount > 0) {
+                Icon(com.sohum.bandlog.ui.components.TrophyIcon, null, tint = p.muted, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(4.dp))
+            }
             Text(
-                if (c.completedCount > 0) "🏆 ${c.completedCount} done" else "${c.participants} in",
+                if (c.completedCount > 0) "${c.completedCount} done" else "${c.participants} in",
                 fontSize = 12.sp, fontWeight = FontWeight(700), color = p.muted,
             )
         }
@@ -226,13 +232,15 @@ private fun PastChallengeRow(c: Challenge, onClick: () -> Unit) {
     ) {
         Column(Modifier.weight(1f)) {
             Text(c.title, fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(
-                listOf(
-                    dateRange(c.startsOn, c.endsOn),
-                    when (c.completedCount) { 0 -> "no finishers this time"; 1 -> "🏆 1 finished"; else -> "🏆 ${c.completedCount} finished" },
-                ).filter { it.isNotBlank() }.joinToString(" · "),
-                fontSize = 12.sp, color = p.muted, maxLines = 1,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val range = dateRange(c.startsOn, c.endsOn)
+                if (range.isNotBlank()) Text("$range · ", fontSize = 12.sp, color = p.muted, maxLines = 1)
+                if (c.completedCount > 0) {
+                    Icon(com.sohum.bandlog.ui.components.TrophyIcon, null, tint = p.muted, modifier = Modifier.size(12.dp))
+                    Spacer(Modifier.width(3.dp))
+                }
+                Text(if (c.completedCount == 0) "no finishers this time" else "${c.completedCount} finished", fontSize = 12.sp, color = p.muted, maxLines = 1)
+            }
             c.leaderName?.takeIf { c.leaderProgress > 0 }?.let { l ->
                 Text("Top: $l · ${c.leaderProgress}/${c.targetDays}", fontSize = 12.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
@@ -294,7 +302,7 @@ private fun StartChallengeSheet(sq: SquadViewModel, proteinGoal: Int?, onDismiss
         title = "Start a challenge",
         subtitle = "The whole squad's in automatically",
         onDismiss = onDismiss,
-        primary = if (sq.busy) "Starting…" else "Start it 🏁",
+        primary = if (sq.busy) "Starting…" else "Start it",
         primaryEnabled = title.isNotBlank() && !sq.busy,
         onPrimary = {
             sq.startChallenge(kind, title.trim(), target, protein, start, ChallengeMath.endsOn(start, length), onDismiss)
@@ -303,7 +311,7 @@ private fun StartChallengeSheet(sq: SquadViewModel, proteinGoal: Int?, onDismiss
         Column(Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState())) {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(ChallengeMath.TRAIN, ChallengeMath.PROTEIN, ChallengeMath.LOG).forEach { k ->
-                    Chip(ChallengeMath.kindLabel(k), kind == k, { pick(k, length) })
+                    Chip(ChallengeMath.kindLabel(k), kind == k, { pick(k, length) }, icon = com.sohum.bandlog.ui.components.challengeKindIcon(k))
                 }
             }
             SheetLabel("How long")
@@ -406,15 +414,18 @@ fun ChallengeDetailPage(sq: SquadViewModel, squad: Squad) {
                             Text("days", fontSize = 13.sp, color = p.muted)
                         }
                     }
-                    Text(
-                        when {
-                            done -> "You did it 🏆"
-                            c.status == "upcoming" -> "Starts ${if (ChallengeMath.daysUntil(today, c.startsOn) <= 1) "tomorrow" else Dates.short(c.startsOn)}. Get ready 😤"
-                            c.status == "ended" -> "Wrapped at ${ChallengeMath.progressLine(c.myProgress, c.targetDays)}"
-                            else -> ChallengeMath.progressLine(c.myProgress, c.targetDays) + " · ${c.targetDays - c.myProgress} to go"
-                        },
-                        fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink, modifier = Modifier.padding(top = 12.dp),
-                    )
+                    Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            when {
+                                done -> "You did it"
+                                c.status == "upcoming" -> "Starts ${if (ChallengeMath.daysUntil(today, c.startsOn) <= 1) "tomorrow" else Dates.short(c.startsOn)}. Get ready 😤"
+                                c.status == "ended" -> "Wrapped at ${ChallengeMath.progressLine(c.myProgress, c.targetDays)}"
+                                else -> ChallengeMath.progressLine(c.myProgress, c.targetDays) + " · ${c.targetDays - c.myProgress} to go"
+                            },
+                            fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink,
+                        )
+                        if (c.status != "upcoming") StatusIcon(done, c.myProgress, 15.dp)
+                    }
                     Text("Started by ${if (c.createdBy == me) "you" else c.creatorName}", fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(top = 4.dp))
                 }
             }
@@ -434,7 +445,10 @@ fun ChallengeDetailPage(sq: SquadViewModel, squad: Squad) {
                     below = { ProgressBar(ChallengeMath.fraction(r.progress, c.targetDays), if (r.completed) p.green else tint, Modifier.padding(top = 8.dp)) },
                 ) {
                     Spacer(Modifier.width(12.dp))
-                    if (r.completed) Text("🏆 ", fontSize = 17.sp)
+                    if (r.completed) {
+                        Icon(com.sohum.bandlog.ui.components.TrophyIcon, "Completed", tint = p.flame, modifier = Modifier.size(17.dp))
+                        Spacer(Modifier.width(4.dp))
+                    }
                     Text("${r.progress}/${c.targetDays}", fontSize = 17.sp, fontWeight = FontWeight(800), color = p.ink)
                 }
             }
@@ -455,4 +469,13 @@ fun ChallengeDetailPage(sq: SquadViewModel, squad: Squad) {
             },
         )
     }
+}
+
+/** v2.10: after a progress line, a trophy once it's done, else a flame once there's a day in (was an emoji suffix). */
+@Composable
+private fun StatusIcon(done: Boolean, progress: Int, size: androidx.compose.ui.unit.Dp) {
+    val p = palette
+    if (!done && progress <= 0) return
+    Spacer(Modifier.width(4.dp))
+    Icon(if (done) com.sohum.bandlog.ui.components.TrophyIcon else com.sohum.bandlog.ui.components.FlameIcon, null, tint = p.flame, modifier = Modifier.size(size))
 }

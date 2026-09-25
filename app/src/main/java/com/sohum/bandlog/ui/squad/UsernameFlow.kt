@@ -1,5 +1,6 @@
 package com.sohum.bandlog.ui.squad
 
+import androidx.compose.material3.Icon
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -143,8 +144,8 @@ fun UsernameFlow(vm: AppViewModel, initialStep: Int = 0, onClose: () -> Unit) {
                     trailing = {
                         when {
                             checking -> CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = p.muted)
-                            available == true || (unchanged && valid) -> Text("✓", fontSize = 20.sp, fontWeight = FontWeight(800), color = p.green)
-                            available == false -> Text("✕", fontSize = 18.sp, fontWeight = FontWeight(800), color = p.red)
+                            available == true || (unchanged && valid) -> Icon(com.sohum.bandlog.ui.components.CheckIcon, "Available", tint = p.green, modifier = Modifier.size(20.dp))
+                            available == false -> Icon(com.sohum.bandlog.ui.components.CrossIcon, "Taken", tint = p.red, modifier = Modifier.size(18.dp))
                         }
                     },
                 )

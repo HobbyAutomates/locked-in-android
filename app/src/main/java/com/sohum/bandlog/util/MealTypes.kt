@@ -15,14 +15,15 @@ object MealTypes {
     const val DINNER = "dinner"
     const val SNACK = "snack"
 
-    data class Type(val key: String, val label: String, val emoji: String)
+    /** v2.10: no emoji; the icon is ui.components.mealTypeIcon(key) (Lucide line icons, as on the web). */
+    data class Type(val key: String, val label: String)
 
     /** Home's section order: Breakfast · Lunch · Dinner · Snacks. */
     val ALL = listOf(
-        Type(BREAKFAST, "Breakfast", "🍳"),
-        Type(LUNCH, "Lunch", "🍛"),
-        Type(DINNER, "Dinner", "🌙"),
-        Type(SNACK, "Snacks", "🍿"),
+        Type(BREAKFAST, "Breakfast"),
+        Type(LUNCH, "Lunch"),
+        Type(DINNER, "Dinner"),
+        Type(SNACK, "Snacks"),
     )
 
     fun isType(s: String?): Boolean = s == BREAKFAST || s == LUNCH || s == DINNER || s == SNACK
