@@ -82,6 +82,31 @@ import androidx.compose.ui.draw.clip
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import com.sohum.bandlog.ui.components.LineIcons
+import com.sohum.bandlog.ui.components.pressable
+import com.sohum.bandlog.ui.motion.Entrance
+import com.sohum.bandlog.ui.motion.MotionScreen
+import com.sohum.bandlog.ui.motion.PremiumMotion
+import com.sohum.bandlog.ui.motion.growFromLeft
+import com.sohum.bandlog.ui.motion.popIn
+import com.sohum.bandlog.ui.motion.rememberMotion
+import com.sohum.bandlog.ui.progress.BadgeMedal
+import com.sohum.bandlog.ui.progress.NextUpRow
+import com.sohum.bandlog.ui.progress.accentColor
+import com.sohum.bandlog.ui.progress.nextBadge
+import com.sohum.bandlog.ui.progress.tierOf
+import com.sohum.bandlog.ui.today.fmt
+import com.sohum.bandlog.util.Reminders
+import kotlin.math.roundToInt
 
 /** Where a Profile row can take you. Rendered as full-screen pages by MainActivity. */
 enum class ProfilePage { PERSONAL, GOALS, GOAL_WEIGHT, REMINDERS, WEIGHT_HISTORY, BADGES, PREFERENCES, APPEARANCE, TRACKING, PRIVACY, ACCOUNT, USERNAME }
@@ -92,9 +117,11 @@ private const val INVITE_TEXT =
         "iPhone: https://web-production-ff1cf.up.railway.app (Safari → Add to Home Screen)"
 
 /**
- * v2.4 Profile: a header (photo, name, email), **You** (details, goals, weight, badges), one
- * **Preferences** row that opens the category pages (Appearance, Tracking, Reminders, Privacy,
- * Account), and **App** (updates, version, what's new, invite, feature requests).
+ * v2.12 Profile (design canvas18 "ProfileFinal"): a monochrome weight-plates cover with settings
+ * and share buttons on its edge, the avatar overlapping it, a "Founding member" chip, name and
+ * "@username · Joined · squad", three dials (streak ticks, protein wave, weight arc), Edit profile
+ * + Invite, the Medals v2 badge shelf, the goal card and one clean list. The warm accent is used
+ * sparingly. Motion comes from ui/motion (sections rise one after another; dials draw in).
  */
 @Composable
 fun ProfileScreen(
@@ -107,8 +134,10 @@ fun ProfileScreen(
     val p = palette
     val ctx = LocalContext.current
     val prof = vm.profile
+    val accent = accentColor
     var showChangelog by remember { mutableStateOf(false) }
     var avatarSheet by remember { mutableStateOf(false) }
+    var editSheet by remember { mutableStateOf(false) }
     var avatarBusy by remember { mutableStateOf(false) }
     var avatarError by remember { mutableStateOf<String?>(null) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -117,9 +146,13 @@ fun ProfileScreen(
     // v2.7 Squad Food Battle: total crowns + last 7 wins (docs/food-battle-spec.md). Quiet (no card)
     // for anyone who's never won one — matches the web's GraffitiWall.tsx.
     var graffiti by remember { mutableStateOf<com.sohum.bandlog.data.BattleRepo.Graffiti?>(null) }
+    // v2.12: the first squad's name for the "@username · Joined · squad" line (a read, like the board).
+    var squadName by remember { mutableStateOf<String?>(null) }
     androidx.compose.runtime.LaunchedEffect(Session.userId) {
         graffiti = runCatching { com.sohum.bandlog.data.BattleRepo.myGraffiti() }.getOrElse { com.sohum.bandlog.data.BattleRepo.Graffiti(0, emptyList()) }
+        squadName = runCatching { Api.mySquads().firstOrNull()?.name }.getOrNull()
     }
+    androidx.compose.runtime.LaunchedEffect(Unit) { vm.loadBadgeTotals() }
 
     // Avatar: center-crop square, <=512 px, JPEG q85 -> avatars/<uid>/avatar.jpg (upsert) ->
     // profiles.avatar_path = "<uid>/avatar.jpg?v=<millis>" (the ?v busts every cache).
@@ -142,138 +175,272 @@ fun ProfileScreen(
         if (uri != null) scope.launch { uploadAvatar(withContext(Dispatchers.IO) { runCatching { com.sohum.bandlog.ui.scan.decodeScaled(ctx, uri, 1400) }.getOrNull() }) }
     }
     val takePhoto = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bmp -> if (bmp != null) uploadAvatar(bmp) }
+    val invite: () -> Unit = {
+        runCatching {
+            ctx.startActivity(
+                android.content.Intent.createChooser(
+                    android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(android.content.Intent.EXTRA_TEXT, INVITE_TEXT)
+                    },
+                    "Invite friends",
+                ),
+            )
+        }
+    }
 
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(PaddingValues(16.dp, 12.dp, 16.dp, 110.dp)),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Rise(0) { ScreenTitle("Profile") }
-        Rise(1) { ErrorNote(vm.error) }
+    // ---- numbers for the dials, goal card and rows ----
+    val logged = remember(vm.workouts, vm.exercises, vm.meals) {
+        (vm.workouts.map { it.date } + vm.exercises.map { it.date } + vm.meals.map { it.date }).toSet()
+    }
+    val streak = vm.dayStreak
+    val bestStreak = maxOf(com.sohum.bandlog.util.Badges.longestDayRun(logged), streak)
+    val proteinToday = com.sohum.bandlog.data.totalsFor(vm.meals, vm.today).protein.roundToInt()
+    val current = vm.weights.firstOrNull()?.weightKg ?: prof.weightKg
+    val startKg = vm.weights.lastOrNull()?.weightKg ?: current
+    val goalKg = prof.goalWeightKg
+    val goalFrac = if (goalKg == null || current == null || startKg == null) 0f else {
+        val span = startKg - goalKg
+        if (kotlin.math.abs(span) < 0.05) (if (kotlin.math.abs(current - goalKg) < 0.2) 1f else 0f) else ((startKg - current) / span).toFloat().coerceIn(0f, 1f)
+    }
+    val remindersOn = Reminders.parse(prof.remindersJson).count { it.value.on }
+    val joined = prof.createdAt?.take(10)?.let { runCatching { java.time.LocalDate.parse(it).format(java.time.format.DateTimeFormatter.ofPattern("MMM yyyy", java.util.Locale.ENGLISH)) }.getOrNull() }
+    val isAdmin = Session.email?.trim()?.lowercase()?.let { e -> BuildConfig.ADMIN_EMAILS.split(",").map { it.trim().lowercase() }.contains(e) } == true
 
-        // ---- header ----
-        Rise(1) {
-            Card(padding = 0.dp) {
-                Column(Modifier.padding(horizontal = 16.dp)) {
-                    Row(Modifier.padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(52.dp).clip(CircleShape).clickable(enabled = !avatarBusy) { avatarSheet = true }, contentAlignment = Alignment.Center) {
-                            Avatar(Api.avatarUrl(prof.avatarPath), Names.initials(displayName), 52.dp)
-                            if (avatarBusy) Box(Modifier.size(52.dp).background(Color.Black.copy(alpha = 0.35f), CircleShape), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = Color.White)
-                            }
+    MotionScreen {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 110.dp)) {
+            // ---- cover, cover buttons, avatar ----
+            Entrance(0, key = "cover") {
+                Box(Modifier.fillMaxWidth().height(364.dp)) {
+                    WeightPlatesCover(
+                        Modifier.fillMaxWidth().height(300.dp)
+                            .clip(RoundedCornerShape(bottomStart = 40.dp, bottomEnd = 40.dp)),
+                    )
+                    CoverButton(LineIcons.Settings, "Preferences", { onOpen(ProfilePage.PREFERENCES) }, Modifier.align(Alignment.TopStart).padding(start = 34.dp, top = 274.dp))
+                    CoverButton(LineIcons.Share, "Invite friends", invite, Modifier.align(Alignment.TopEnd).padding(end = 34.dp, top = 274.dp))
+                    val pop = rememberMotion("avatar", 380, PremiumMotion.POP_MS)
+                    Box(
+                        Modifier.align(Alignment.TopCenter).padding(top = 252.dp).size(112.dp).popIn(pop)
+                            .shadow(18.dp, CircleShape, ambientColor = Color.Black.copy(alpha = 0.3f), spotColor = Color.Black.copy(alpha = 0.3f))
+                            .background(p.bg, CircleShape)
+                            .border(1.dp, if (isDarkTheme) Color.White.copy(alpha = 0.28f) else Color.Black.copy(alpha = 0.12f), CircleShape)
+                            .clip(CircleShape).clickable(enabled = !avatarBusy, onClickLabel = "Change profile photo") { avatarSheet = true }
+                            .semantics { contentDescription = "Profile photo, $displayName" },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Avatar(Api.avatarUrl(prof.avatarPath), Names.initials(displayName), 102.dp)
+                        if (avatarBusy) Box(Modifier.size(102.dp).background(Color.Black.copy(alpha = 0.35f), CircleShape), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = Color.White)
                         }
-                        Spacer(Modifier.width(14.dp))
-                        Column(Modifier.weight(1f)) {
-                            NameField(prof.name, placeholder = Names.nameFromEmail(Session.email).ifBlank { "Enter your name" }) { newName -> vm.launch { vm.saveProfile(vm.profile.copy(name = newName)) } }
-                            Session.email?.let { Text(it, fontSize = 13.sp, color = p.muted, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
-                            prof.age?.let { Text("$it years old", fontSize = 12.sp, color = p.muted) }
-                            // v2.6: the squad handle; tap to create / change it (username + photo flow).
-                            if (prof.usernameSupported) Text(
-                                prof.username?.let { "@$it" } ?: "Create your squad username ›",
-                                fontSize = 13.sp, fontWeight = FontWeight(700), color = if (prof.username != null) p.ink else p.blue,
-                                modifier = Modifier.clickable { onOpen(ProfilePage.USERNAME) }.padding(top = 2.dp),
+                    }
+                }
+            }
+
+            Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                // ---- identity ----
+                Entrance(2, key = "identity") {
+                    Column(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // Every current user is a founding member (v2.12 launch cohort).
+                        Row(
+                            Modifier.border(1.dp, accent, CircleShape).padding(horizontal = 14.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Icon(LineIcons.Star, null, tint = accent, modifier = Modifier.size(14.dp))
+                            Text("Founding member", fontSize = 13.sp, fontWeight = FontWeight(500), letterSpacing = 0.3.sp, color = accent)
+                        }
+                        Text(
+                            displayName.ifBlank { "Your name" }, fontSize = 30.sp, fontWeight = FontWeight(600), letterSpacing = (-0.8).sp, color = p.ink,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp),
+                        )
+                        val handle = when {
+                            prof.username != null -> "@${prof.username}"
+                            else -> null
+                        }
+                        val bits = listOfNotNull(handle, joined?.let { "Joined $it" }, squadName)
+                        if (bits.isNotEmpty()) Text(bits.joinToString("  ·  "), fontSize = 14.sp, color = p.muted, textAlign = TextAlign.Center)
+                        // v2.6: create the squad handle from here (username + photo flow).
+                        if (prof.usernameSupported && prof.username == null) Text(
+                            "Create your squad username ›", fontSize = 13.sp, fontWeight = FontWeight(700), color = p.blue,
+                            modifier = Modifier.heightIn(min = 48.dp).clickable { onOpen(ProfilePage.USERNAME) }.padding(horizontal = 8.dp, vertical = 14.dp),
+                        )
+                        avatarError?.let { ErrorNote(it) }
+                    }
+                }
+                ErrorNote(vm.error)
+
+                // ---- dials ----
+                Entrance(3, key = "dials") {
+                    Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            StreakDial(streak, bestStreak)
+                            DialLabel(LineIcons.Flame, "Streak")
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            ProteinWaveDial(proteinToday, prof.proteinTargetG)
+                            DialLabel(LineIcons.Drop, "Protein")
+                        }
+                        Column(
+                            Modifier.semantics(mergeDescendants = true) {
+                                contentDescription = current?.let { "Weight ${fmt(it)} kilograms${goalKg?.let { g -> ", ${(goalFrac * 100).roundToInt()} percent of the way to ${fmt(g)}" } ?: ""}" } ?: "No weight logged"
+                            },
+                            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            WeightArcDial(current?.let { fmt((it * 10).roundToInt() / 10.0) } ?: "—", goalFrac)
+                            DialLabel(LineIcons.Balance, "Weight")
+                        }
+                    }
+                }
+
+                // ---- actions ----
+                Entrance(4, key = "actions") {
+                    Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Box(
+                            Modifier.weight(1f).height(52.dp).pressable().background(accent, RoundedCornerShape(16.dp))
+                                .clickable(onClickLabel = "Edit profile") { editSheet = true },
+                            contentAlignment = Alignment.Center,
+                        ) { Text("Edit profile", fontSize = 16.sp, fontWeight = FontWeight(600), color = Color.White) }
+                        Row(
+                            Modifier.weight(1f).height(52.dp).pressable().border(1.5.dp, accent, RoundedCornerShape(16.dp))
+                                .clickable(onClickLabel = "Invite friends", onClick = invite),
+                            horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("Invite", fontSize = 16.sp, fontWeight = FontWeight(600), color = accent)
+                            Spacer(Modifier.width(8.dp))
+                            Icon(LineIcons.Plus, null, tint = accent, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+
+                // ---- v2.7: graffiti wall (Squad Food Battle crowns) — hidden until the first win ----
+                graffiti?.takeIf { it.total > 0 }?.let { g -> Entrance(5, key = "graffiti") { GraffitiWallCard(g) } }
+                // v2.10: an under-18 "lose" goal moves to maintain here too, with its one-time card.
+                com.sohum.bandlog.ui.components.TeenGoalMigration(vm)
+
+                // ---- badges shelf ----
+                Entrance(5, key = "badges") { BadgesShelf(vm) { onOpen(ProfilePage.BADGES) } }
+
+                // ---- goal ----
+                Entrance(6, key = "goal") {
+                    ProfileCard {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Goal", fontSize = 14.sp, color = p.muted, modifier = Modifier.weight(1f))
+                            Text(
+                                "Edit", fontSize = 14.sp, fontWeight = FontWeight(500), color = accent,
+                                modifier = Modifier.heightIn(min = 48.dp).clickable(onClickLabel = "Edit goal weight") { onOpen(ProfilePage.GOAL_WEIGHT) }.padding(horizontal = 8.dp, vertical = 14.dp),
                             )
                         }
+                        if (goalKg != null) {
+                            Row(verticalAlignment = Alignment.Bottom) {
+                                Text(current?.let { fmt((it * 10).roundToInt() / 10.0) } ?: "—", fontSize = 30.sp, fontWeight = FontWeight(400), letterSpacing = (-1).sp, color = p.ink)
+                                Spacer(Modifier.width(8.dp))
+                                Text("→ ${fmt(goalKg)} kg${goalEtaShort(vm, current)}", fontSize = 15.sp, color = p.muted, modifier = Modifier.padding(bottom = 5.dp), maxLines = 1)
+                            }
+                            Spacer(Modifier.height(10.dp))
+                            val grow = rememberMotion("goal-bar", 1080, PremiumMotion.GROW_X_MS)
+                            Box(Modifier.fillMaxWidth().height(6.dp).background(if (isDarkTheme) Color(0xFF2C2C2E) else Color(0xFFE7E7EA), RoundedCornerShape(3.dp))) {
+                                Box(Modifier.fillMaxWidth(goalFrac.coerceAtLeast(0.02f)).height(6.dp).growFromLeft(grow).background(accent, RoundedCornerShape(3.dp)))
+                            }
+                        } else {
+                            Text(
+                                "Set a goal weight ›", fontSize = 17.sp, fontWeight = FontWeight(600), color = p.ink,
+                                modifier = Modifier.heightIn(min = 48.dp).clickable { onOpen(ProfilePage.GOAL_WEIGHT) }.padding(vertical = 12.dp),
+                            )
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(22.dp)) {
+                            if (prof.hideNumbers != true) GoalStat(String.format(java.util.Locale.US, "%,d", prof.calorieTarget), "kcal") { onOpen(ProfilePage.GOALS) }
+                            GoalStat("${prof.proteinTargetG} g", "protein") { onOpen(ProfilePage.GOALS) }
+                            GoalStat("$remindersOn", if (remindersOn == 1) "reminder" else "reminders") { onOpen(ProfilePage.REMINDERS) }
+                        }
                     }
-                    avatarError?.let { ErrorNote(it, Modifier.padding(bottom = 10.dp)) }
                 }
-            }
-        }
 
-        // ---- v2.7: graffiti wall (Squad Food Battle crowns) — hidden until the first win ----
-        graffiti?.takeIf { it.total > 0 }?.let { g -> Rise(1) { GraffitiWallCard(g) } }
-        // v2.10: an under-18 "lose" goal moves to maintain here too, with its one-time card.
-        com.sohum.bandlog.ui.components.TeenGoalMigration(vm)
-
-        // ---- you ----
-        Rise(1) { GroupLabel("You") }
-        Rise(1) {
-            Card(padding = 0.dp) {
-                Column(Modifier.padding(horizontal = 16.dp)) {
-                    SettingRow(Icons.Outlined.Person, p.ink, "Personal details", onClick = { onOpen(ProfilePage.PERSONAL) }) { Chevron() }
-                    Hair()
-                    SettingRow(TargetIcon, p.ink, "Nutrition goals", onClick = { onOpen(ProfilePage.GOALS) }) {
-                        Text(if (prof.hideNumbers == true) "Set" else "${prof.calorieTarget} kcal", fontSize = 13.sp, color = p.muted)
-                    }
-                    Hair()
-                    SettingRow(FlameIcon, p.flame, "Goal & weight", onClick = { onOpen(ProfilePage.GOAL_WEIGHT) }) {
-                        Text(prof.goalType.replaceFirstChar { it.uppercase() }, fontSize = 13.sp, color = p.muted)
-                    }
-                    Hair()
-                    SettingRow(ScaleIcon, p.ink, "Weight history", onClick = { onOpen(ProfilePage.WEIGHT_HISTORY) }) {
-                        Text(prof.weightKg?.let { "${com.sohum.bandlog.ui.today.fmt(it)} kg" } ?: "—", fontSize = 13.sp, color = p.muted)
-                    }
-                    Hair()
-                    SettingRow(com.sohum.bandlog.ui.components.CheckIcon, p.ink, "Badges", onClick = { onOpen(ProfilePage.BADGES) }) { Chevron() }
-                }
-            }
-        }
-
-        // ---- preferences: one row, categories inside ----
-        Rise(2) { GroupLabel("Preferences") }
-        Rise(2) {
-            Card(padding = 0.dp) {
-                Column(Modifier.padding(horizontal = 16.dp)) {
-                    SettingRow(Icons.Outlined.Tune, p.ink, "Preferences", subtitle = "Appearance, tracking, reminders, privacy, account", onClick = { onOpen(ProfilePage.PREFERENCES) }) { Chevron() }
-                }
-            }
-        }
-
-        // ---- app ----
-        Rise(3) { GroupLabel("App") }
-        Rise(3) {
-            Card(padding = 0.dp) {
-                Column(Modifier.padding(horizontal = 16.dp)) {
-                    SettingRow(Icons.Outlined.Refresh, p.ink, "Check for updates", subtitle = "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", onClick = { updateVm.check() }) {
-                        Text(
+                // ---- the list ----
+                Entrance(7, key = "list") {
+                    ProfileCard(padding = 0.dp) {
+                        ListRow(LineIcons.User, "Personal details", listOfNotNull(prof.age?.toString(), prof.heightCm?.let { "${it.roundToInt()} cm" }).joinToString(" · ")) { onOpen(ProfilePage.PERSONAL) }
+                        ListDivider()
+                        ListRow(LineIcons.Target, "Nutrition goals", if (prof.hideNumbers == true) "Set" else "${prof.calorieTarget} kcal") { onOpen(ProfilePage.GOALS) }
+                        ListDivider()
+                        ListRow(LineIcons.Flag, "Goal weight", prof.goalType.replaceFirstChar { it.uppercase() }) { onOpen(ProfilePage.GOAL_WEIGHT) }
+                        ListDivider()
+                        ListRow(LineIcons.Chart, "Weight history", if (vm.weights.isEmpty()) "" else "${vm.weights.size} ${if (vm.weights.size == 1) "entry" else "entries"}") { onOpen(ProfilePage.WEIGHT_HISTORY) }
+                        ListDivider()
+                        ListRow(LineIcons.Bell, "Reminders", "$remindersOn on") { onOpen(ProfilePage.REMINDERS) }
+                        ListDivider()
+                        ListRow(LineIcons.Sliders, "Preferences", "") { onOpen(ProfilePage.PREFERENCES) }
+                        ListDivider()
+                        ListRow(LineIcons.Star, "What's new", BuildConfig.VERSION_NAME) { showChangelog = true }
+                        ListDivider()
+                        ListRow(
+                            LineIcons.Refresh, "Check for updates",
                             when {
                                 updateVm.checking -> "Checking…"
                                 updateVm.upToDate -> "v${BuildConfig.VERSION_NAME} · up to date"
-                                else -> "v${BuildConfig.VERSION_NAME}"
+                                else -> "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
                             },
-                            fontSize = 13.sp, fontWeight = FontWeight(600), color = if (updateVm.upToDate) p.green else p.muted,
-                        )
-                    }
-                    Hair()
-                    SettingRow(Icons.Outlined.NewReleases, p.ink, "What's new", subtitle = "Changelog", onClick = { showChangelog = true }) { Chevron() }
-                    // v2.11: only the owner sees this; the web panel still checks on the server.
-                    val isAdmin = Session.email?.trim()?.lowercase()?.let { e -> BuildConfig.ADMIN_EMAILS.split(",").map { it.trim().lowercase() }.contains(e) } == true
-                    if (isAdmin && BuildConfig.API_BASE.isNotBlank()) {
-                        Hair()
-                        SettingRow(Icons.Outlined.AdminPanelSettings, p.ink, "Admin", subtitle = "Users and usage (opens in your browser)", onClick = {
-                            runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(BuildConfig.API_BASE.trimEnd('/') + "/admin"))) }
-                        }) { Chevron() }
-                    }
-                    Hair()
-                    SettingRow(Icons.Outlined.Share, p.ink, "Invite friends", subtitle = "Android APK or the iPhone web app", onClick = {
-                        runCatching {
-                            ctx.startActivity(
-                                android.content.Intent.createChooser(
-                                    android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                                        type = "text/plain"
-                                        putExtra(android.content.Intent.EXTRA_TEXT, INVITE_TEXT)
+                            valueColor = if (updateVm.upToDate) p.green else null, chevron = false,
+                        ) { updateVm.check() }
+                        ListDivider()
+                        ListRow(LineIcons.Message, "Request a feature", "") {
+                            runCatching {
+                                ctx.startActivity(
+                                    android.content.Intent(android.content.Intent.ACTION_SENDTO).apply {
+                                        data = android.net.Uri.parse("mailto:sohumai.team@gmail.com")
+                                        putExtra(android.content.Intent.EXTRA_SUBJECT, "Locked In — feature request")
                                     },
-                                    "Invite friends",
-                                ),
-                            )
+                                )
+                            }
                         }
-                    }) { Chevron() }
-                    Hair()
-                    SettingRow(Icons.Outlined.MailOutline, p.ink, "Request a feature", onClick = {
-                        runCatching {
-                            ctx.startActivity(
-                                android.content.Intent(android.content.Intent.ACTION_SENDTO).apply {
-                                    data = android.net.Uri.parse("mailto:sohumai.team@gmail.com")
-                                    putExtra(android.content.Intent.EXTRA_SUBJECT, "Locked In — feature request")
-                                },
-                            )
+                        // v2.11: only the owner sees this; the web panel still checks on the server.
+                        if (isAdmin && BuildConfig.API_BASE.isNotBlank()) {
+                            ListDivider()
+                            ListRow(LineIcons.Shield, "Admin", "Opens in browser") {
+                                runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(BuildConfig.API_BASE.trimEnd('/') + "/admin"))) }
+                            }
                         }
-                    }) { Chevron() }
+                        ListDivider()
+                        ListRow(LineIcons.LogOut, "Sign out", "", chevron = false) { vm.signOut() }
+                    }
                 }
             }
         }
     }
 
     if (showChangelog) ChangelogSheet { showChangelog = false }
+    if (editSheet) BottomSheet(title = "Edit profile", subtitle = "Your photo, name and squad handle", onDismiss = { editSheet = false }) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable { editSheet = false; avatarSheet = true }, verticalAlignment = Alignment.CenterVertically) {
+            Icon(LineIcons.Camera, null, tint = p.ink, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(14.dp))
+            Text("Profile photo", fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink, modifier = Modifier.weight(1f))
+            Chevron()
+        }
+        Hair()
+        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(LineIcons.User, null, tint = p.ink, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(14.dp))
+            Box(Modifier.weight(1f)) {
+                NameField(prof.name, placeholder = Names.nameFromEmail(Session.email).ifBlank { "Enter your name" }) { newName -> vm.launch { vm.saveProfile(vm.profile.copy(name = newName)) } }
+            }
+        }
+        Session.email?.let { Text(it, fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(start = 34.dp, bottom = 8.dp)) }
+        if (prof.usernameSupported) {
+            Hair()
+            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable { editSheet = false; onOpen(ProfilePage.USERNAME) }, verticalAlignment = Alignment.CenterVertically) {
+                Icon(LineIcons.AtSign, null, tint = p.ink, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(14.dp))
+                Text(prof.username?.let { "@$it" } ?: "Create your squad username", fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink, modifier = Modifier.weight(1f))
+                Chevron()
+            }
+        }
+        Hair()
+        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable { editSheet = false; onOpen(ProfilePage.PERSONAL) }, verticalAlignment = Alignment.CenterVertically) {
+            Icon(LineIcons.Sliders, null, tint = p.ink, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(14.dp))
+            Text("Personal details", fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink, modifier = Modifier.weight(1f))
+            Chevron()
+        }
+    }
     if (avatarSheet) BottomSheet(title = "Profile photo", subtitle = "Shows on your profile and your squads' boards", onDismiss = { avatarSheet = false }) {
         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable {
             avatarSheet = false
@@ -301,6 +468,99 @@ fun ProfileScreen(
                 Icon(com.sohum.bandlog.ui.components.CrossIcon, null, tint = p.red, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(14.dp))
                 Text("Remove photo", fontSize = 15.sp, fontWeight = FontWeight(600), color = p.red)
+            }
+        }
+    }
+}
+
+/** " · about Nov 20" for the goal card, from the planned pace (the Progress weight card uses the trend). */
+private fun goalEtaShort(vm: AppViewModel, current: Double?): String {
+    val goal = vm.profile.goalWeightKg ?: return ""
+    if (current == null) return ""
+    val remaining = kotlin.math.abs(goal - current)
+    if (remaining < 0.2) return " · reached"
+    val asc = vm.weights.sortedBy { it.date }
+    val recent = asc.filter { it.date >= com.sohum.bandlog.util.Dates.addDays(vm.today, -30) }
+    val trend = if (recent.size >= 2) (recent.last().weightKg - recent.first().weightKg) / maxOf(1L, com.sohum.bandlog.util.Dates.daysBetween(recent.first().date, recent.last().date)).toDouble() else 0.0
+    val perDay = if (trend * (goal - current) > 0 && kotlin.math.abs(trend) > 0.005) kotlin.math.abs(trend) else vm.profile.goalSpeedKgWk.coerceAtLeast(0.1) / 7.0
+    val days = (remaining / perDay).roundToInt()
+    if (days > 730) return ""
+    return " · about " + java.time.LocalDate.now(com.sohum.bandlog.util.Dates.ZONE).plusDays(days.toLong()).format(java.time.format.DateTimeFormatter.ofPattern("MMM d", java.util.Locale.ENGLISH))
+}
+
+@Composable
+private fun GoalStat(value: String, label: String, onClick: () -> Unit) {
+    val p = palette
+    Text(
+        buildAnnotatedString {
+            withStyle(SpanStyle(color = p.ink, fontWeight = FontWeight(500))) { append(value) }
+            append(" $label")
+        },
+        fontSize = 14.sp, color = p.muted,
+        modifier = Modifier.heightIn(min = 48.dp).clickable(onClickLabel = "Edit $label", onClick = onClick).padding(vertical = 14.dp),
+    )
+}
+
+/** One row of the Profile list: thin line icon, label, muted value, chevron. 48 dp+ tall. */
+@Composable
+private fun ListRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, value: String, valueColor: Color? = null, chevron: Boolean = true, onClick: () -> Unit) {
+    val p = palette
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 50.dp).clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Icon(icon, null, tint = p.ink, modifier = Modifier.size(20.dp))
+        Text(label, fontSize = 15.5.sp, color = p.ink, modifier = Modifier.weight(1f), maxLines = 1)
+        if (value.isNotEmpty()) Text(value, fontSize = 13.5.sp, color = valueColor ?: p.muted, maxLines = 1)
+        if (chevron) Icon(LineIcons.ChevronRight, null, tint = p.muted, modifier = Modifier.size(16.dp))
+    }
+}
+
+@Composable
+private fun ListDivider() = Box(Modifier.fillMaxWidth().padding(start = 50.dp).height(1.dp).background(if (isDarkTheme) Color(0xFF2A2A2D) else Color(0xFFE2E2E6)))
+
+/**
+ * Medals v2 shelf: up to three earned medals (best tier first) and the next locked one, "N of M ›"
+ * to the full grid, then "Next up: X · k more days" with a growing bar.
+ */
+@Composable
+private fun BadgesShelf(vm: AppViewModel, onOpen: () -> Unit) {
+    val p = palette
+    val progress = vm.badgeProgress
+    val all = com.sohum.bandlog.util.Badges.ALL
+    val earned = all.filter { progress.earned(it) }.sortedWith(compareBy({ tierOf(it).ordinal }, { -it.need }))
+    val locked = all.filter { !progress.earned(it) }.sortedByDescending { progress.value(it.group).toFloat() / it.need }
+    val shelf = (earned.take(3) + locked).take(4)
+    val next = nextBadge(progress)
+    ProfileCard(padding = 0.dp, radius = 24.dp) {
+        Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(onClickLabel = "Open badges", onClick = onOpen).padding(horizontal = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Badges", fontSize = 19.sp, fontWeight = FontWeight(600), color = p.ink, modifier = Modifier.weight(1f))
+                Text("${earned.size} of ${all.size}  ›", fontSize = 14.sp, color = p.muted)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                shelf.forEachIndexed { i, b ->
+                    val got = progress.earned(b)
+                    Column(
+                        Modifier.width(80.dp).clickable(onClickLabel = "Open badges", onClick = onOpen)
+                            .semantics(mergeDescendants = true) { contentDescription = if (got) "${b.name}, ${tierOf(b).label.lowercase()} medal" else "${b.name}, ${progress.value(b.group).coerceAtMost(b.need)} of ${b.need}" },
+                        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp),
+                    ) {
+                        BadgeMedal(b, progress, 76.dp, "shelf$i", 450 + i * 120)
+                        Text(
+                            if (got) tierOf(b).label else "${progress.value(b.group).coerceAtMost(b.need)} OF ${b.need}",
+                            fontSize = 9.5.sp, fontWeight = FontWeight(600), letterSpacing = 1.4.sp, color = if (got) tierOf(b).mid else accentColor,
+                        )
+                        Text(b.name, fontSize = 13.sp, fontWeight = FontWeight(500), color = p.ink, textAlign = TextAlign.Center, maxLines = 2, lineHeight = 16.sp)
+                    }
+                }
+            }
+            if (next != null) {
+                Box(Modifier.fillMaxWidth().padding(horizontal = 6.dp).height(1.dp).background(if (isDarkTheme) Color(0xFF2A2A2D) else Color(0xFFE2E2E6)))
+                NextUpRow(next, progress, Modifier.padding(horizontal = 6.dp))
             }
         }
     }

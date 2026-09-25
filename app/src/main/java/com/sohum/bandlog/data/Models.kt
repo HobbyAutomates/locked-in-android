@@ -263,6 +263,8 @@ data class Profile(
     val hideNumbers: Boolean? = null,
     /** v2.10 optional waist for waist-to-height; null = not entered (or column missing). */
     val waistCm: Double? = null,
+    /** v2.12 read-only: profiles.created_at (the "Joined Aug 2026" line); null when not returned. Never written. */
+    val createdAt: String? = null,
 ) {
     /** The lens a report opens on: `goal` follows the weight goal (lose → cutting, gain → bulking, else protein). */
     val initialLens: String
@@ -320,6 +322,7 @@ data class Profile(
             autoShare = if (!o.has("auto_share")) null else com.sohum.bandlog.util.SquadSharing.parseAutoShare(o.optJSONArray("auto_share")) ?: com.sohum.bandlog.util.SquadSharing.KINDS,
             hideNumbers = if (!o.has("hide_numbers")) null else o.optBoolean("hide_numbers", false),
             waistCm = if (!o.has("waist_cm")) null else o.dbl("waist_cm"),
+            createdAt = if (!o.has("created_at")) null else o.str("created_at"),
         )
     }
 }
