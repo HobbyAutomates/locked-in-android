@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -163,12 +164,20 @@ fun TodayScreen(
                     kcalOver > 0 -> kcalOver to "over"
                     else -> caloriesLeft to "left"
                 }
+                // v2.10 "Hide calorie numbers" (schema_v34 opt-in): words instead of kcal in both left and
+                // eaten modes. The ring stays; macro cards still show grams (science spec).
+                val hideNumbers = prof.hideNumbers == true
+                val kcalLabel = if (hideNumbers) (if (eatenMode) "Calories eaten" else "Calories left") else "Calories $kcalWord"
                 Card(padding = 20.dp, onClick = flip) {
                     RowSpaceBetween {
-                        FlipFace(eatenMode, flipped) {
-                            Text(String.format(Locale.US, "%,d", kcalValue), fontSize = 40.sp, fontWeight = FontWeight(800), letterSpacing = (-1.5).sp, color = p.ink, lineHeight = 40.sp)
-                            Text(if (isToday) "Calories $kcalWord" else "Calories $kcalWord · ${Dates.short(selected)}", fontSize = 14.sp, fontWeight = FontWeight(500), color = p.muted)
-                            if (isToday && (vm.burnedKcal > 0 || vm.rolloverKcal > 0)) Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FlipFace(eatenMode, flipped, if (hideNumbers) Modifier.widthIn(max = 210.dp) else Modifier) {
+                            if (hideNumbers) {
+                                Text(com.sohum.bandlog.util.Goals.calorieWords(totals.calories, budget), fontSize = 22.sp, fontWeight = FontWeight(800), letterSpacing = (-0.5).sp, color = p.ink, lineHeight = 26.sp)
+                            } else {
+                                Text(String.format(Locale.US, "%,d", kcalValue), fontSize = 40.sp, fontWeight = FontWeight(800), letterSpacing = (-1.5).sp, color = p.ink, lineHeight = 40.sp)
+                            }
+                            Text(if (isToday) kcalLabel else "$kcalLabel · ${Dates.short(selected)}", fontSize = 14.sp, fontWeight = FontWeight(500), color = p.muted)
+                            if (!hideNumbers && isToday && (vm.burnedKcal > 0 || vm.rolloverKcal > 0)) Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 if (vm.burnedKcal > 0) Box(Modifier.background(p.card2, CircleShape).padding(8.dp, 3.dp)) { Text("+${vm.burnedKcal.toInt()} burned", fontSize = 11.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1) }
                                 if (vm.rolloverKcal > 0) Box(Modifier.background(p.card2, CircleShape).padding(8.dp, 3.dp)) { Text("+${vm.rolloverKcal.toInt()} rollover", fontSize = 11.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1) }
                             }
