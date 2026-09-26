@@ -24,6 +24,7 @@ import com.sohum.bandlog.util.DietModes
 import com.sohum.bandlog.util.Goals
 import com.sohum.bandlog.util.MealTypes
 import com.sohum.bandlog.util.WhatToEat
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import kotlin.math.roundToInt
@@ -116,8 +117,10 @@ class NutritionViewModel : ViewModel() {
     private var checkinWeek: String? = null
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("nutrition_v213", Context.MODE_PRIVATE)
-    fun checkinHandled(ctx: Context, week: String): Boolean = prefs(ctx).getBoolean("checkin_done_$week", false)
-    private fun markHandled(ctx: Context, week: String) { prefs(ctx).edit().putBoolean("checkin_done_$week", true).apply() }
+    /** Bumped when a check-in is answered, so the card (which reads SharedPreferences) recomposes. */
+    private var handledTick by androidx.compose.runtime.mutableIntStateOf(0)
+    fun checkinHandled(ctx: Context, week: String): Boolean { handledTick; return prefs(ctx).getBoolean("checkin_done_$week", false) }
+    private fun markHandled(ctx: Context, week: String) { prefs(ctx).edit().putBoolean("checkin_done_$week", true).apply(); handledTick++ }
 
     /** Floor / ceiling for a profile: Goals' floor; under 18 never under maintenance (no deficit), at most maintenance + the growth surplus. */
     private fun bounds(p: Profile): Pair<Int, Int> {
@@ -167,6 +170,8 @@ class NutritionViewModel : ViewModel() {
         }
     }
 
+    fun checkinVisible(ctx: Context): Boolean = checkin?.let { !it.applied && !checkinHandled(ctx, it.weekStart) } == true
+
     /** Apply: the new calorie target, macros recomputed per the diet mode; applied = true. */
     suspend fun applyCheckin(ctx: Context, vm: AppViewModel): Boolean {
         val c = checkin ?: return false
@@ -186,7 +191,6 @@ class NutritionViewModel : ViewModel() {
     fun keepCheckin(ctx: Context) {
         val c = checkin ?: return
         markHandled(ctx, c.weekStart)
-        checkin = c.copy()
     }
 
     // ---------------------------------------------------------------- §7 fasting
@@ -300,6 +304,10 @@ class NutritionViewModel : ViewModel() {
         ) to pr
     }
 
+    /** Home shows the card once something is logged today and at least 150 kcal are left. */
+    fun whatToEatVisible(vm: AppViewModel): Boolean =
+        vm.meals.any { it.date == vm.today } && remaining(vm).kcal >= 150 && vm.presets.isNotEmpty()
+
     fun picks(vm: AppViewModel, n: Int = 5): List<WhatToEat.Pick> =
         WhatToEat.rank(candidates(vm).map { it.first }, remaining(vm), MealTypes.default(), dietMode(vm.profile), n)
 
@@ -348,6 +356,11 @@ class NutritionViewModel : ViewModel() {
                 NutritionApi.moveMeal(meal.id, type)
                 message = "Moved to ${MealTypes.label(type)}"
                 vm.refresh()
+                // Drop the override once the refreshed list agrees (a later edit must win over it).
+                kotlinx.coroutines.withTimeoutOrNull(15_000) {
+                    androidx.compose.runtime.snapshotFlow { vm.meals.firstOrNull { it.id == meal.id }?.let { MealTypes.of(it) } }.first { it == type || it == null }
+                }
+                moved = moved - meal.id
             } catch (e: Exception) {
                 moved = moved - meal.id
                 message = "Couldn't move it: ${e.message ?: "try again"}"

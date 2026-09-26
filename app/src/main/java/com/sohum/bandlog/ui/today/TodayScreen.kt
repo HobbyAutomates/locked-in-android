@@ -135,7 +135,10 @@ fun TodayScreen(
 
     androidx.compose.runtime.LaunchedEffect(vm.loadedOnce) {
         if (vm.loadedOnce && com.sohum.bandlog.ui.nutrition.fastingBlock(vm, ctx) == null) nvm.loadFasting(ctx)
+        if (vm.loadedOnce) vm.loadPresets()
     }
+    // Monday (or the first open after it): this week's check-in, when adaptive targets are on.
+    androidx.compose.runtime.LaunchedEffect(nvm.settings, vm.loadedOnce) { nvm.ensureCheckin(vm) }
     var rootOrigin by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
 
     // v2.12: cards rise out of a soft blur one after another, once per visit (ui/motion).
@@ -174,7 +177,7 @@ fun TodayScreen(
         if (isToday && nvm.active != null && com.sohum.bandlog.ui.nutrition.fastingBlock(vm, ctx) == null) item(key = "fast") {
             Entrance(1, key = "fast") { com.sohum.bandlog.ui.nutrition.FastingHomeCard(nvm) { nvm.page = com.sohum.bandlog.ui.nutrition.NutritionPage.Fasting } }
         }
-        if (isToday) item(key = "checkin") { Entrance(1, key = "checkin") { com.sohum.bandlog.ui.nutrition.CheckinCard(vm, nvm) } }
+        if (isToday && nvm.checkinVisible(ctx)) item(key = "checkin") { Entrance(1, key = "checkin") { com.sohum.bandlog.ui.nutrition.CheckinCard(vm, nvm) } }
         item { Entrance(1, key = "weekStrip") { WeekStrip(today, selected, trained) { selected = it } } }
         item {
             Entrance(2, key = "card2") {
@@ -224,7 +227,7 @@ fun TodayScreen(
         }
         // v2.13 §6 / §7 / §8 / §9: shortcuts, then "What should I eat?" from what's left today.
         if (isToday) item(key = "ntools") { Entrance(3, key = "ntools") { com.sohum.bandlog.ui.nutrition.NutritionShortcuts(vm, nvm) } }
-        if (isToday) item(key = "wte") { Entrance(3, key = "wte") { com.sohum.bandlog.ui.nutrition.WhatToEatCard(vm, nvm) } }
+        if (isToday && nvm.whatToEatVisible(vm)) item(key = "wte") { Entrance(3, key = "wte") { com.sohum.bandlog.ui.nutrition.WhatToEatCard(vm, nvm) } }
         if (isToday) {
             val h = vm.healthToday
             val burned = vm.burnedToday

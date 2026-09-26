@@ -86,7 +86,6 @@ private fun Shortcut(icon: ImageVector, label: String, onClick: () -> Unit) {
 fun CheckinCard(vm: AppViewModel, nvm: NutritionViewModel) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    LaunchedEffect(nvm.settings, vm.loadedOnce) { nvm.ensureCheckin(vm) }
     val c = nvm.checkin ?: return
     if (c.applied || nvm.checkinHandled(ctx, c.weekStart)) return
     val p = palette
