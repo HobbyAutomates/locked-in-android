@@ -18,6 +18,9 @@
         <intent><action android:name="android.media.action.IMAGE_CAPTURE" /></intent>
         <intent><action android:name="android.speech.RecognitionService" /></intent>
         <package android:name="com.google.android.apps.healthdata" />
+        <!-- v2.13 platform: share cards offer "Instagram Stories" when Instagram is installed. -->
+        <package android:name="com.instagram.android" />
+        <intent><action android:name="com.instagram.share.ADD_TO_STORY" /></intent>
     </queries>
     <!-- Health Connect: steps + active calories in, band sessions out. -->
     <uses-permission android:name="android.permission.health.READ_STEPS" />
@@ -95,6 +98,22 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.intent.action.TIME_SET" />
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- v2.13 platform: the afternoon protein nudge (re-armed by BootReceiver) and the live-workout rest timer's end. -->
+        <receiver
+            android:name=".alarm.ProteinNudgeReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.sohum.bandlog.ACTION_PROTEIN_NUDGE" />
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name=".alarm.RestTimerReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.sohum.bandlog.ACTION_REST_DONE" />
             </intent-filter>
         </receiver>
 

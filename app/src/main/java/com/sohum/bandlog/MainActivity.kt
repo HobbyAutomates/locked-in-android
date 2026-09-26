@@ -140,7 +140,10 @@ class MainActivity : ComponentActivity() {
     }
 
     // v2.10 beta events: every return to the foreground is an app_open; leaving sends what's queued.
-    override fun onStart() { super.onStart(); Analytics.track("app_open") }
+    override fun onStart() {
+        super.onStart(); Analytics.track("app_open")
+        if (Session.signedIn) com.sohum.bandlog.ui.platform.PlatformNav.onAppOpen(this) // v2.13 platform
+    }
     override fun onStop() { Analytics.flushSoon(); super.onStop() }
 
     override fun onNewIntent(intent: android.content.Intent) {
@@ -162,6 +165,7 @@ class MainActivity : ComponentActivity() {
             segs.getOrNull(at + 1)?.filter { it.isLetterOrDigit() }?.uppercase()?.takeIf { at >= 0 && it.length in 4..12 }?.let { joinCode.value = it }
             i.data = null
         }
+        com.sohum.bandlog.ui.platform.PlatformNav.handleIntent(this, i) // v2.13 platform
         // Consume it so a rotation / re-delivery doesn't reopen the same thing.
         i?.removeExtra(EXTRA_OPEN)
     }
@@ -298,6 +302,10 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
         hintPending = false
         ctx.getSharedPreferences(com.sohum.bandlog.util.SquadSharing.HINT_PREFS, android.content.Context.MODE_PRIVATE).edit().putBoolean(com.sohum.bandlog.util.SquadSharing.HINT_SEEN, true).apply()
         snack = com.sohum.bandlog.util.SquadSharing.HINT_TEXT; snackUndo = false; snackChange = true; snackTick++
+    }
+    // v2.13 platform: a tapped nudge notification (or inbox row) lands on the Squad tab.
+    LaunchedEffect(com.sohum.bandlog.ui.platform.PlatformNav.squadTick) {
+        if (com.sohum.bandlog.ui.platform.PlatformNav.squadTick > 0) { page = null; log = null; meal = null; tab = 1 }
     }
     // A tapped 9 pm wrap lands on Home, where the Wrap card sits on top.
     LaunchedEffect(openWrapTick) {
@@ -459,6 +467,7 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
 
         // v2.6 squads: the profile / create flows and the open squad, full screen over the tabs.
         com.sohum.bandlog.ui.squad.SquadOverlays(vm)
+        com.sohum.bandlog.ui.platform.PlatformOverlays(vm) // v2.13 platform
 
         if (waterParty) com.sohum.bandlog.ui.today.WaterGoalParty { waterParty = false }
     }

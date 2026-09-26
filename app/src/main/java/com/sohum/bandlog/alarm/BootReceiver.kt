@@ -13,5 +13,8 @@ class BootReceiver : BroadcastReceiver() {
         MealAlarms.rescheduleAll(context.applicationContext)
         // v2.6: the water reminder's next slot.
         WaterAlarms.reschedule(context.applicationContext)
+        // v2.13 platform: the protein nudge, and the inbox check (WorkManager keeps it, this just makes sure).
+        ProteinNudgeAlarms.reschedule(context.applicationContext)
+        com.sohum.bandlog.notify.InboxWorker.schedule(context.applicationContext)
     }
 }

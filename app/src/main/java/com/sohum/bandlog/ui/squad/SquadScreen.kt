@@ -532,7 +532,14 @@ class SquadViewModel : ViewModel() {
         val g = openId ?: return
         sent = sent + userId
         viewModelScope.launch {
-            runCatching { Api.nudge(g, userId) }.onFailure { e -> sent = sent - userId; error = e.message ?: "Couldn't send the nudge" }
+            runCatching { Api.nudge(g, userId) }
+                .onSuccess {
+                    // v2.13 platform: push it to their iPhone / web app now (the server sends pending rows), and
+                    // ask this user once for notification permission so nudges back reach them too.
+                    com.sohum.bandlog.ui.platform.PlatformNav.askNotificationsTick++
+                    com.sohum.bandlog.data.PlatformApi.dispatchPush(userId)
+                }
+                .onFailure { e -> sent = sent - userId; error = e.message ?: "Couldn't send the nudge" }
         }
     }
 
