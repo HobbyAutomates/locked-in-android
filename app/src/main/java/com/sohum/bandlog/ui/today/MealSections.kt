@@ -99,6 +99,8 @@ fun MealSection(
     val target = drag != null && drag.meal != null && drag.hover == t.key && drag.meal?.let { MealTypes.of(it) } != t.key
     val track = if (drag != null) Modifier.onGloballyPositioned { drag.bounds[t.key] = it.boundsInRoot() } else Modifier
     val ring = if (target) Modifier.border(2.dp, p.ink, RoundedCornerShape(20.dp)) else Modifier
+    // A section scrolled out of the list must not keep catching drops at its old spot.
+    if (drag != null) androidx.compose.runtime.DisposableEffect(drag, t.key) { onDispose { drag.bounds.remove(t.key) } }
     if (section.meals.isEmpty()) {
         Card(track.then(ring), padding = 0.dp) {
             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(start = 16.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
