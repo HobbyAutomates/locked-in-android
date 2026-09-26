@@ -191,12 +191,15 @@ private val MODES = listOf(
     ScanMode("barcode", "Barcode", "barcode", "Line the bars up across the middle"),
     ScanMode("label", "Food label", "label", "Get the front of the pack and its claims in shot"),
     ScanMode("facts", "Nutrition facts", "label", "Fill the frame with the nutrition table"),
+    // v2.13 §10: a restaurant menu → dishes with kcal / protein ranges and a best pick.
+    ScanMode("menu", "Menu", "menu", "Fit one menu page in the frame, text sharp"),
 )
 
 private fun modeIcon(key: String): ImageVector = when (key) {
     "barcode" -> BarcodeIcon
     "label" -> TagIcon
     "facts" -> ClipboardListIcon
+    "menu" -> com.sohum.bandlog.ui.nutrition.NutritionIcons.Menu
     else -> UtensilsIcon
 }
 
@@ -280,13 +283,22 @@ private fun ScanForm(
     var report by remember { mutableStateOf<LabelReport?>(null) }
     var plate by remember { mutableStateOf<PlateEstimate?>(null) }
     var notFound by remember { mutableStateOf(false) }
+    // v2.13 §10 menu scan, and the live camera in the frame (CAMERA permission; else the camera app).
+    val nvm: com.sohum.bandlog.ui.nutrition.NutritionViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    var menu by remember { mutableStateOf<com.sohum.bandlog.data.MenuScan?>(null) }
+    var menuUnavailable by remember { mutableStateOf(false) }
+    val live = remember { LiveCamera() }
+    var camAllowed by remember { mutableStateOf(LiveCamera.permitted(ctx)) }
+    var camFailed by remember { mutableStateOf(false) }
+    var askedCam by rememberSaveable { mutableStateOf(false) }
+    val camPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> camAllowed = ok }
     val target = remember { mutableStateOf<Uri?>(null) }
     var mode by rememberSaveable { mutableStateOf("food") }
     // The plate as edited in the review, for the floating totals over the photo.
     var plateItems by remember { mutableStateOf<List<PlateItem>>(emptyList()) }
     LaunchedEffect(plate) { plateItems = plate?.items ?: emptyList() }
 
-    fun clearResults() { report = null; plate = null; notFound = false; error = null }
+    fun clearResults() { report = null; plate = null; notFound = false; error = null; menu = null; menuUnavailable = false }
 
     suspend fun labelFrom(bmp: Bitmap?) {
         if (ocr.isBlank() && bmp != null) ocr = runCatching { Ocr.read(bmp) }.getOrDefault("")
@@ -320,6 +332,18 @@ private fun ScanForm(
                         }
                     }
                     "label" -> labelFrom(bmp)
+                    "menu" -> {
+                        bmp ?: return@launch
+                        val rem = nvm.remaining(vm)
+                        val remJson = org.json.JSONObject().put("kcal", rem.kcal.roundToInt()).put("protein", rem.protein.roundToInt())
+                            .put("carbs", rem.carbs.roundToInt()).put("fat", rem.fat.roundToInt())
+                        try {
+                            menu = com.sohum.bandlog.data.NutritionApi.scanMenu(
+                                withContext(Dispatchers.IO) { toJpegBase64(scaleForUpload(bmp, 1600), 85) }, note, remJson, nvm.dietMode(vm.profile),
+                                withContext(Dispatchers.IO) { runCatching { toJpegBase64(scaleForUpload(bmp, 320), 75) }.getOrNull() },
+                            )
+                        } catch (e: com.sohum.bandlog.data.NotYetAvailable) { menuUnavailable = true }
+                    }
                     else -> {
                         bmp ?: return@launch
                         plate = Api.photoMeal(withContext(Dispatchers.IO) { toJpegBase64(scaleForUpload(bmp, 1280), 85) }, note)
@@ -337,6 +361,7 @@ private fun ScanForm(
         photo = bitmap; ocr = ""; barcode = ""; kind = null; clearResults(); showText = false
         val bmp = bitmap ?: run { error = "Couldn't open that photo"; return }
         val forced = MODES.firstOrNull { it.key == mode }?.forced
+        if (forced == "menu") { runKind("menu"); return }
         scope.launch {
             reading = true
             val code = runCatching { Barcode.read(bmp) }.getOrNull()
@@ -363,12 +388,25 @@ private fun ScanForm(
     /** Back to the camera stage (the note and mode stay). */
     fun reset() { photo = null; ocr = ""; barcode = ""; kind = null; clearResults(); showText = false; digitsOpen = false }
 
-    val inResult = photo != null || reading || busy || report != null || plate != null || notFound || digitsOpen
+    val inResult = photo != null || reading || busy || report != null || plate != null || notFound || digitsOpen || menu != null || menuUnavailable
     if (!inResult) {
+        LaunchedEffect(Unit) {
+            nvm.loadSettings()
+            // Ask once for the live preview; a "no" keeps the camera-app flow (and a link to ask again).
+            if (!camAllowed && !askedCam) { askedCam = true; runCatching { camPermission.launch(android.Manifest.permission.CAMERA) } }
+        }
+        val liveOn = camAllowed && !camFailed
         CameraStage(
             mode = mode, onMode = { mode = it }, error = error,
-            onShutter = { error = null; openCamera() }, onGallery = { error = null; openGallery() },
+            onShutter = {
+                error = null
+                if (liveOn && live.ready) live.takePicture(ctx, onBitmap = { accept(it) }, onError = { error = it })
+                else openCamera()
+            },
+            onGallery = { error = null; openGallery() },
             onTypeCode = { error = null; digitsOpen = true }, onHistory = onOpenHistory,
+            live = if (liveOn) live else null, onCameraFailed = { camFailed = true },
+            onEnableLive = if (!camAllowed) ({ runCatching { camPermission.launch(android.Manifest.permission.CAMERA) } }) else null,
         )
         return
     }
@@ -422,6 +460,7 @@ private fun ScanForm(
                             when {
                                 reading -> "Working out what it is…"
                                 k == "plate" -> "Identifying each item, then checking the food table. 10–20 s."
+                                k == "menu" -> "Reading the menu and sizing up each dish. 15–30 s."
                                 k == "barcode" -> "Looking it up, then writing your report. About 10 seconds."
                                 ocr.trim().length < OCR_MIN_CHARS -> "Your phone couldn't read enough, so the photo is going up too — 20–45 s."
                                 else -> "Checking the brand and writing your report. About 8 seconds."
@@ -454,6 +493,14 @@ private fun ScanForm(
                     PillButton("Scan again", { openCamera() }, height = 48.dp)
                 }
                 report?.let { ReportView(it, lens, onLogged = { vm.refresh() }, onLogServing = onLogServing) }
+                if (menuUnavailable) com.sohum.bandlog.ui.nutrition.ComingSoonCard(
+                    "Restaurant menu scan", "Snap a menu and see each dish's calories and protein, with the best pick for what you have left today.",
+                )
+                menu?.let { m ->
+                    MenuResultView(m, nvm.remaining(vm)) { dish ->
+                        vm.saveMeal(Dates.today(), "Menu: ${dish.name}", listOf(dish.toMealItem()), mealType = MealTypes.default(), method = "menu")
+                    }
+                }
                 plate?.let { est ->
                     PhotoReview(
                         est, photo, readOnly = false, showPhoto = false,
@@ -472,7 +519,7 @@ private fun ScanForm(
                 }
 
                 // Not right? What the phone thinks it is, with a one-tap override, and the quieter ways in.
-                if (bmp != null && k != null && !reading) {
+                if (bmp != null && k != null && k != "menu" && !reading) {
                     Column {
                         Text(
                             "Looks like " + when (k) { "barcode" -> "a barcode"; "label" -> "a label"; else -> "a plate" } + " — change?",
@@ -499,7 +546,7 @@ private fun ScanForm(
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                     if (!busy && !reading) TextLinkSmall("Retake") { openCamera() }
-                    if (!digitsOpen) TextLinkSmall("Type barcode digits") { digitsOpen = true }
+                    if (!digitsOpen && k != "menu") TextLinkSmall("Type barcode digits") { digitsOpen = true }
                     if (!noteOpen && bmp != null) TextLinkSmall("Add a note") { noteOpen = true }
                 }
                 Spacer(Modifier.navigationBarsPadding().height(104.dp))
@@ -511,7 +558,7 @@ private fun ScanForm(
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             StageButton(CloseIcon, "Close", enabled = !busy && !reading) { reset() }
             Text(
-                when (k) { "barcode" -> "Barcode"; "label" -> "Label check"; "plate" -> "Your plate"; else -> if (digitsOpen) "Barcode" else "Scan" },
+                when (k) { "barcode" -> "Barcode"; "label" -> "Label check"; "plate" -> "Your plate"; "menu" -> "Menu"; else -> if (digitsOpen) "Barcode" else "Scan" },
                 Modifier.weight(1f).alpha(fade).semantics { heading() }, textAlign = TextAlign.Center,
                 fontSize = 15.sp, fontWeight = FontWeight(700), color = StageInk,
             )
@@ -529,17 +576,31 @@ private fun ScanForm(
 private fun CameraStage(
     mode: String, onMode: (String) -> Unit, error: String?,
     onShutter: () -> Unit, onGallery: () -> Unit, onTypeCode: () -> Unit, onHistory: () -> Unit,
+    /** v2.13: the live preview (null = permission denied / no camera → the old camera-app flow). */
+    live: LiveCamera? = null, onCameraFailed: (String) -> Unit = {}, onEnableLive: (() -> Unit)? = null,
 ) {
     val current = MODES.firstOrNull { it.key == mode } ?: MODES.first()
     Column(Modifier.fillMaxSize().background(Color.Black).navigationBarsPadding().padding(bottom = 100.dp)) {
         Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 8.dp).scanEnter(0, riseDp = 16f), verticalAlignment = Alignment.CenterVertically) {
             Text("Scan", Modifier.weight(1f).semantics { heading() }, fontSize = 30.sp, fontWeight = FontWeight(800), letterSpacing = (-1).sp, color = StageInk)
+            if (live != null && live.hasFlash) StageButton(
+                if (live.torch) com.sohum.bandlog.ui.nutrition.NutritionIcons.Flash else com.sohum.bandlog.ui.nutrition.NutritionIcons.FlashOff,
+                if (live.torch) "Flash on, tap to turn off" else "Flash off, tap to turn on",
+            ) { live.toggleTorch() }
             StageButton(HistoryIcon, "Scan history", onClick = onHistory)
         }
         Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 40.dp, vertical = 18.dp).scanEnter(1, riseDp = 16f)) {
+            if (live != null) LiveCameraPreview(live, Modifier.fillMaxSize().padding(4.dp).clip(RoundedCornerShape(22.dp)), onFailed = onCameraFailed)
             CornerBrackets(color = StageInk.copy(alpha = 0.92f))
-            Icon(modeIcon(current.key), null, tint = StageInk.copy(alpha = 0.16f), modifier = Modifier.align(Alignment.Center).size(64.dp))
+            if (live == null) Icon(modeIcon(current.key), null, tint = StageInk.copy(alpha = 0.16f), modifier = Modifier.align(Alignment.Center).size(64.dp))
+            if (live != null && live.busy) Box(Modifier.align(Alignment.Center).size(64.dp).background(StageGlass, CircleShape), contentAlignment = Alignment.Center) {
+                androidx.compose.material3.CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp, color = StageInk)
+            }
         }
+        if (onEnableLive != null) Box(
+            Modifier.fillMaxWidth().heightIn(min = 40.dp).clickable(onClick = onEnableLive).padding(horizontal = 24.dp),
+            contentAlignment = Alignment.Center,
+        ) { Text("Live preview is off · Turn on", fontSize = 12.sp, fontWeight = FontWeight(600), color = StageInk.copy(alpha = 0.75f)) }
         if (error != null) {
             Text(
                 error, Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 6.dp), textAlign = TextAlign.Center,
@@ -1484,8 +1545,8 @@ private fun trustChip(verdict: String): Pair<Color, String>? {
 @Composable
 private fun HistoryRow(it: ScanHistoryItem, onOpen: () -> Unit, onDelete: () -> Unit) {
     val p = palette
-    val kindIcon = when { it.kind == "barcode" -> BarcodeIcon; it.isPlate -> CameraIcon; else -> TagIcon }
-    val kindLabel = when { it.kind == "barcode" -> "Barcode"; it.isPlate -> "Plate"; else -> "Label" }
+    val kindIcon = when { it.kind == "barcode" -> BarcodeIcon; it.kind == "menu" -> com.sohum.bandlog.ui.nutrition.NutritionIcons.Menu; it.isPlate -> CameraIcon; else -> TagIcon }
+    val kindLabel = when { it.kind == "barcode" -> "Barcode"; it.kind == "menu" -> "Menu"; it.isPlate -> "Plate"; else -> "Label" }
     val trust = trustChip(it.verdict)
     Card(padding = 12.dp, onClick = onOpen) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1535,6 +1596,8 @@ private fun ScanDetailPage(item: ScanHistoryItem, onLogged: () -> Unit, onLogSer
             error != null -> ErrorNote(error)
             o == null -> { LinearProgressIndicator(Modifier.fillMaxWidth(), color = p.ink, trackColor = p.track); Text("Opening…", fontSize = 12.sp, color = p.muted) }
             item.isPlate -> PhotoReview(PlateEstimate.from(o), null, readOnly = true)
+            // v2.13: a saved restaurant-menu scan; + opens Add food with that dish on the plate.
+            item.kind == "menu" -> MenuResultView(com.sohum.bandlog.data.MenuScan.from(o), null) { d -> onLogServing(d.toMealItem()); true }
             else -> ReportView(LabelReport.from(o), onLogged = onLogged, onLogServing = onLogServing)
         }
     }

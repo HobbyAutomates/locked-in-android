@@ -1,6 +1,8 @@
 package com.sohum.bandlog.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -83,7 +85,10 @@ private fun SheetBody(
             trailing?.invoke()
         }
         Spacer(Modifier.height(14.dp))
-        content()
+        // v2.13: the body scrolls when it's taller than the sheet ("What's new" and friends were cut
+        // off). The title stays put and the primary button stays pinned under it. Content must not
+        // nest its own unbounded vertical scroll (bounded ones, heightIn(max = …), are fine).
+        Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) { content() }
         if (primary != null) {
             Spacer(Modifier.height(14.dp))
             PillButton(primary, onPrimary, enabled = primaryEnabled)

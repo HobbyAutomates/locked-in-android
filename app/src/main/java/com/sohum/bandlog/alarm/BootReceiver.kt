@@ -16,5 +16,7 @@ class BootReceiver : BroadcastReceiver() {
         // v2.13 platform: the protein nudge, and the inbox check (WorkManager keeps it, this just makes sure).
         ProteinNudgeAlarms.reschedule(context.applicationContext)
         com.sohum.bandlog.notify.InboxWorker.schedule(context.applicationContext)
+        // v2.13 nutrition: a running fast's "goal reached" alarm.
+        runCatching { FastingAlarm.rearm(context.applicationContext) }
     }
 }
