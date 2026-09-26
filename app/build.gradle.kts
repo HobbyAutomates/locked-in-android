@@ -88,6 +88,8 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
+    // v2.14 brand fonts: Bricolage Grotesque + Fraunces as downloadable Google Fonts (Geist stays bundled).
+    implementation("androidx.compose.ui:ui-text-google-fonts")
 
     // HTTP client for Supabase REST/Auth and the meal-parse API
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

@@ -539,10 +539,10 @@ private fun Fab(modifier: Modifier, open: Boolean, onLongClick: () -> Unit, onCl
     val glow by t.animateFloat(10f, 16f, infiniteRepeatable(tween(1200), RepeatMode.Reverse), label = "fabGlow")
     val turn by androidx.compose.animation.core.animateFloatAsState(if (open) 45f else 0f, Motion.spatialFast(), label = "fabTurn")
     Box(
-        modifier.size(60.dp).shadow(glow.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow).background(p.btn, CircleShape)
+        modifier.size(60.dp).shadow(glow.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow).background(p.ember, CircleShape)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         contentAlignment = Alignment.Center,
-    ) { Icon(Icons.Outlined.Add, if (open) "Close" else "Log", tint = p.btnInk, modifier = Modifier.size(28.dp).graphicsLayer { rotationZ = turn }) }
+    ) { Icon(Icons.Outlined.Add, if (open) "Close" else "Log", tint = p.onEmber, modifier = Modifier.size(28.dp).graphicsLayer { rotationZ = turn }) }
 }
 
 /**
