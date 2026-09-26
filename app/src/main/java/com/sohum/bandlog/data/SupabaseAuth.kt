@@ -94,7 +94,7 @@ object SupabaseAuth {
         val at = Session.accessToken
         Session.clear()
         if (at != null) runCatching {
-            val r = req("logout").header("Authorization", "Bearer $at").post(json("{}")).build()
+            val r = req("logout?scope=local").header("Authorization", "Bearer $at").post(json("{}")).build()
             client.newCall(r).execute().close()
         }
         Unit
