@@ -298,6 +298,8 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
             onJoinHandled()
         }
     }
+    // v2.14 milestone flood: a 7/30/100-day streak, the goal weight or a fresh PR, once each.
+    LaunchedEffect(vm.loadedOnce, vm.dayStreak, vm.profile.weightKg, vm.workouts.size) { vm.checkMilestones(ctx) }
     // v2.14: a squad code typed during onboarding, joined once the account and profile are ready.
     LaunchedEffect(vm.pendingJoinCode, vm.loadedOnce) {
         val code = vm.pendingJoinCode
@@ -518,6 +520,8 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
         com.sohum.bandlog.ui.nutrition.NutritionOverlays(vm)
 
         if (waterParty) com.sohum.bandlog.ui.today.WaterGoalParty { waterParty = false }
+
+        vm.milestone?.let { m -> com.sohum.bandlog.ui.milestone.MilestoneFlood(m, vm) { vm.dismissMilestone() } }
     }
 }
 

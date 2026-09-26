@@ -103,6 +103,44 @@ class AppViewModel : ViewModel() {
         get() = signedIn && loadedOnce && !onboardingSkipped &&
             (profile.weightKg == null || profile.heightCm == null || profile.dob == null)
 
+    // ---- v2.14 milestone flood ----
+
+    /** The milestone being celebrated full screen (see ui/milestone). */
+    var milestone by mutableStateOf<com.sohum.bandlog.util.Milestones.Milestone?>(null); private set
+
+    /** Shows the first unseen milestone, if any, and marks it (plus older streak steps) seen. */
+    fun checkMilestones(context: android.content.Context) {
+        if (!loadedOnce || !celebrationsOn || milestone != null) return
+        val seen = com.sohum.bandlog.util.Milestones.localSeen(context) + profile.milestonesSeen.orEmpty()
+        val (show, silent) = com.sohum.bandlog.util.Milestones.next(today, dayStreak, profile.weightKg, profile.goalWeightKg, com.sohum.bandlog.util.Goals.effectiveGoal(profile.goalType, profile.age), workouts, seen)
+        markMilestonesSeen(context, silent + listOfNotNull(show?.key))
+        if (show != null) Analytics.track("milestone_shown", "key" to show.key.substringBefore(':'))
+        milestone = show
+    }
+
+    fun dismissMilestone() { milestone = null }
+
+    /** Seen keys go to the device and, when schema_v37 is there, profiles.milestones_seen (appended). */
+    private fun markMilestonesSeen(context: android.content.Context, keys: List<String>) {
+        if (keys.isEmpty()) return
+        com.sohum.bandlog.util.Milestones.markLocal(context, keys)
+        val had = profile.milestonesSeen ?: return
+        val next = (had + keys).distinct()
+        profile = profile.copy(milestonesSeen = next)
+        viewModelScope.launch { runCatching { Api.patchProfile(org.json.JSONObject().put("milestones_seen", org.json.JSONArray(next))) } }
+    }
+
+    /** v2.14: coach / onboarding settings saved on the profile (the v37 columns); reverts if the save fails. */
+    fun patchProfileV37(fields: org.json.JSONObject, local: (Profile) -> Profile, onResult: (Boolean) -> Unit = {}) {
+        val before = profile
+        profile = local(profile)
+        viewModelScope.launch {
+            val ok = Api.patchProfile(fields)
+            if (!ok) profile = before
+            onResult(ok)
+        }
+    }
+
     // ---- v2.14 onboarding replay ----
 
     /** A squad code typed during onboarding, joined by the shell once loaded. */

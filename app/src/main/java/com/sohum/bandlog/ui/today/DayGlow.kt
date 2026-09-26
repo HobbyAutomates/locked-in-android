@@ -29,14 +29,20 @@ import com.sohum.bandlog.ui.theme.palette
 object DayGlow {
     const val MAX_ALPHA = 0.18f
 
-    /** 0..1: the share of today's four targets that are hit. */
+    /**
+     * 0..1 from four equal parts (the web's DayGlow.tsx `warmth`, same weights): calories count in
+     * full inside 85–110 % of the budget (half when over, a partial 0.6 share on the way up),
+     * protein as a share of its target, a workout today, and anything logged today.
+     */
     fun warmth(calories: Double, budget: Double, protein: Double, proteinTarget: Double, trained: Boolean, logged: Boolean): Float {
-        var hit = 0
-        if (logged) hit++
-        if (budget > 0 && calories > 0 && kotlin.math.abs(calories - budget) <= budget * 0.10) hit++
-        if (proteinTarget > 0 && protein >= proteinTarget) hit++
-        if (trained) hit++
-        return hit / 4f
+        val kcal = if (budget > 0) calories / budget else 0.0
+        val calPart = when {
+            kcal in 0.85..1.1 -> 1.0
+            kcal > 1.1 -> 0.5
+            else -> maxOf(0.0, kcal / 0.85) * 0.6
+        }
+        val proPart = if (proteinTarget > 0) minOf(1.0, protein / proteinTarget) else 0.0
+        return ((calPart + proPart + (if (trained) 1 else 0) + (if (logged) 1 else 0)) / 4.0).toFloat()
     }
 
     fun warmth(vm: AppViewModel): Float {

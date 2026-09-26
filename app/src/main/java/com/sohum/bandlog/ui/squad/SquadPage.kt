@@ -587,13 +587,14 @@ internal fun RankRow(
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("#$rank", fontSize = 17.sp, fontWeight = FontWeight(800), color = if (rank == 1) gold else p.muted, modifier = Modifier.width(40.dp))
+        // v2.14 brand: #1 is ink (no gold), the rest muted.
+        Text("#$rank", fontSize = 17.sp, fontWeight = FontWeight(800), color = if (rank == 1) p.ink else p.muted, modifier = Modifier.width(40.dp))
         Avatar(Api.avatarUrl(avatarPath), Names.initials(name), 52.dp)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(name, fontSize = 16.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                if (isMe) Text(" (you)", fontSize = 16.sp, fontWeight = FontWeight(700), color = p.ember, maxLines = 1)
+                if (isMe) Text(" · you", fontSize = 16.sp, fontWeight = FontWeight(700), color = p.ember, maxLines = 1)
             }
             username?.let { Text("@$it", fontSize = 14.sp, color = p.muted, maxLines = 1) }
             below?.invoke()
