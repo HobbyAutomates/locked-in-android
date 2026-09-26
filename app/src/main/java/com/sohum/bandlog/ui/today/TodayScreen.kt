@@ -6,6 +6,8 @@ import com.sohum.bandlog.ui.components.PillButton
 import com.sohum.bandlog.ui.components.Chevron
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.background
@@ -78,7 +80,10 @@ fun TodayScreen(
     val isToday = selected == today
     val totals = totalsFor(vm.meals, selected)
     val prof = vm.profile
-    val todayMeals = vm.meals.filter { it.date == selected }
+    // v2.13 nutrition: meal moves, fasting, the check-in and what-to-eat live in NutritionViewModel.
+    val nvm: com.sohum.bandlog.ui.nutrition.NutritionViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    val drag = androidx.compose.runtime.remember { MealDrag() }
+    val todayMeals = nvm.withMoves(vm.meals.filter { it.date == selected })
     val todayWorkouts = vm.workouts.filter { it.date == selected }
     // Band-workout burns ride on the workout row itself; everything else gets a row of its own.
     val todayExercises = vm.exercises.filter { it.date == selected && it.source != "workout" }
@@ -128,8 +133,14 @@ fun TodayScreen(
     val caloriesLeft = (budget - totals.calories).toInt().coerceAtLeast(0)
     if (isToday && vm.loadedOnce) androidx.compose.runtime.LaunchedEffect(caloriesLeft) { com.sohum.bandlog.widget.CaloriesWidget.publish(ctx, caloriesLeft, if (prof.hideNumbers == true) com.sohum.bandlog.util.Goals.calorieWords(totals.calories, budget.toDouble()) else null) }
 
+    androidx.compose.runtime.LaunchedEffect(vm.loadedOnce) {
+        if (vm.loadedOnce && com.sohum.bandlog.ui.nutrition.fastingBlock(vm, ctx) == null) nvm.loadFasting(ctx)
+    }
+    var rootOrigin by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+
     // v2.12: cards rise out of a soft blur one after another, once per visit (ui/motion).
     MotionScreen {
+    Box(Modifier.fillMaxSize().onGloballyPositioned { rootOrigin = it.positionInRoot() }) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 110.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Entrance(0, key = "header") {
@@ -158,6 +169,12 @@ fun TodayScreen(
             }
         }
         item(key = "streak") { Entrance(1, key = "streak") { DayStreakRow(vm.dayStreak, vm.notice) { vm.dismissNotice() } } }
+        // v2.13: "Moved to Lunch" and friends; the running fast; Monday's check-in.
+        if (nvm.message != null && nvm.page == null) item(key = "nmsg") { com.sohum.bandlog.ui.nutrition.NoticeLine(nvm) }
+        if (isToday && nvm.active != null && com.sohum.bandlog.ui.nutrition.fastingBlock(vm, ctx) == null) item(key = "fast") {
+            Entrance(1, key = "fast") { com.sohum.bandlog.ui.nutrition.FastingHomeCard(nvm) { nvm.page = com.sohum.bandlog.ui.nutrition.NutritionPage.Fasting } }
+        }
+        if (isToday) item(key = "checkin") { Entrance(1, key = "checkin") { com.sohum.bandlog.ui.nutrition.CheckinCard(vm, nvm) } }
         item { Entrance(1, key = "weekStrip") { WeekStrip(today, selected, trained) { selected = it } } }
         item {
             Entrance(2, key = "card2") {
@@ -205,6 +222,9 @@ fun TodayScreen(
                 }
             }
         }
+        // v2.13 §6 / §7 / §8 / §9: shortcuts, then "What should I eat?" from what's left today.
+        if (isToday) item(key = "ntools") { Entrance(3, key = "ntools") { com.sohum.bandlog.ui.nutrition.NutritionShortcuts(vm, nvm) } }
+        if (isToday) item(key = "wte") { Entrance(3, key = "wte") { com.sohum.bandlog.ui.nutrition.WhatToEatCard(vm, nvm) } }
         if (isToday) {
             val h = vm.healthToday
             val burned = vm.burnedToday
@@ -256,7 +276,12 @@ fun TodayScreen(
         items(todayWorkouts, key = { "w" + it.id }) { w -> Entrance(5, key = "w" + w.id) { WorkoutRow(w, burnKcal = workoutBurn[w.id]) { onOpenWorkout(w) } } }
         items(todayExercises, key = { "e" + it.id }) { e -> Entrance(5, key = "e" + e.id) { com.sohum.bandlog.ui.log.ActivityExerciseRow(e) { onOpenExercise(e) } } }
         // v2.8: Breakfast · Lunch · Dinner · Snacks, each with its totals and "+ Add"; tap a meal to edit it.
-        items(com.sohum.bandlog.util.MealTypes.group(todayMeals), key = { "s" + it.type.key }) { s -> Entrance(6, key = "s" + s.type.key) { MealSection(s, onAdd = { t -> onAddMeal(selected, t) }, onOpen = onOpenMeal) } }
+        // v2.13: long-press + drag a meal onto another section (or ⋮ → Move to…).
+        items(com.sohum.bandlog.util.MealTypes.group(todayMeals), key = { "s" + it.type.key }) { s ->
+            Entrance(6, key = "s" + s.type.key) { MealSection(s, onAdd = { t -> onAddMeal(selected, t) }, onOpen = onOpenMeal, drag = drag, onMove = { m, t -> nvm.moveMeal(vm, m, t) }) }
+        }
+    }
+    MealDragGhost(drag, rootOrigin)
     }
     }
 }
