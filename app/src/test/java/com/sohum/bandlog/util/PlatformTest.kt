@@ -108,7 +108,8 @@ class MuscleMapTest {
             assertTrue("${e.name} has no primary", t!!.primary.isNotEmpty())
             assertTrue("${e.name} lists a muscle twice", t.primary.intersect(t.secondary.toSet()).isEmpty())
         }
-        assertEquals(Lifts.ALL.size, MuscleMap.TABLE.size)
+        // The table also carries the web library's name variants (e.g. "dips"), so it can be larger.
+        assertTrue(MuscleMap.TABLE.size >= Lifts.ALL.size)
     }
 
     @Test fun sanity() {

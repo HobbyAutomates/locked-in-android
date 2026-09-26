@@ -100,7 +100,7 @@ fun FastingScreen(vm: AppViewModel, nvm: NutritionViewModel, onBack: () -> Unit)
     var confirmEnd by remember { mutableStateOf(false) }
 
     MotionScreen {
-        SubPage("Fasting", onBack) {
+        SubPage("Fasting", onBack, pro = true) {
             NoticeLine(nvm)
             if (block != null) {
                 Entrance(0) {

@@ -234,6 +234,7 @@ fun Hair() = Box(Modifier.fillMaxWidth().height(1.dp).background(palette.hair))
 fun SubPage(
     title: String,
     onBack: () -> Unit,
+    pro: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val p = palette
@@ -245,7 +246,8 @@ fun SubPage(
                 contentAlignment = Alignment.Center,
             ) { Icon(Icons.Outlined.ArrowBack, "Back", tint = p.ink, modifier = Modifier.size(18.dp)) }
             Text(title, Modifier.weight(1f), textAlign = TextAlign.Center, fontSize = 17.sp, fontWeight = FontWeight(700), color = p.ink)
-            Box(Modifier.size(40.dp))
+            // v2.13: Pro screens show the PRO chip in the right-hand slot (free for beta testers).
+            Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) { if (pro) com.sohum.bandlog.ui.platform.ProChip() }
         }
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(PaddingValues(16.dp, 6.dp, 16.dp, 32.dp)),

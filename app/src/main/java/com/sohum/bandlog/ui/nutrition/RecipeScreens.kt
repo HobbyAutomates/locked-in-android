@@ -72,7 +72,7 @@ fun RecipesScreen(vm: AppViewModel, nvm: NutritionViewModel, onBack: () -> Unit)
     LaunchedEffect(Unit) { nvm.loadRecipes() }
     var logging by remember { mutableStateOf<String?>(null) }
     MotionScreen {
-        SubPage("Recipes", onBack) {
+        SubPage("Recipes", onBack, pro = true) {
             NoticeLine(nvm)
             if (nvm.recipesUnavailable) { Entrance(0) { ComingSoonCard("Recipe builder") }; return@SubPage }
             Entrance(0, key = "new") {

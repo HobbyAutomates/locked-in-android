@@ -52,7 +52,7 @@ fun MicrosScreen(vm: AppViewModel, nvm: NutritionViewModel, onBack: () -> Unit) 
     val week = remember(items) { Micros.weekAverage(items, today) }
     val hints = remember(targets, week, mode) { Micros.weekHints(targets, week.values, week.loggedDays, mode) }
     MotionScreen {
-        SubPage("Micronutrients", onBack) {
+        SubPage("Micronutrients", onBack, pro = true) {
             Entrance(0, key = "intro") {
                 Card {
                     Text("Today vs your 7-day average", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)

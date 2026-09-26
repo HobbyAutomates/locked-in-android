@@ -87,6 +87,8 @@ object FastingAlarm {
             .setContentIntent(pi)
             .build()
         runCatching { NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, n) }
+        // v2.13 merge: tell the inbox check this phone already showed today's fasting notice (no duplicate).
+        runCatching { com.sohum.bandlog.util.PlatformPrefs.markFired(context, "fasting", com.sohum.bandlog.util.Dates.today()) }
     }
 }
 
