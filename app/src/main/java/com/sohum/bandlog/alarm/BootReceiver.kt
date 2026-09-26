@@ -13,5 +13,7 @@ class BootReceiver : BroadcastReceiver() {
         MealAlarms.rescheduleAll(context.applicationContext)
         // v2.6: the water reminder's next slot.
         WaterAlarms.reschedule(context.applicationContext)
+        // v2.13 nutrition: a running fast's "goal reached" alarm.
+        runCatching { FastingAlarm.rearm(context.applicationContext) }
     }
 }

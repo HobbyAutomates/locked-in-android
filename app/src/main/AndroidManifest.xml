@@ -14,6 +14,8 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Label scanner uses the system camera app via ACTION_IMAGE_CAPTURE; no CAMERA permission needed. -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- v2.13 nutrition: live CameraX preview in the scan frame; denied = the camera-app flow above. -->
+    <uses-permission android:name="android.permission.CAMERA" />
     <queries>
         <intent><action android:name="android.media.action.IMAGE_CAPTURE" /></intent>
         <intent><action android:name="android.speech.RecognitionService" /></intent>
@@ -83,6 +85,15 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="com.sohum.bandlog.ACTION_MEAL_REMINDER" />
+            </intent-filter>
+        </receiver>
+
+        <!-- v2.13 nutrition: the fasting timer's one-shot "goal reached" alarm. -->
+        <receiver
+            android:name=".alarm.FastingReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.sohum.bandlog.ACTION_FASTING_GOAL" />
             </intent-filter>
         </receiver>
 

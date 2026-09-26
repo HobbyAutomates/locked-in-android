@@ -113,6 +113,7 @@ class MainActivity : ComponentActivity() {
         // A reboot or update clears AlarmManager; re-arm here too in case the receiver was missed.
         runCatching { com.sohum.bandlog.alarm.MealAlarms.rescheduleAll(this) }
         runCatching { com.sohum.bandlog.alarm.WaterAlarms.reschedule(this) }
+        runCatching { com.sohum.bandlog.alarm.FastingAlarm.rearm(this) }
         enableEdgeToEdge()
         setContent {
             var themeMode by remember { mutableStateOf(ThemePrefs.get(this)) }
@@ -154,6 +155,8 @@ class MainActivity : ComponentActivity() {
             OPEN_MEAL -> openMealTick.intValue++
             OPEN_WRAP -> { runCatching { com.sohum.bandlog.util.Wrap.undismiss(this) }; openWrapTick.intValue++ }
             OPEN_WATER -> openWaterTick.intValue++
+            // v2.13 nutrition: "fast goal reached" opens the fasting timer.
+            com.sohum.bandlog.alarm.FastingAlarm.OPEN_FASTING -> com.sohum.bandlog.ui.nutrition.NutritionNav.openFastingTick++
         }
         // v2.6 invite link: https://web-production-ff1cf.up.railway.app/join/<code>
         i?.data?.takeIf { i.action == android.content.Intent.ACTION_VIEW }?.let { uri ->
@@ -459,6 +462,8 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
 
         // v2.6 squads: the profile / create flows and the open squad, full screen over the tabs.
         com.sohum.bandlog.ui.squad.SquadOverlays(vm)
+        // v2.13 nutrition: fasting, recipes, micros, what-to-eat pages over everything above.
+        com.sohum.bandlog.ui.nutrition.NutritionOverlays(vm)
 
         if (waterParty) com.sohum.bandlog.ui.today.WaterGoalParty { waterParty = false }
     }
