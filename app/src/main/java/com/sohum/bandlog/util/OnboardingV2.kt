@@ -81,11 +81,8 @@ object OnboardingV2 {
         Option("lost_motivation", "Lost motivation before", "Started strong, then drifted"),
     )
 
-    /** Spec keys (docs/v214-spec.md) with their chip labels. */
-    val SPORTS = listOf(
-        Option("gym", "Gym"), Option("home", "Home workout"), Option("running", "Running"), Option("cricket", "Cricket"),
-        Option("football", "Football"), Option("yoga", "Yoga"), Option("badminton", "Badminton"), Option("walking", "Walking"),
-    )
+    /** Sports chips. Stored as the labels themselves, like the web (its SPORTS list), so both apps write the same values. */
+    val SPORTS = listOf("Gym", "Home workout", "Running", "Cricket", "Football", "Yoga", "Badminton", "Walking").map { Option(it, it) }
 
     val EATER_TYPES = listOf(
         Option(DietModes.BALANCED, "Balanced", "Eat everything, in moderation"),

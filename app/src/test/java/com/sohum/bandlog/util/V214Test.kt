@@ -49,7 +49,7 @@ class V214Test {
     }
 
     @Test fun answersRoundTrip() {
-        val a = OnboardingV2.Answers(heardFrom = "friend", goal = "gain", obstacles = listOf("exam_stress"), sports = listOf("gym", "cricket"), trainingDays = 4, coachStyle = "calm")
+        val a = OnboardingV2.Answers(heardFrom = "friend", goal = "gain", obstacles = listOf("exam_stress"), sports = listOf("Gym", "Cricket"), trainingDays = 4, coachStyle = "calm")
         assertEquals(a, OnboardingV2.Answers.from(a.toJson()))
     }
 
