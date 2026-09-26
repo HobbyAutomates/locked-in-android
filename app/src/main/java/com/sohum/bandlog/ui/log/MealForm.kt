@@ -395,6 +395,7 @@ fun MealForm(
                         recipes = if (nvm.recipesUnavailable) null else nvm.recipes,
                         onRecipe = { r -> val it = r.servingItem(); add(it, "Your recipe: ${r.name}", "1 serving") },
                         onRecipes = { nvm.page = com.sohum.bandlog.ui.nutrition.NutritionPage.Recipes },
+                        dietMode = nvm.dietMode(vm.profile),
                     )
                 }
                 if (items.isEmpty() && pending.isEmpty()) Spacer(Modifier.navigationBarsPadding())
@@ -754,9 +755,12 @@ private fun PresetGrid(
     recipes: List<com.sohum.bandlog.data.Recipe>? = null,
     onRecipe: (com.sohum.bandlog.data.Recipe) -> Unit = {},
     onRecipes: () -> Unit = {},
+    /** v2.13 §4: quick picks follow the diet mode's food filter (search still finds everything). */
+    dietMode: String = com.sohum.bandlog.util.DietModes.BALANCED,
 ) {
     val p = palette
-    val presets = vm.presets
+    val presets = remember(vm.presets, dietMode) { vm.presets.filter { com.sohum.bandlog.util.DietModes.allows(dietMode, it.label + " " + it.foodName, it.category) } }
+    val filtered = presets.size < vm.presets.size
     val top = remember(presets, use) {
         presets.filter { it.category != "fat" && (use[it.foodId] ?: 0) > 0 }.sortedByDescending { use[it.foodId] ?: 0 }.distinctBy { it.foodId }.take(8)
     }
@@ -772,6 +776,10 @@ private fun PresetGrid(
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         chips.forEach { (key, label) -> Chip(label, key == cat, { onSelect(key) }) }
     }
+    if (filtered) Text(
+        "Showing ${com.sohum.bandlog.util.DietModes.byKey(dietMode).label.lowercase()} picks. Search still finds everything.",
+        fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(horizontal = 4.dp),
+    )
     if (presets.isEmpty()) {
         Card {
             if (vm.presetsLoading) {

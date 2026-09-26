@@ -1544,8 +1544,8 @@ private fun trustChip(verdict: String): Pair<Color, String>? {
 @Composable
 private fun HistoryRow(it: ScanHistoryItem, onOpen: () -> Unit, onDelete: () -> Unit) {
     val p = palette
-    val kindIcon = when { it.kind == "barcode" -> BarcodeIcon; it.isPlate -> CameraIcon; else -> TagIcon }
-    val kindLabel = when { it.kind == "barcode" -> "Barcode"; it.isPlate -> "Plate"; else -> "Label" }
+    val kindIcon = when { it.kind == "barcode" -> BarcodeIcon; it.kind == "menu" -> com.sohum.bandlog.ui.nutrition.NutritionIcons.Menu; it.isPlate -> CameraIcon; else -> TagIcon }
+    val kindLabel = when { it.kind == "barcode" -> "Barcode"; it.kind == "menu" -> "Menu"; it.isPlate -> "Plate"; else -> "Label" }
     val trust = trustChip(it.verdict)
     Card(padding = 12.dp, onClick = onOpen) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1595,6 +1595,8 @@ private fun ScanDetailPage(item: ScanHistoryItem, onLogged: () -> Unit, onLogSer
             error != null -> ErrorNote(error)
             o == null -> { LinearProgressIndicator(Modifier.fillMaxWidth(), color = p.ink, trackColor = p.track); Text("Opening…", fontSize = 12.sp, color = p.muted) }
             item.isPlate -> PhotoReview(PlateEstimate.from(o), null, readOnly = true)
+            // v2.13: a saved restaurant-menu scan; + opens Add food with that dish on the plate.
+            item.kind == "menu" -> MenuResultView(com.sohum.bandlog.data.MenuScan.from(o), com.sohum.bandlog.util.WhatToEat.Remaining(0.0, 0.0, 0.0, 0.0), "balanced", localPick = false) { d -> onLogServing(d.toMealItem()); true }
             else -> ReportView(LabelReport.from(o), onLogged = onLogged, onLogServing = onLogServing)
         }
     }

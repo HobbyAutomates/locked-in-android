@@ -59,13 +59,13 @@ private fun range(lo: Double, hi: Double): String {
 
 /** §10 the menu result: each dish with its kcal / protein range per portion, confidence, the best pick, one-tap log. */
 @Composable
-fun MenuResultView(scan: MenuScan, remaining: WhatToEat.Remaining, dietMode: String, onLog: suspend (MenuDish) -> Boolean) {
+fun MenuResultView(scan: MenuScan, remaining: WhatToEat.Remaining, dietMode: String, localPick: Boolean = true, onLog: suspend (MenuDish) -> Boolean) {
     val p = palette
     val scope = rememberCoroutineScope()
     var logged by remember(scan) { mutableStateOf(setOf<String>()) }
     var busy by remember(scan) { mutableStateOf<String?>(null) }
     val serverPick = scan.dishes.any { it.bestPick }
-    val pick = if (serverPick) null else localBestPick(scan.dishes, remaining, dietMode)
+    val pick = if (serverPick || !localPick) null else localBestPick(scan.dishes, remaining, dietMode)
     // Best picks first, then the rest as the menu lists them.
     val ordered = scan.dishes.sortedByDescending { it.bestPick || it === pick }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -77,7 +77,7 @@ fun MenuResultView(scan: MenuScan, remaining: WhatToEat.Remaining, dietMode: Str
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Text(scan.restaurant ?: "From the menu", fontSize = 17.sp, fontWeight = FontWeight(800), color = p.ink)
-                    Text("${scan.dishes.size} dish${if (scan.dishes.size == 1) "" else "es"} · ${remaining.kcal.roundToInt()} kcal and ${remaining.protein.roundToInt()} g protein left today", fontSize = 12.sp, color = p.muted)
+                    Text("${scan.dishes.size} dish${if (scan.dishes.size == 1) "" else "es"}" + if (localPick) " · ${remaining.kcal.roundToInt()} kcal and ${remaining.protein.roundToInt()} g protein left today" else "", fontSize = 12.sp, color = p.muted)
                 }
             }
             if (scan.note.isNotBlank()) Text(scan.note, fontSize = 13.sp, color = p.muted, lineHeight = 18.sp, modifier = Modifier.padding(top = 8.dp))
