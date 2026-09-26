@@ -121,6 +121,7 @@ fun NutritionGoalsScreen(vm: AppViewModel, onBack: () -> Unit, onOpenPersonal: (
     var planNote by remember(prof) { mutableStateOf<Goals.Plan?>(null) }
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val working = Goals.plan(prof)
+    val nvm: com.sohum.bandlog.ui.nutrition.NutritionViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     androidx.compose.runtime.LaunchedEffect(Unit) { if (vm.weights.isEmpty()) vm.loadWeights() }
 
     // v2.10: anything under the safe floor is lifted to it on save (never blocked).
@@ -247,7 +248,9 @@ fun NutritionGoalsScreen(vm: AppViewModel, onBack: () -> Unit, onOpenPersonal: (
                 PillButton("Auto generate", height = 46.dp, onClick = {
                     missing = Goals.missing(prof)
                     val pl = Goals.plan(prof) ?: return@PillButton
-                    val t = pl.targets
+                    // v2.13: the macros follow the diet mode (same calories); balanced = the plan as is.
+                    val t = nvm.dietMode(prof).takeIf { it != com.sohum.bandlog.util.DietModes.BALANCED }
+                        ?.let { m -> com.sohum.bandlog.util.DietModes.targets(m, pl.targets.calories, pl.age, prof.weightKg, prof.gender, prof.weeklyWorkoutTarget) } ?: pl.targets
                     planNote = pl
                     generated = t
                     calories = t.calories.toString()
@@ -277,6 +280,8 @@ fun NutritionGoalsScreen(vm: AppViewModel, onBack: () -> Unit, onOpenPersonal: (
             }
         }
 
+        // v2.13 §4 / §5: diet mode (with its science sheet, confirm and undo) and adaptive weekly targets.
+        Rise(3) { Column(verticalArrangement = Arrangement.spacedBy(14.dp)) { com.sohum.bandlog.ui.nutrition.DietModeSection(vm) } }
         Rise(3) { ErrorNote(vm.error) }
         Rise(3) {
             PillButton(
