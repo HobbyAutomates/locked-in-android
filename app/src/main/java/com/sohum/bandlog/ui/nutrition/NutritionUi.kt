@@ -1,5 +1,7 @@
 package com.sohum.bandlog.ui.nutrition
 
+import com.sohum.bandlog.ui.components.hatchTrack
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -76,7 +78,7 @@ fun ComingSoonCard(title: String, body: String = "This needs a server update tha
 fun GrowBar(fraction: Float, color: Color, key: String, modifier: Modifier = Modifier, height: Int = 8, marker: Float? = null) {
     val p = palette
     val t = rememberMotion("bar-$key", 200, 1200)
-    Box(modifier.fillMaxWidth().height(height.dp).background(p.track, CircleShape)) {
+    Box(modifier.fillMaxWidth().height(height.dp).hatchTrack(CircleShape)) {
         Box(Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).height(height.dp).growFromLeft(t).background(color, CircleShape))
         if (marker != null) Box(Modifier.fillMaxWidth(marker.coerceIn(0f, 1f)).height(height.dp), contentAlignment = Alignment.CenterEnd) {
             Box(Modifier.width(2.dp).height(height.dp + 6.dp).background(p.ink.copy(alpha = 0.55f)))

@@ -220,9 +220,9 @@ fun TodayScreen(
             Entrance(3, key = "card3") {
                 Column {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        MacroCard(Modifier.weight(1f), "Protein", totals.protein, prof.proteinTargetG.toDouble(), p.red, eatenMode, flipped, flip)
-                        MacroCard(Modifier.weight(1f), "Carbs", totals.carbs, prof.carbTargetG.toDouble(), p.orange, eatenMode, flipped, flip)
-                        MacroCard(Modifier.weight(1f), "Fat", totals.fat, prof.fatTargetG.toDouble(), p.blue, eatenMode, flipped, flip)
+                        MacroCard(Modifier.weight(1f), "Protein", totals.protein, prof.proteinTargetG.toDouble(), p.ink, eatenMode, flipped, flip)
+                        MacroCard(Modifier.weight(1f), "Carbs", totals.carbs, prof.carbTargetG.toDouble(), p.ink, eatenMode, flipped, flip)
+                        MacroCard(Modifier.weight(1f), "Fat", totals.fat, prof.fatTargetG.toDouble(), p.ink, eatenMode, flipped, flip)
                     }
                     if (!hintSeen) Text(
                         "Tap a card to switch between left and eaten", fontSize = 12.sp, color = p.muted,
@@ -244,7 +244,7 @@ fun TodayScreen(
                         Row(Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically) {
                             if (vm.healthConnected) {
                                 Row(Modifier.weight(1f).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Ring(((h?.steps ?: 0L) / prof.stepGoal.toFloat()).coerceIn(0f, 1f), p.green, 44.dp, 5.dp) { Icon(com.sohum.bandlog.ui.components.StepsIcon, null, tint = p.green, modifier = Modifier.size(16.dp)) }
+                                    Ring(((h?.steps ?: 0L) / prof.stepGoal.toFloat()).coerceIn(0f, 1f), p.ink, 44.dp, 5.dp) { Icon(com.sohum.bandlog.ui.components.StepsIcon, null, tint = p.ink, modifier = Modifier.size(16.dp)) }
                                     Spacer(Modifier.width(10.dp))
                                     Column {
                                         Text(String.format(Locale.US, "%,d", h?.steps ?: 0L), fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink, maxLines = 1)
@@ -255,7 +255,7 @@ fun TodayScreen(
                             }
                             // Health Connect active kcal (when connected) + logged exercise, deduplicated in the view model.
                             Row(Modifier.weight(1f).clickable(onClick = onLogExercise).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Ring((burned / 400.0).toFloat().coerceIn(0f, 1f), p.orange, 44.dp, 5.dp) { Icon(FlameIcon, null, tint = p.orange, modifier = Modifier.size(16.dp)) }
+                                Ring((burned / 400.0).toFloat().coerceIn(0f, 1f), p.ink, 44.dp, 5.dp) { Icon(FlameIcon, null, tint = p.ink, modifier = Modifier.size(16.dp)) }
                                 Spacer(Modifier.width(10.dp))
                                 Column(Modifier.weight(1f)) {
                                     Text("${burned.toInt()}", fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink)

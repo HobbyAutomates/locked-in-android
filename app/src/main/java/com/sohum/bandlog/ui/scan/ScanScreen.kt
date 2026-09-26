@@ -1,5 +1,7 @@
 package com.sohum.bandlog.ui.scan
 
+import com.sohum.bandlog.ui.components.hatchTrack
+
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import android.content.Context
@@ -1264,7 +1266,7 @@ private fun FillBar(fraction: Float, color: Color, modifier: Modifier = Modifier
     var go by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { go = true }
     val a by animateFloatAsState(if (go) fraction.coerceIn(0f, 1f) else 0f, Motion.spatialSlow(), label = "bar")
-    Box(modifier.fillMaxWidth().height(height).background(p.track, CircleShape)) { Box(Modifier.fillMaxWidth(a).height(height).background(color, CircleShape)) }
+    Box(modifier.fillMaxWidth().height(height).hatchTrack(CircleShape)) { Box(Modifier.fillMaxWidth(a).height(height).background(color, CircleShape)) }
 }
 
 /** Collapsed-by-default bullet card (the web research). */

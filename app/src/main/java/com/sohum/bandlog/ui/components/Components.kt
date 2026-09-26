@@ -165,18 +165,24 @@ fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit, mod
 
 /** Progress ring; draws from zero with a spring. */
 @Composable
-fun Ring(fraction: Float, color: Color, size: Dp, stroke: Dp, modifier: Modifier = Modifier, center: (@Composable () -> Unit)? = null) {
+fun Ring(fraction: Float, color: Color, size: Dp, stroke: Dp, modifier: Modifier = Modifier, hatched: Boolean = true, center: (@Composable () -> Unit)? = null) {
     val p = palette
     var go by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(120); go = true }
     val animated by animateFloatAsState(if (go) fraction.coerceIn(0f, 1f) else 0f, Motion.spatialSlow(), label = "ring")
     Box(modifier.size(size), contentAlignment = Alignment.Center) {
         val track = p.track
+        val hatch = p.hatch
+        val tint = p.track.copy(alpha = 0.45f)
         Canvas(Modifier.size(size)) {
             val sw = stroke.toPx()
             val inset = sw / 2
             val arc = Size(this.size.width - sw, this.size.height - sw)
-            drawArc(track, -90f, 360f, false, Offset(inset, inset), arc, style = Stroke(sw, cap = StrokeCap.Round))
+            // v2.14 "hatch = remaining": what's still to go is a 45° hatch, the done part solid.
+            if (hatched) {
+                val done = 360f * animated
+                drawHatchedArc(-90f + done, 360f - done, Offset(inset, inset), arc, sw, hatch, tint, (sw * 0.55f).coerceIn(3.dp.toPx(), 6.dp.toPx()), 1.1.dp.toPx())
+            } else drawArc(track, -90f, 360f, false, Offset(inset, inset), arc, style = Stroke(sw, cap = StrokeCap.Round))
             if (animated > 0f) drawArc(color, -90f, 360f * animated, false, Offset(inset, inset), arc, style = Stroke(sw, cap = StrokeCap.Round))
         }
         center?.invoke()
