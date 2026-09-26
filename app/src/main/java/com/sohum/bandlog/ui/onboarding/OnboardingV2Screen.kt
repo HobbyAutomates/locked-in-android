@@ -621,7 +621,10 @@ private fun Wheel(count: Int, selected: Int, label: (Int) -> String, modifier: M
     val state = rememberLazyListState(initialFirstVisibleItemIndex = selected.coerceIn(0, count - 1))
     val fling = rememberSnapFlingBehavior(lazyListState = state)
     val center by remember { derivedStateOf { (state.firstVisibleItemIndex + if (state.firstVisibleItemScrollOffset > rowPx / 2) 1 else 0).coerceIn(0, count - 1) } }
-    LaunchedEffect(state) { snapshotFlow { center }.distinctUntilChanged().collect { if (it != selected) onSelect(it) } }
+    // The latest callback (it closes over the latest answers), not the one from the first composition.
+    val select by androidx.compose.runtime.rememberUpdatedState(onSelect)
+    val current by androidx.compose.runtime.rememberUpdatedState(selected)
+    LaunchedEffect(state) { snapshotFlow { center }.distinctUntilChanged().collect { if (it != current) select(it) } }
     Box(modifier.height(rowH * 5), contentAlignment = Alignment.Center) {
         Box(Modifier.fillMaxWidth().height(68.dp).shadow(10.dp, RoundedCornerShape(22.dp), ambientColor = p.shadow, spotColor = p.shadow).background(p.card, RoundedCornerShape(22.dp)))
         LazyColumn(Modifier.fillMaxSize(), state = state, flingBehavior = fling, contentPadding = PaddingValues(vertical = rowH * 2), horizontalAlignment = Alignment.CenterHorizontally) {

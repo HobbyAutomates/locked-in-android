@@ -196,7 +196,9 @@ fun CoachChatScreen(vm: AppViewModel, cvm: CoachViewModel, onBack: () -> Unit) {
     var photo by remember { mutableStateOf<Pair<String, android.graphics.Bitmap>?>(null) }
     LaunchedEffect(Unit) { CoachNav.prompt = null; cvm.loadChat() }
     val list = rememberLazyListState()
-    LaunchedEffect(cvm.messages.size, cvm.sending) { if (cvm.messages.isNotEmpty()) list.animateScrollToItem(cvm.messages.size + 1) }
+    LaunchedEffect(cvm.messages.size, cvm.sending) {
+        if (cvm.messages.isNotEmpty()) list.animateScrollToItem((list.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
+    }
     val (dictation, toggleMic) = com.sohum.bandlog.util.rememberDictation { chunk -> text = (text.trim() + " " + chunk).trim() }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null) scope.launch {
