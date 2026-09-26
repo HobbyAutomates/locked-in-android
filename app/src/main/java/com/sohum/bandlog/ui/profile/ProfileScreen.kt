@@ -361,6 +361,15 @@ fun ProfileScreen(
                         // v2.13 platform: Locked In Pro (everyone's on the beta, so every Pro feature is free).
                         ListRow(LineIcons.Crown, "Locked In Pro", "Beta · all features", valueColor = accent) { com.sohum.bandlog.ui.platform.PlatformNav.open(com.sohum.bandlog.ui.platform.PlatformPage.PRO) }
                         ListDivider()
+                        // v2.14: the AI coach (chat, what it knows, its style) and buddy streaks.
+                        ListRow(com.sohum.bandlog.ui.onboarding.OnbIcons.Star, "Coach", if (prof.v37) com.sohum.bandlog.util.OnboardingV2.styleLabel(com.sohum.bandlog.util.OnboardingV2.effectiveCoachStyle(prof.coachStyle, prof.age)) else "Soon") { com.sohum.bandlog.ui.coach.CoachNav.open(com.sohum.bandlog.ui.coach.CoachPage.CHAT) }
+                        ListDivider()
+                        ListRow(com.sohum.bandlog.ui.onboarding.OnbIcons.Brain, "What your coach knows", "") { com.sohum.bandlog.ui.coach.CoachNav.open(com.sohum.bandlog.ui.coach.CoachPage.MEMORY) }
+                        ListDivider()
+                        ListRow(com.sohum.bandlog.ui.onboarding.OnbIcons.Scale, "Coach style", "") { com.sohum.bandlog.ui.coach.CoachNav.open(com.sohum.bandlog.ui.coach.CoachPage.STYLE) }
+                        ListDivider()
+                        ListRow(com.sohum.bandlog.ui.onboarding.OnbIcons.Flame, "Buddy streaks", "") { com.sohum.bandlog.ui.coach.CoachNav.open(com.sohum.bandlog.ui.coach.CoachPage.BUDDY) }
+                        ListDivider()
                         ListRow(LineIcons.User, "Personal details", listOfNotNull(prof.age?.toString(), prof.heightCm?.let { "${it.roundToInt()} cm" }).joinToString(" · ")) { onOpen(ProfilePage.PERSONAL) }
                         ListDivider()
                         ListRow(LineIcons.Target, "Nutrition goals", if (prof.hideNumbers == true) "Set" else "${prof.calorieTarget} kcal") { onOpen(ProfilePage.GOALS) }

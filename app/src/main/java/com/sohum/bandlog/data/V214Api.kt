@@ -49,6 +49,15 @@ data class CoachMemory(val id: String, val kind: String, val text: String, val s
 
 data class MemoryState(val remember: Boolean, val memories: List<CoachMemory>)
 
+/** GET /api/coach/note: today's morning note, the Sunday roast and the 8 pm nudge (each may be null). */
+data class NoteBundle(val note: CoachNote?, val roast: CoachNote?, val evening: CoachNote?, val noteTime: String?) {
+    /** What Home shows, the roast first (the evening nudge replaces the morning note). */
+    val shown: List<CoachNote> get() = listOfNotNull(roast, evening ?: note)
+}
+
+/** GET /api/coach/chat. */
+data class ChatState(val style: String, val remember: Boolean, val teen: Boolean, val messages: List<CoachMessage>)
+
 data class ChatReply(val user: CoachMessage?, val reply: CoachMessage?, val learned: List<CoachMemory>, val safety: Boolean)
 
 /** One `my_buddies()` row. */
@@ -105,6 +114,7 @@ object V214Api {
                 if (!res.isSuccessful) {
                     android.util.Log.w("LockedIn", "$label failed (${res.code}) /api/$path: ${text.take(400)}")
                     if (res.code == 404) throw NotYetAvailable()
+                    if (runCatching { JSONObject(text).optBoolean("available", true) }.getOrDefault(true).not()) throw NotYetAvailable()
                     val msg = runCatching { JSONObject(text).optString("error") }.getOrNull().orEmpty()
                     if (res.code == 401 && auth) throw AuthException(msg.ifBlank { "Not signed in" })
                     throw ApiException(msg.ifBlank { "$label failed (${res.code})" })
@@ -150,21 +160,22 @@ object V214Api {
 
     // ---- coach ----
 
-    suspend fun note(): CoachNote? {
+    suspend fun note(): NoteBundle {
         val o = obj(web("GET", "coach/note", label = "Coach note"))
-        return o.optJSONObject("note")?.let { CoachNote.from(it) }?.takeIf { it.text.isNotBlank() }
+        fun n(k: String) = o.optJSONObject(k)?.let { CoachNote.from(it) }?.takeIf { it.text.isNotBlank() }
+        return NoteBundle(n("note"), n("roast"), n("evening"), o.optString("noteTime").ifBlank { null })
     }
 
-    /** History, oldest first, plus the style the server used. */
-    suspend fun chat(limit: Int = 60): Pair<String, List<CoachMessage>> {
+    /** History, oldest first, plus the style the server used, the memory switch and the teen cap. */
+    suspend fun chat(limit: Int = 60): ChatState {
         val o = obj(web("GET", "coach/chat?limit=$limit", label = "Coach chat"))
         val arr = o.optJSONArray("messages") ?: JSONArray()
-        return o.optString("style", "balanced") to (0 until arr.length()).map { CoachMessage.from(arr.getJSONObject(it)) }
+        return ChatState(o.optString("style", "balanced"), o.optBoolean("remember", true), o.optBoolean("teen", false), (0 until arr.length()).map { CoachMessage.from(arr.getJSONObject(it)) })
     }
 
     suspend fun send(message: String, imageBase64: String? = null): ChatReply {
         val body = JSONObject().put("message", message).put("date", com.sohum.bandlog.util.Dates.today())
-        if (imageBase64 != null) body.put("image", imageBase64)
+        if (imageBase64 != null) body.put("image", imageBase64).put("media_type", "image/jpeg")
         val o = obj(web("POST", "coach/chat", body, label = "Coach", timeoutSec = 90))
         val learned = o.optJSONArray("learned")?.let { a -> (0 until a.length()).map { CoachMemory.from(a.getJSONObject(it)) } } ?: emptyList()
         return ChatReply(o.optJSONObject("user")?.let { CoachMessage.from(it) }, o.optJSONObject("reply")?.let { CoachMessage.from(it) }, learned, o.optBoolean("safety", false))
@@ -190,6 +201,7 @@ object V214Api {
 
     suspend fun pinMemory(id: String, pinned: Boolean) { web("PATCH", "coach/memory", JSONObject().put("id", id).put("pinned", pinned), label = "Pin memory") }
 
+    /** `id = "all"` forgets everything. */
     suspend fun forgetMemory(id: String) { web("DELETE", "coach/memory?id=${java.net.URLEncoder.encode(id, "UTF-8")}", label = "Forget memory") }
 
     // ---- buddies (Supabase RPCs, schema_v37) ----

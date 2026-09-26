@@ -516,6 +516,7 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
         // v2.6 squads: the profile / create flows and the open squad, full screen over the tabs.
         com.sohum.bandlog.ui.squad.SquadOverlays(vm)
         com.sohum.bandlog.ui.platform.PlatformOverlays(vm) // v2.13 platform
+        com.sohum.bandlog.ui.coach.CoachOverlays(vm) // v2.14 coach, buddies, Tune your plan
         // v2.13 nutrition: fasting, recipes, micros, what-to-eat pages over everything above.
         com.sohum.bandlog.ui.nutrition.NutritionOverlays(vm)
 

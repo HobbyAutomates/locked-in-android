@@ -142,6 +142,9 @@ fun TodayScreen(
     // Monday (or the first open after it): this week's check-in, when adaptive targets are on.
     androidx.compose.runtime.LaunchedEffect(nvm.settings, vm.loadedOnce) { nvm.ensureCheckin(vm) }
     var rootOrigin by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    // v2.14: Tune your plan, the coach's note and buddy streaks (each hidden until its server side is live).
+    val cvm: com.sohum.bandlog.ui.coach.CoachViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    androidx.compose.runtime.LaunchedEffect(vm.loadedOnce) { if (vm.loadedOnce) { cvm.loadNote(); cvm.loadBuddies() } }
 
     // v2.12: cards rise out of a soft blur one after another, once per visit (ui/motion).
     MotionScreen {
@@ -179,6 +182,9 @@ fun TodayScreen(
         }
         if (isToday && showRecap) item(key = "recapPrompt") { com.sohum.bandlog.ui.platform.RecapPrompt(vm) } // v2.13 platform
         item(key = "streak") { Entrance(1, key = "streak") { DayStreakRow(vm.dayStreak, vm.notice) { vm.dismissNotice() } } }
+        if (isToday && com.sohum.bandlog.ui.coach.v214CardsVisible(vm, cvm)) item(key = "v214") {
+            Entrance(1, key = "v214") { com.sohum.bandlog.ui.coach.V214HomeCards(vm, cvm) { t -> onAddMeal(today, t) } }
+        }
         // v2.13: "Moved to Lunch" and friends; the running fast; Monday's check-in.
         if (nvm.message != null && nvm.page == null) item(key = "nmsg") { com.sohum.bandlog.ui.nutrition.NoticeLine(nvm) }
         if (isToday && nvm.active != null && com.sohum.bandlog.ui.nutrition.fastingBlock(vm, ctx) == null) item(key = "fast") {
