@@ -72,6 +72,9 @@ dependencies {
     implementation("androidx.camera:camera-camera2:$cameraX")
     implementation("androidx.camera:camera-lifecycle:$cameraX")
     implementation("androidx.camera:camera-view:$cameraX")
+    // ProcessCameraProvider.getInstance returns a Guava ListenableFuture; ML Kit pins the empty
+    // listenablefuture stub, so the class comes from Guava itself (R8 strips the rest in release).
+    implementation("com.google.guava:guava:33.3.1-android")
     testImplementation("junit:junit:4.13.2")
 
     implementation("androidx.core:core-ktx:1.13.1")
