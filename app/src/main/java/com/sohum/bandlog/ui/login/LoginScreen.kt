@@ -141,11 +141,18 @@ private fun onGreen(p: Palette) = if (isDark(p)) Color.Black else Color.White
  * account is ready (the same pending-code path a tapped invite link uses).
  */
 @Composable
-fun LoginScreen(reason: String? = null, onInviteCode: (String) -> Unit = {}, onSignedIn: () -> Unit) {
+fun LoginScreen(
+    reason: String? = null, onInviteCode: (String) -> Unit = {}, onSignedIn: () -> Unit,
+    /** v2.14: "Get started" opens the new onboarding (value first, account at the end). */
+    onGetStarted: () -> Unit = {},
+    /** v2.14: back from the onboarding's "I already have an account" / "I've confirmed". */
+    startOnSignIn: Boolean = false,
+    prefillEmail: String? = null,
+) {
     val scope = rememberCoroutineScope()
-    var stage by rememberSaveable { mutableIntStateOf(if (reason != null) SIGN_IN else WELCOME) }
+    var stage by rememberSaveable { mutableIntStateOf(if (reason != null || startOnSignIn) SIGN_IN else WELCOME) }
     var step by rememberSaveable { mutableIntStateOf(0) }
-    var email by rememberSaveable { mutableStateOf("") }
+    var email by rememberSaveable { mutableStateOf(prefillEmail.orEmpty()) }
     var password by rememberSaveable { mutableStateOf("") }
     var name by rememberSaveable { mutableStateOf("") }
     var inviteText by rememberSaveable { mutableStateOf("") }
@@ -182,7 +189,7 @@ fun LoginScreen(reason: String? = null, onInviteCode: (String) -> Unit = {}, onS
 
     key(stage) {
         when (stage) {
-            WELCOME -> Welcome(error, onEmail = { go(SIGN_IN) }, onInvite = { go(INVITE) })
+            WELCOME -> Welcome(error, onStart = onGetStarted, onEmail = { go(SIGN_IN) }, onInvite = { go(INVITE) })
             SIGN_IN -> SignInForm(
                 email, { email = it }, password, { password = it }, busy, error, info,
                 onBack = { go(WELCOME) }, onSubmit = { signIn() }, onCreate = { go(CREATE) },
@@ -213,7 +220,7 @@ fun LoginScreen(reason: String? = null, onInviteCode: (String) -> Unit = {}, onS
 // ---------------------------------------------------------------------------------------------
 
 @Composable
-private fun Welcome(reason: String?, onEmail: () -> Unit, onInvite: () -> Unit) {
+private fun Welcome(reason: String?, onStart: () -> Unit, onEmail: () -> Unit, onInvite: () -> Unit) {
     val p = palette
     val dark = isDark(p)
     val glowA = if (dark) p.green.copy(alpha = 0.16f) else p.greenBg
@@ -255,8 +262,10 @@ private fun Welcome(reason: String?, onEmail: () -> Unit, onInvite: () -> Unit) 
             }
             if (reason != null) ErrorNote(reason)
             Spacer(Modifier.height(4.dp))
-            Box(Modifier.loginEnter(4)) { SolidPill("Continue with email", onEmail, icon = MailIcon) }
-            Box(Modifier.loginEnter(5)) { OutlinePill("I have a squad invite", onInvite, icon = TicketIcon) }
+            // v2.14: value first. "Get started" is the onboarding (the account is made at its end).
+            Box(Modifier.loginEnter(4)) { SolidPill("Get started", onStart, bg = p.ember, fg = p.onEmber) }
+            Box(Modifier.loginEnter(5)) { OutlinePill("I already have an account", onEmail, icon = MailIcon) }
+            Box(Modifier.loginEnter(6).fillMaxWidth(), contentAlignment = Alignment.Center) { TextLink("", "I have a squad invite", onInvite) }
         }
     }
 }

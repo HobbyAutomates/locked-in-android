@@ -93,6 +93,6 @@ object OnbStore {
     /** Clears the flow once it has been saved (keeps the device id and the local flags). */
     fun clearFlow() {
         if (!ready) return
-        prefs.edit().remove("answers").remove("first_log").remove("step").remove("pending").remove("pending_email").remove("squad_code").apply()
+        prefs.edit().remove("answers").remove("first_log").remove("step").remove("pending").remove("pending_email").apply()
     }
 }

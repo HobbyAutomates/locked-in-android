@@ -103,6 +103,32 @@ class AppViewModel : ViewModel() {
         get() = signedIn && loadedOnce && !onboardingSkipped &&
             (profile.weightKg == null || profile.heightCm == null || profile.dob == null)
 
+    // ---- v2.14 onboarding replay ----
+
+    /** A squad code typed during onboarding, joined by the shell once loaded. */
+    var pendingJoinCode by mutableStateOf<String?>(null)
+    /** Bumped when a buddy invite was asked for before the account existed (the shell shares it). */
+    var buddyInviteTick by mutableStateOf(0); private set
+
+    /**
+     * Saves an onboarding finished on this device (before sign-up, or before the email was
+     * confirmed) into the account that is now signed in. Runs at the start of every [refresh], so a
+     * killed app catches up on the next launch.
+     */
+    private suspend fun replayOnboarding() {
+        if (!com.sohum.bandlog.util.OnbStore.pending) return
+        val squad = com.sohum.bandlog.util.OnbStore.squadCode
+        try {
+            if (com.sohum.bandlog.data.OnbSync.replayIfPending()) {
+                Analytics.track("onboarding_v2_saved")
+                if (squad != null) { pendingJoinCode = squad; com.sohum.bandlog.util.OnbStore.squadCode = null }
+                if (com.sohum.bandlog.util.OnbStore.buddyIntent) buddyInviteTick++
+            }
+        } catch (e: AuthException) { throw e }
+        catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { android.util.Log.w("LockedIn", "Onboarding replay failed", e); error = "Couldn't save your plan yet (${e.message}). We'll try again." }
+    }
+
     // ---- Health Connect (Google Fit / Samsung Health) ----
     var healthConnected by mutableStateOf(false); private set
     var healthToday by mutableStateOf<com.sohum.bandlog.util.Health.Today?>(null); private set
@@ -543,6 +569,7 @@ class AppViewModel : ViewModel() {
         viewModelScope.launch {
             loading = true; error = null
             try {
+                replayOnboarding()
                 val t = Dates.today()
                 val from = Dates.addDays(t, -120)
                 coroutineScope {

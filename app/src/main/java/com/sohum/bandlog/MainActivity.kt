@@ -75,7 +75,7 @@ import com.sohum.bandlog.ui.components.Hair
 import com.sohum.bandlog.ui.components.Motion
 import com.sohum.bandlog.ui.log.LogScreen
 import com.sohum.bandlog.ui.login.LoginScreen
-import com.sohum.bandlog.ui.onboarding.OnboardingScreen
+import com.sohum.bandlog.ui.onboarding.OnboardingV2Screen
 import com.sohum.bandlog.ui.profile.GoalWeightScreen
 import com.sohum.bandlog.ui.profile.NutritionGoalsScreen
 import com.sohum.bandlog.ui.profile.PersonalDetailsScreen
@@ -107,6 +107,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Session.init(this)
+        com.sohum.bandlog.util.OnbStore.init(this) // v2.14 onboarding kept on the device until the account exists
         // v2.10: the WHO 2007 BMI-for-age table (res/raw) for the teen BMI card and safety flags.
         com.sohum.bandlog.util.Bmi.load(this)
         handleIntent(intent)
@@ -127,11 +128,12 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(Unit) { updateVm.checkOnce(); vm.localBurned = ThemePrefs.burned(this@MainActivity); vm.localRollover = ThemePrefs.rollover(this@MainActivity); vm.celebrationsOn = ThemePrefs.celebrations(this@MainActivity); if (vm.signedIn) { vm.refresh(); vm.refreshHealth(this@MainActivity) } }
                 Surface(Modifier.fillMaxSize(), color = palette.bg) {
                     when {
-                        !vm.signedIn -> LoginScreen(reason = vm.signOutReason, onInviteCode = { joinCode.value = it }, onSignedIn = { vm.onSignedIn() })
+                        !vm.signedIn -> SignedOut(vm) { joinCode.value = it }
                         // Hold the mark up for the moment between sign-in and the first profile read,
                         // so a brand-new account never flashes the empty tab shell.
                         !vm.loadedOnce && vm.error == null -> BootSplash()
-                        vm.needsOnboarding -> OnboardingScreen(vm, onDone = {}, onSkip = { vm.onboardingSkipped = true })
+                        // v2.14: a signed-in account without height / weight / birthday gets the new flow (no Save screen).
+                        vm.needsOnboarding -> OnboardingV2Screen(signedIn = true, onExit = { vm.onboardingSkipped = true }, onFinished = { vm.refresh() }, onSquadCode = { joinCode.value = it })
                         else -> MainShell(vm, updateVm, themeMode, openMealTick.intValue, openWrapTick.intValue, openWaterTick.intValue, joinCode.value, { joinCode.value = null }) { themeMode = it; ThemePrefs.set(this, it) }
                     }
                 }
@@ -178,6 +180,30 @@ class MainActivity : ComponentActivity() {
         const val OPEN_MEAL = "meal"
         const val OPEN_WRAP = "wrap"
         const val OPEN_WATER = "water"
+    }
+}
+
+/**
+ * v2.14 signed out: the welcome / sign-in screens, or the new onboarding (value first, before the
+ * account exists). A flow left half-way (or waiting on "confirm your email") reopens where it was.
+ */
+@Composable
+private fun SignedOut(vm: AppViewModel, onSquadCode: (String) -> Unit) {
+    var onboarding by rememberSaveable { mutableStateOf(com.sohum.bandlog.util.OnbStore.step > 0 && vm.signOutReason == null) }
+    var signInFirst by rememberSaveable { mutableStateOf(false) }
+    if (onboarding) {
+        OnboardingV2Screen(
+            signedIn = false,
+            onExit = { onboarding = false; com.sohum.bandlog.util.OnbStore.step = 0 },
+            onAccountReady = { vm.onSignedIn() },
+            onSignIn = { onboarding = false; signInFirst = true },
+            onSquadCode = onSquadCode,
+        )
+    } else {
+        LoginScreen(
+            reason = vm.signOutReason, onInviteCode = onSquadCode, onSignedIn = { vm.onSignedIn() },
+            onGetStarted = { onboarding = true }, startOnSignIn = signInFirst, prefillEmail = com.sohum.bandlog.util.OnbStore.pendingEmail,
+        )
     }
 }
 
@@ -270,6 +296,23 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
             page = null; log = null; tab = 1
             sq.joinByCode(joinCode, com.sohum.bandlog.util.Names.display(vm.profile.name, com.sohum.bandlog.data.Session.email, "Member"))
             onJoinHandled()
+        }
+    }
+    // v2.14: a squad code typed during onboarding, joined once the account and profile are ready.
+    LaunchedEffect(vm.pendingJoinCode, vm.loadedOnce) {
+        val code = vm.pendingJoinCode
+        if (code != null && vm.loadedOnce) {
+            vm.pendingJoinCode = null
+            page = null; log = null; tab = 1
+            sq.joinByCode(code, com.sohum.bandlog.util.Names.display(vm.profile.name, com.sohum.bandlog.data.Session.email, "Member"))
+        }
+    }
+    // v2.14: "Invite a buddy" tapped before the account existed: make the invite now and share it.
+    LaunchedEffect(vm.buddyInviteTick, vm.loadedOnce) {
+        if (vm.buddyInviteTick == 0 || !vm.loadedOnce || !com.sohum.bandlog.util.OnbStore.buddyIntent) return@LaunchedEffect
+        com.sohum.bandlog.util.OnbStore.buddyIntent = false
+        runCatching { com.sohum.bandlog.data.V214Api.buddyInvite() }.onSuccess { c ->
+            com.sohum.bandlog.ui.squad.shareInvite(ctx, "Be my Locked In buddy: we both log, the streak grows. ${com.sohum.bandlog.data.V214Api.buddyLink(c)} (code $c)")
         }
     }
     // v2.6 water: keep the reminder receiver's mirror current (today's total, goal, glass, window).
