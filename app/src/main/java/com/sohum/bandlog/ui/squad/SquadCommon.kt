@@ -75,9 +75,12 @@ fun timeAgo(iso: String): String = runCatching {
     }
 }.getOrDefault("")
 
-/** A squad's picture: the preset disc for its icon key, its uploaded photo, or a people mark on a gradient. */
+/**
+ * A squad's picture: its uploaded photo, else the icon (or a people mark) on the squad's mono
+ * texture (v2.14 brand: squads get a texture from [textureId]'s hash, never a colour).
+ */
 @Composable
-fun SquadIconView(icon: String?, seed: String, size: Dp, modifier: Modifier = Modifier, ring: Boolean = false, cover: String? = null) {
+fun SquadIconView(icon: String?, seed: String, size: Dp, modifier: Modifier = Modifier, ring: Boolean = false, cover: String? = null, textureId: String? = null) {
     val p = palette
     val ringMod = if (ring) Modifier.border(4.dp, p.ink, CircleShape).padding(6.dp) else Modifier
     Box(modifier.then(ringMod), contentAlignment = Alignment.Center) {
@@ -87,9 +90,13 @@ fun SquadIconView(icon: String?, seed: String, size: Dp, modifier: Modifier = Mo
             RemoteImage(url = cover, size = size, radius = size / 2, fallback = PeopleIcon)
         } else {
             val preset = SQUAD_ICONS.firstOrNull { it.key == icon }
-            val (from, to) = preset?.let { it.from to it.to } ?: AVATAR_GRADIENTS[(seed.hashCode() and 0x7fffffff) % AVATAR_GRADIENTS.size]
-            Box(Modifier.size(size).clip(CircleShape).background(Brush.linearGradient(listOf(from, to))), contentAlignment = Alignment.Center) {
-                Icon(preset?.icon ?: PeopleIcon, null, tint = Color.White, modifier = Modifier.size(size * 0.52f))
+            Box(
+                Modifier.size(size).clip(CircleShape).background(p.card2).squadTexture(textureId ?: seed, alpha = 0.2f, cell = (size.value / 6f).coerceIn(6f, 14f).dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(Modifier.size(size * 0.62f).background(p.card, CircleShape), contentAlignment = Alignment.Center) {
+                    Icon(preset?.icon ?: PeopleIcon, null, tint = p.ink, modifier = Modifier.size(size * 0.36f))
+                }
             }
         }
     }

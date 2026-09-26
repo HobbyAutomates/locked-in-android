@@ -155,7 +155,8 @@ fun SquadPage(sq: SquadViewModel, squad: Squad, initialTab: Int? = null, protein
         prefs.edit().putString("tab_${squad.id}", t.name).apply()
     }
     Column(Modifier.fillMaxSize().background(p.bg).statusBarsPadding()) {
-        Column(Modifier.background(p.card)) {
+        // v2.14: the header carries the squad's texture, faintly.
+        Column(Modifier.background(p.card).squadTexture(squad.id, alpha = 0.06f, cell = 12.dp)) {
             Row(Modifier.fillMaxWidth().padding(8.dp, 8.dp, 12.dp, 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(48.dp).clip(CircleShape).clickable { sq.close() }, contentAlignment = Alignment.Center) {
                     Icon(Icons.Outlined.ArrowBack, "Back", tint = p.ink, modifier = Modifier.size(24.dp))
@@ -163,7 +164,7 @@ fun SquadPage(sq: SquadViewModel, squad: Squad, initialTab: Int? = null, protein
                 // A single entry point to Members and invite: the name row and the people icon used to
                 // be two separate taps to the same place, so they're now one clickable row.
                 Row(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).clickable { sq.infoOpen = true }.padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    SquadIconView(squad.icon, squad.name, 40.dp, cover = squad.coverUrl)
+                    SquadIconView(squad.icon, squad.name, 40.dp, cover = squad.coverUrl, textureId = squad.id)
                     Spacer(Modifier.width(12.dp))
                     Text(squad.name, fontSize = 20.sp, fontWeight = FontWeight(800), color = p.ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
@@ -508,7 +509,7 @@ private fun LeaderboardTab(sq: SquadViewModel) {
         items(sq.leaders.withIndex().toList(), key = { it.value.userId }) { (i, r) ->
             val isMe = r.userId == me
             val already = r.userId in sq.sent
-            RankRow(i + 1, r.name, r.username, r.avatarPath, isMe = isMe, onClick = { sheetRow = LeaderRowWithRank(r, i + 1) }) {
+            RankRow(i + 1, r.name, r.username, r.avatarPath, isMe = isMe, onClick = { sheetRow = LeaderRowWithRank(r, i + 1) }, textureId = sq.openId) {
                 Flame(if (r.flames > 0) p.flame else p.muted, 20.dp)
                 Text(" ${r.flames}", fontSize = 17.sp, fontWeight = FontWeight(800), color = p.ink)
                 if (!isMe) {
@@ -571,13 +572,17 @@ internal fun RankRow(
     below: (@Composable () -> Unit)? = null,
     /** Leaderboard rows are tappable (opens the member's mini profile); challenge-board rows leave this unset. */
     onClick: (() -> Unit)? = null,
+    /** v2.14: the squad whose texture sits faintly under the row. */
+    textureId: String? = null,
     trailing: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit,
 ) {
     val p = palette
     val gold = Color(0xFFFFC53D)
     Row(
         Modifier.fillMaxWidth().shadow(6.dp, RoundedCornerShape(22.dp), ambientColor = p.shadow, spotColor = p.shadow).background(p.card, RoundedCornerShape(22.dp))
-            .then(if (isMe) Modifier.border(1.5.dp, p.ink.copy(alpha = 0.25f), RoundedCornerShape(22.dp)) else Modifier)
+            .then(if (textureId != null) Modifier.clip(RoundedCornerShape(22.dp)).squadTexture(textureId, alpha = 0.05f, cell = 12.dp) else Modifier)
+            // v2.14 brand: "you" in a squad list is ember.
+            .then(if (isMe) Modifier.border(1.5.dp, p.ember.copy(alpha = 0.6f), RoundedCornerShape(22.dp)) else Modifier)
             .then(if (onClick != null) Modifier.pressable().clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -586,7 +591,10 @@ internal fun RankRow(
         Avatar(Api.avatarUrl(avatarPath), Names.initials(name), 52.dp)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(name + if (isMe) " (you)" else "", fontSize = 16.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(name, fontSize = 16.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                if (isMe) Text(" (you)", fontSize = 16.sp, fontWeight = FontWeight(700), color = p.ember, maxLines = 1)
+            }
             username?.let { Text("@$it", fontSize = 14.sp, color = p.muted, maxLines = 1) }
             below?.invoke()
         }
@@ -614,7 +622,7 @@ fun SquadInfoPage(sq: SquadViewModel, squad: Squad, onBack: () -> Unit) {
     Column(Modifier.fillMaxSize().background(p.bg).statusBarsPadding()) {
         FlowTopBar(null, onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(bottom = 40.dp).navigationBarsPadding(), horizontalAlignment = Alignment.CenterHorizontally) {
-            SquadIconView(squad.icon, squad.name, 150.dp, cover = squad.coverUrl)
+            SquadIconView(squad.icon, squad.name, 150.dp, cover = squad.coverUrl, textureId = squad.id)
             Spacer(Modifier.height(14.dp))
             if (renaming) {
                 Row(Modifier.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {

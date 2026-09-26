@@ -620,7 +620,7 @@ fun SquadScreen(vm: AppViewModel, onOpenProfile: () -> Unit) {
                 Rise(1 + i) {
                     Card(onClick = { sq.openSquad(s.id) }, padding = 14.dp) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            SquadIconView(s.icon, s.name, 52.dp, cover = s.coverUrl)
+                            SquadIconView(s.icon, s.name, 52.dp, cover = s.coverUrl, textureId = s.id)
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(s.name, fontSize = 16.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1)
@@ -667,7 +667,7 @@ private fun DiscoverSection(squads: List<com.sohum.bandlog.data.PublicSquad>, jo
             Card(padding = 12.dp) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (s.icon == null && s.coverUrl != null) com.sohum.bandlog.ui.components.RemoteImage(url = s.coverUrl, size = 52.dp, radius = 26.dp, fallback = PeopleIcon)
-                    else SquadIconView(s.icon, s.name, 52.dp)
+                    else SquadIconView(s.icon, s.name, 52.dp, textureId = s.id)
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(s.name, fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1)
