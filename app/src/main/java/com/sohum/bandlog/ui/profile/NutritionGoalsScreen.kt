@@ -250,7 +250,7 @@ fun NutritionGoalsScreen(vm: AppViewModel, onBack: () -> Unit, onOpenPersonal: (
                     val pl = Goals.plan(prof) ?: return@PillButton
                     // v2.13: the macros follow the diet mode (same calories); balanced = the plan as is.
                     val t = nvm.dietMode(prof).takeIf { it != com.sohum.bandlog.util.DietModes.BALANCED }
-                        ?.let { m -> com.sohum.bandlog.util.DietModes.targets(m, pl.targets.calories, pl.age, prof.weightKg, prof.gender, prof.weeklyWorkoutTarget) } ?: pl.targets
+                        ?.let { m -> com.sohum.bandlog.util.DietModes.targets(prof, pl.targets.calories.toDouble(), m) } ?: pl.targets
                     planNote = pl
                     generated = t
                     calories = t.calories.toString()

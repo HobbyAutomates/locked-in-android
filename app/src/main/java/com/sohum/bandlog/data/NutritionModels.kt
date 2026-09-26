@@ -111,7 +111,10 @@ data class FastingSession(
     }
 }
 
-/** One row of `bandlog.recipes`: items [{name, grams, kcal, protein_g, carbs_g, fat_g, fiber_g, food_id?, micros?}]. */
+/**
+ * One row of `bandlog.recipes` (the web's src/lib/recipes.ts Recipe): items
+ * [{name, grams, kcal, protein_g, carbs_g, fat_g, fiber_g, food_id, micros, per100?}] and per_serving.
+ */
 data class Recipe(
     val id: String?,
     val name: String,
@@ -130,133 +133,127 @@ data class Recipe(
             .put("cooked_weight_g", cookedWeightG ?: JSONObject.NULL)
             .put("items", JSONArray().apply {
                 items.forEach { i ->
-                    put(
-                        JSONObject().put("name", i.name).put("grams", i.grams).put("kcal", i.kcal).put("protein_g", i.protein)
-                            .put("carbs_g", i.carbs).put("fat_g", i.fat).put("fiber_g", i.fiber)
-                            .put("food_id", i.foodId ?: JSONObject.NULL).put("micros", JSONObject(i.micros)),
-                    )
+                    val o = JSONObject().put("name", i.name).put("grams", i.grams).put("kcal", i.kcal).put("protein_g", i.protein)
+                        .put("carbs_g", i.carbs).put("fat_g", i.fat).put("fiber_g", i.fiber ?: 0.0)
+                        .put("food_id", i.foodId ?: JSONObject.NULL).put("micros", JSONObject(i.micros))
+                    i.per100?.let { p -> o.put("per100", JSONObject().put("kcal", p.kcal).put("protein_g", p.protein).put("carbs_g", p.carbs).put("fat_g", p.fat).put("micros", JSONObject(p.micros))) }
+                    put(o)
                 }
             })
-            .put("per_serving", JSONObject().put("grams", ps.grams).put("kcal", ps.kcal).put("protein_g", ps.protein).put("carbs_g", ps.carbs)
-                .put("fat_g", ps.fat).put("fiber_g", ps.fiber).put("micros", JSONObject(ps.micros)))
+            .put("per_serving", JSONObject().put("kcal", ps.kcal).put("protein_g", ps.protein).put("carbs_g", ps.carbs)
+                .put("fat_g", ps.fat).put("fiber_g", ps.fiber).put("grams", ps.grams).put("micros", JSONObject(ps.micros)))
             .put("note", note.ifBlank { JSONObject.NULL })
     }
 
-    /** One serving as a meal row, named after the recipe (source "table": the DB only allows table / estimated / scan). */
-    fun servingItem(count: Double = 1.0): MealItem {
-        val ps = perServing
-        return MealItem(
-            foodId = null, name = name, grams = Math.round(ps.grams * count * 10) / 10.0,
-            calories = ps.kcal * count, proteinG = ps.protein * count, carbsG = ps.carbs * count, fatG = ps.fat * count,
-            source = "table", confidence = 1.0,
-            micros = (ps.micros + (if (ps.fiber > 0) mapOf("fiber_g" to ps.fiber) else emptyMap())).mapValues { it.value * count },
-            unit = "serving", servings = count,
-            sourceInfo = SourceInfo("recipe", "Your recipe", "Worked out from the ingredients you added, divided by ${com.sohum.bandlog.ui.today.fmt(servings)} servings."),
-        )
-    }
+    /** "Log a serving": [count] servings as one meal item named after the recipe (unit "recipe"). */
+    fun servingItem(count: Double = 1.0): MealItem = Recipes.mealItem(name, perServing, count).copy(
+        sourceInfo = SourceInfo("recipe", "Your recipe", "Worked out from the ingredients you added, divided by ${com.sohum.bandlog.ui.today.fmt(servings)} servings."),
+    )
 
     companion object {
         fun from(o: JSONObject): Recipe {
             val arr = o.optJSONArray("items") ?: JSONArray()
             val items = (0 until arr.length()).mapNotNull { i ->
                 val x = arr.optJSONObject(i) ?: return@mapNotNull null
+                val p = x.optJSONObject("per100")?.let { pp ->
+                    Recipes.Per100(pp.optDouble("kcal", 0.0), pp.optDouble("protein_g", 0.0), pp.optDouble("carbs_g", 0.0), pp.optDouble("fat_g", 0.0), MealItem.micros(pp.optJSONObject("micros")))
+                }
                 Recipes.Ingredient(
                     name = x.optString("name"), grams = x.optDouble("grams", 0.0), kcal = x.optDouble("kcal", x.optDouble("calories", 0.0)),
                     protein = x.optDouble("protein_g", 0.0), carbs = x.optDouble("carbs_g", 0.0), fat = x.optDouble("fat_g", 0.0),
-                    fiber = x.optDouble("fiber_g", 0.0).takeIf { !it.isNaN() } ?: 0.0,
-                    foodId = x.strOrNull("food_id"), micros = MealItem.micros(x.optJSONObject("micros")),
+                    fiber = x.dblOrNull("fiber_g"), foodId = x.strOrNull("food_id"), micros = MealItem.micros(x.optJSONObject("micros")), per100 = p,
                 )
             }
             return Recipe(
-                id = o.strOrNull("id"), name = o.optString("name"), servings = o.dblOrNull("servings") ?: 1.0,
-                cookedWeightG = o.dblOrNull("cooked_weight_g"), items = items, note = o.strOrNull("note").orEmpty(),
+                id = o.strOrNull("id"), name = o.optString("name").ifBlank { "Recipe" }, servings = (o.dblOrNull("servings") ?: 1.0).takeIf { it > 0 } ?: 1.0,
+                cookedWeightG = o.dblOrNull("cooked_weight_g")?.takeIf { it > 0 }, items = items, note = o.strOrNull("note").orEmpty(),
                 updatedAt = o.optString("updated_at"),
             )
         }
     }
 }
 
-/** One dish from `/api/scan-menu`. Ranges are per portion; either end may be missing on an older server. */
+/**
+ * One dish from `POST /api/scan-menu` (the web's src/lib/menuScan.ts MenuDish): ranges per portion,
+ * the server's diet-mode check and best pick.
+ */
 data class MenuDish(
     val name: String,
-    val portion: String,
+    val description: String = "",
+    val section: String? = null,
+    /** "1 plate (about 350 g)". */
+    val portion: String = "1 serving",
+    val grams: Double = 0.0,
     val kcalLow: Double,
     val kcalHigh: Double,
     val proteinLow: Double,
     val proteinHigh: Double,
-    val carbsG: Double?,
-    val fatG: Double?,
+    val carbsG: Double = 0.0,
+    val fatG: Double = 0.0,
     /** high | medium | low */
-    val confidence: String,
-    val bestPick: Boolean,
-    val why: String,
-    val grams: Double?,
+    val confidence: String = "medium",
+    /** One line on how sure the estimate is and why. */
+    val why: String = "",
+    val veg: Boolean? = null,
+    val price: String? = null,
+    val fitsDiet: Boolean = true,
+    /** Why it doesn't fit the diet mode ("meat", "egg"…). */
+    val dietConflicts: List<String> = emptyList(),
+    val score: Double = 0.0,
+    val bestPick: Boolean = false,
 ) {
-    val kcalMid: Double get() = (kcalLow + kcalHigh) / 2
-    val proteinMid: Double get() = (proteinLow + proteinHigh) / 2
+    private fun jsRound(v: Double) = kotlin.math.floor(v + 0.5)
+    val midKcal: Double get() = jsRound((kcalLow + kcalHigh) / 2)
+    val midProtein: Double get() = jsRound((proteinLow + proteinHigh) / 2 * 10) / 10
 
-    /** The dish as one meal row at the middle of its ranges (an AI estimate). */
+    /** A tapped dish as a meal item: the middle of each range, an AI estimate (restaurant portion). Same maths as the web's dishMealItem. */
     fun toMealItem(): MealItem {
-        val kcal = kcalMid
-        val p = proteinMid
-        val c = carbsG ?: ((kcal - p * 4 - (fatG ?: kcal * 0.3 / 9) * 9) / 4).coerceAtLeast(0.0)
-        val f = fatG ?: (kcal * 0.3 / 9)
+        val kcal = midKcal
+        val protein = midProtein
+        // Carbs and fat scaled so the macros agree with the mid calories when the model's pair is off.
+        val macroKcal = protein * 4 + carbsG * 4 + fatG * 9
+        val k = if (macroKcal > 0) maxOf(0.0, kcal - protein * 4) / maxOf(1.0, carbsG * 4 + fatG * 9) else 0.0
         return MealItem(
-            foodId = null, name = name, grams = grams ?: 0.0, calories = Math.round(kcal).toDouble(), proteinG = Math.round(p * 10) / 10.0,
-            carbsG = Math.round(c * 10) / 10.0, fatG = Math.round(f * 10) / 10.0, source = "estimated",
-            confidence = when (confidence) { "high" -> 0.9; "medium" -> 0.6; else -> 0.3 },
-            sourceInfo = SourceInfo("estimate", "AI estimate from a menu", "Estimated by the AI from the dish name on the menu and a typical restaurant portion."),
+            foodId = null, name = name, grams = if (grams > 0) grams else maxOf(100.0, jsRound(kcal / 1.8)),
+            calories = kcal, proteinG = protein, carbsG = jsRound(carbsG * k * 10) / 10, fatG = jsRound(fatG * k * 10) / 10,
+            source = "estimated", confidence = when (confidence) { "high" -> 0.85; "low" -> 0.35; else -> 0.6 },
+            unit = "g", servings = null, cookedIn = "restaurant",
         )
     }
 
     companion object {
-        /** A range from "kcal_low"/"kcal_high", "kcal_min"/"kcal_max", a [lo, hi] array, or one number. */
-        private fun range(o: JSONObject, vararg bases: String): Pair<Double, Double>? {
-            for (b in bases) {
-                val lo = o.dblOrNull("${b}_low") ?: o.dblOrNull("${b}_min")
-                val hi = o.dblOrNull("${b}_high") ?: o.dblOrNull("${b}_max")
-                if (lo != null && hi != null) return minOf(lo, hi) to maxOf(lo, hi)
-                o.optJSONArray("${b}_range")?.let { a -> if (a.length() >= 2) return minOf(a.optDouble(0), a.optDouble(1)) to maxOf(a.optDouble(0), a.optDouble(1)) }
-                o.optJSONObject("${b}_range")?.let { r -> val l = r.dblOrNull("low") ?: r.dblOrNull("min"); val h = r.dblOrNull("high") ?: r.dblOrNull("max"); if (l != null && h != null) return l to h }
-                val one = o.dblOrNull(b) ?: lo ?: hi
-                if (one != null) return one to one
-            }
-            return null
-        }
-
         fun from(o: JSONObject): MenuDish? {
-            val name = (o.strOrNull("name") ?: o.strOrNull("dish"))?.trim() ?: return null
-            val kcal = range(o, "kcal", "calories") ?: return null
-            val protein = range(o, "protein", "protein_g") ?: (0.0 to 0.0)
-            val conf = when (val c = o.opt("confidence")) {
-                is Number -> if (c.toDouble() >= 0.8) "high" else if (c.toDouble() >= 0.5) "medium" else "low"
-                is String -> c.lowercase().takeIf { it in setOf("high", "medium", "low") } ?: "medium"
-                else -> "medium"
-            }
+            val name = o.strOrNull("name")?.trim() ?: return null
+            val kh = o.dblOrNull("kcal_high") ?: o.dblOrNull("kcal") ?: return null
+            val kl = o.dblOrNull("kcal_low") ?: kh
+            val ph = o.dblOrNull("protein_high") ?: o.dblOrNull("protein_g") ?: 0.0
+            val pl = o.dblOrNull("protein_low") ?: ph
+            val conflicts = o.optJSONArray("diet_conflicts")?.let { a -> (0 until a.length()).map { a.optString(it) }.filter { it.isNotBlank() } } ?: emptyList()
             return MenuDish(
-                name = name,
-                portion = o.strOrNull("portion") ?: o.strOrNull("serving") ?: "1 portion",
-                kcalLow = kcal.first, kcalHigh = kcal.second,
-                proteinLow = protein.first, proteinHigh = protein.second,
-                carbsG = o.dblOrNull("carbs_g") ?: o.dblOrNull("carbs"),
-                fatG = o.dblOrNull("fat_g") ?: o.dblOrNull("fat"),
-                confidence = conf,
-                bestPick = o.optBoolean("best_pick", o.optBoolean("best", false)),
-                why = o.strOrNull("why") ?: o.strOrNull("reason") ?: o.strOrNull("note").orEmpty(),
-                grams = o.dblOrNull("grams"),
+                name = name, description = o.strOrNull("description").orEmpty(), section = o.strOrNull("section"),
+                portion = o.strOrNull("portion") ?: "1 serving", grams = o.dblOrNull("grams") ?: 0.0,
+                kcalLow = minOf(kl, kh), kcalHigh = maxOf(kl, kh), proteinLow = minOf(pl, ph), proteinHigh = maxOf(pl, ph),
+                carbsG = o.dblOrNull("carbs_g") ?: 0.0, fatG = o.dblOrNull("fat_g") ?: 0.0,
+                confidence = o.strOrNull("confidence")?.lowercase()?.takeIf { it == "high" || it == "low" || it == "medium" } ?: "medium",
+                why = o.strOrNull("why").orEmpty(),
+                veg = if (!o.has("veg") || o.isNull("veg")) null else o.optBoolean("veg"),
+                price = o.strOrNull("price"),
+                fitsDiet = !o.has("fits_diet") || o.optBoolean("fits_diet", true),
+                dietConflicts = conflicts,
+                score = o.dblOrNull("score") ?: 0.0,
+                bestPick = o.optBoolean("best_pick", false),
             )
         }
     }
 }
 
-/** The `/api/scan-menu` result. */
-data class MenuScan(val id: String?, val dishes: List<MenuDish>, val note: String, val restaurant: String?) {
+/** The `/api/scan-menu` result (kind "menu"); [id] is null until schema_v36 lets the server save it. */
+data class MenuScan(val id: String?, val dishes: List<MenuDish>, val note: String, val restaurant: String?, val dietMode: String?) {
     companion object {
         fun from(o: JSONObject): MenuScan {
-            val arr = o.optJSONArray("dishes") ?: o.optJSONArray("items") ?: JSONArray()
+            val arr = o.optJSONArray("dishes") ?: JSONArray()
             val dishes = (0 until arr.length()).mapNotNull { arr.optJSONObject(it)?.let { d -> MenuDish.from(d) } }
-            // No best pick flagged by the server: nothing is marked (the UI never invents one).
-            return MenuScan(o.strOrNull("id") ?: o.strOrNull("scan_id"), dishes, o.strOrNull("note") ?: o.strOrNull("summary").orEmpty(), o.strOrNull("restaurant"))
+            return MenuScan(o.strOrNull("id"), dishes, o.strOrNull("note").orEmpty(), o.strOrNull("restaurant"), o.strOrNull("diet_mode"))
         }
     }
 }

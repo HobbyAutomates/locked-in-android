@@ -44,14 +44,6 @@ import com.sohum.bandlog.util.WhatToEat
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
-/**
- * The dish the app points at when the server didn't flag one: diet-mode OK, fits what's left,
- * most protein per kcal (the same idea as What should I eat?).
- */
-fun localBestPick(dishes: List<MenuDish>, remaining: WhatToEat.Remaining, dietMode: String): MenuDish? =
-    dishes.filter { DietModes.allows(dietMode, it.name) && it.kcalMid > 0 }
-        .maxByOrNull { d -> WhatToEat.W_PROTEIN * minOf(1.0, d.proteinMid / d.kcalMid * 100 / WhatToEat.FULL_PROTEIN_PER_100_KCAL) + WhatToEat.W_FIT * WhatToEat.fitScore(d.kcalMid, remaining.kcal) }
-
 private fun range(lo: Double, hi: Double): String {
     val a = lo.roundToInt(); val b = hi.roundToInt()
     return if (a == b) "$a" else "$a–$b"
@@ -59,15 +51,14 @@ private fun range(lo: Double, hi: Double): String {
 
 /** §10 the menu result: each dish with its kcal / protein range per portion, confidence, the best pick, one-tap log. */
 @Composable
-fun MenuResultView(scan: MenuScan, remaining: WhatToEat.Remaining, dietMode: String, localPick: Boolean = true, onLog: suspend (MenuDish) -> Boolean) {
+fun MenuResultView(scan: MenuScan, remaining: WhatToEat.Remaining?, onLog: suspend (MenuDish) -> Boolean) {
     val p = palette
     val scope = rememberCoroutineScope()
     var logged by remember(scan) { mutableStateOf(setOf<String>()) }
     var busy by remember(scan) { mutableStateOf<String?>(null) }
-    val serverPick = scan.dishes.any { it.bestPick }
-    val pick = if (serverPick || !localPick) null else localBestPick(scan.dishes, remaining, dietMode)
-    // Best picks first, then the rest as the menu lists them.
-    val ordered = scan.dishes.sortedByDescending { it.bestPick || it === pick }
+    // The server flags the best pick (diet-mode fit, protein per kcal, fits what's left, confidence); it goes first.
+    val ordered = scan.dishes.sortedByDescending { it.bestPick }
+    val mode = scan.dietMode?.takeIf { DietModes.isMode(it) } ?: DietModes.BALANCED
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Card {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -77,18 +68,21 @@ fun MenuResultView(scan: MenuScan, remaining: WhatToEat.Remaining, dietMode: Str
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Text(scan.restaurant ?: "From the menu", fontSize = 17.sp, fontWeight = FontWeight(800), color = p.ink)
-                    Text("${scan.dishes.size} dish${if (scan.dishes.size == 1) "" else "es"}" + if (localPick) " · ${remaining.kcal.roundToInt()} kcal and ${remaining.protein.roundToInt()} g protein left today" else "", fontSize = 12.sp, color = p.muted)
+                    Text("${scan.dishes.size} dish${if (scan.dishes.size == 1) "" else "es"}" + (remaining?.let { " · ${it.kcal.roundToInt()} kcal and ${it.protein.roundToInt()} g protein left today" } ?: ""), fontSize = 12.sp, color = p.muted)
                 }
             }
             if (scan.note.isNotBlank()) Text(scan.note, fontSize = 13.sp, color = p.muted, lineHeight = 18.sp, modifier = Modifier.padding(top = 8.dp))
             Text("Restaurant portions vary a lot, so these are ranges per portion. Logging uses the middle.", fontSize = 11.sp, color = p.muted, lineHeight = 15.sp, modifier = Modifier.padding(top = 6.dp))
+        }
+        if (scan.dishes.isNotEmpty() && scan.dishes.none { it.bestPick } && mode != DietModes.BALANCED) Card {
+            Text("Nothing here fits your ${DietModes.byKey(mode).label.lowercase()} mode.", fontSize = 13.sp, color = p.ink)
         }
         if (scan.dishes.isEmpty()) Card { Text("Couldn't read any dishes. Try a sharper, closer photo of one menu page.", fontSize = 14.sp, color = p.ink) }
         else Card(padding = 0.dp) {
             Column(Modifier.padding(horizontal = 16.dp)) {
                 ordered.forEachIndexed { i, d ->
                     if (i > 0) Hair()
-                    val best = d.bestPick || d === pick
+                    val best = d.bestPick
                     val (cfg, cbg) = confidenceColors(d.confidence)
                     val done = d.name in logged
                     Row(
@@ -99,13 +93,17 @@ fun MenuResultView(scan: MenuScan, remaining: WhatToEat.Remaining, dietMode: Str
                     ) {
                         Column(Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                if (best) Tag(if (d.bestPick) "Best pick" else "Our pick", p.green, p.greenBg)
+                                if (best) Tag("Best pick", p.green, p.greenBg)
                                 Tag(d.confidence.replaceFirstChar { it.uppercase() }, cfg, cbg)
                             }
                             Text(d.name, fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink, modifier = Modifier.padding(top = 4.dp))
                             Text("${d.portion} · ${range(d.kcalLow, d.kcalHigh)} kcal · ${range(d.proteinLow, d.proteinHigh)} g protein", fontSize = 12.sp, color = p.muted)
                             if (d.why.isNotBlank()) Text(d.why, fontSize = 12.sp, color = if (best) p.green else p.muted, lineHeight = 16.sp)
-                            if (!DietModes.allows(dietMode, d.name)) Text("Outside your ${DietModes.byKey(dietMode).label.lowercase()} mode", fontSize = 11.sp, color = p.orange)
+                            if (!d.fitsDiet) Text(
+                                "Has " + d.dietConflicts.joinToString(", ") { c -> if (c == "roots") "roots / onion / garlic" else c }.ifBlank { "something" } + " · outside your ${DietModes.byKey(mode).label.lowercase()} mode",
+                                fontSize = 11.sp, color = p.orange,
+                            )
+                            d.price?.let { Text(it, fontSize = 11.sp, color = p.muted) }
                         }
                         Box(
                             Modifier.size(48.dp).clickable(enabled = busy == null && !done, onClickLabel = "Log ${d.name}") {

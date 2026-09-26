@@ -202,7 +202,7 @@ fun MealForm(
             items = items.map { it ->
                 val i = saved.indexOfFirst { s -> s.id != null && s.id == it.id }
                 val f = found.getOrNull(i)
-                if (i < 0 || f == null || it.sourceInfo != null) it else it.copy(sourceInfo = f.first, variants = f.second)
+                if (i < 0 || f == null || it.sourceInfo != null || com.sohum.bandlog.util.Recipes.isRecipeItem(it.unit)) it else it.copy(sourceInfo = f.first, variants = f.second)
             }
         }
     }
@@ -478,7 +478,7 @@ fun MealForm(
         val key = "${row.foodId}|${row.name}"
         SourceSheet(
             name = row.name,
-            info = row.sourceInfo ?: Sources.fallback(row),
+            info = row.sourceInfo ?: (if (com.sohum.bandlog.util.Recipes.isRecipeItem(row.unit)) com.sohum.bandlog.data.SourceInfo("recipe", "Your recipe", "Worked out from the ingredients of your own recipe.") else Sources.fallback(row)),
             confidence = Sources.confidenceLabel(row.confidence, row.source),
             per100 = Sources.per100Note(row.grams, row.calories, row.proteinG, row.carbsG, row.fatG),
             variants = row.variants, currentId = row.foodId,
@@ -486,7 +486,7 @@ fun MealForm(
             onDismiss = { infoIdx = null },
             onPickVariant = { v -> pickVariant(idx, v); infoIdx = null },
             onPickAnother = { infoIdx = null; swapIdx = idx; text = row.name.removeSuffix(" (restaurant)") },
-            facts = com.sohum.bandlog.util.ItemInfo.facts(row.grams, row.confidence, row.source, row.foodId, row.sourceInfo?.kind),
+            facts = com.sohum.bandlog.util.ItemInfo.Row(row.grams, row.foodId, row.source, row.confidence, row.unit, row.cookedIn),
             macros = com.sohum.bandlog.ui.components.ItemMacros(row.grams, row.calories, row.proteinG, row.carbsG, row.fatG),
             onReport = {
                 reported = reported + key
@@ -759,7 +759,7 @@ private fun PresetGrid(
     dietMode: String = com.sohum.bandlog.util.DietModes.BALANCED,
 ) {
     val p = palette
-    val presets = remember(vm.presets, dietMode) { vm.presets.filter { com.sohum.bandlog.util.DietModes.allows(dietMode, it.label + " " + it.foodName, it.category) } }
+    val presets = remember(vm.presets, dietMode) { vm.presets.filter { com.sohum.bandlog.util.DietModes.allows(dietMode, it.label + " " + it.foodName) } }
     val filtered = presets.size < vm.presets.size
     val top = remember(presets, use) {
         presets.filter { it.category != "fat" && (use[it.foodId] ?: 0) > 0 }.sortedByDescending { use[it.foodId] ?: 0 }.distinctBy { it.foodId }.take(8)
@@ -1037,8 +1037,8 @@ private fun PlateRow(
     // v2.13: the full name wraps to two lines and a tap shows all of it; a line under the macros says
     // where the numbers came from, how sure we are and the likely gram range (the ⓘ has the detail).
     var expanded by remember { mutableStateOf(false) }
-    val facts = remember(item.grams, item.confidence, item.source, item.foodId, item.sourceInfo) {
-        com.sohum.bandlog.util.ItemInfo.facts(item.grams, item.confidence, item.source, item.foodId, item.sourceInfo?.kind)
+    val facts = remember(item.grams, item.confidence, item.source, item.foodId, item.unit, item.cookedIn) {
+        com.sohum.bandlog.util.ItemInfo.Row(item.grams, item.foodId, item.source, item.confidence, item.unit, item.cookedIn)
     }
     Column(Modifier.padding(vertical = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1072,10 +1072,11 @@ private fun PlateRow(
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                val (dot, _) = com.sohum.bandlog.ui.nutrition.confidenceColors(facts.level)
+                val level = com.sohum.bandlog.util.ItemInfo.level(facts)
+                val (dot, _) = com.sohum.bandlog.ui.nutrition.confidenceColors(level.lowercase())
                 Box(Modifier.size(6.dp).background(dot, CircleShape))
                 Text(
-                    "  ${facts.kind} · ${facts.level.replaceFirstChar { it.uppercase() }} · likely ${com.sohum.bandlog.util.ItemInfo.rangeLabel(facts)}",
+                    "  ${com.sohum.bandlog.util.ItemInfo.ORIGIN_LABEL.getValue(com.sohum.bandlog.util.ItemInfo.origin(facts))} · $level · likely ${com.sohum.bandlog.util.ItemInfo.gramRangeText(facts)}",
                     fontSize = 11.sp, color = p.muted, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
             }

@@ -78,7 +78,7 @@ object NutritionApi {
     /** Stores or updates the week's check-in (unique user + week_start). */
     suspend fun upsertCheckin(c: WeeklyCheckin): WeeklyCheckin = withContext(Dispatchers.IO) {
         val body = run(
-            rest("weekly_checkins?on_conflict=user_id,week_start").header("Prefer", "resolution=merge-duplicates,return=representation")
+            rest("weekly_checkins?on_conflict=user_id,week_start").header("Prefer", "resolution=ignore-duplicates,return=representation")
                 .post(json(c.toJson(uid()).toString())).build(),
             "Save check-in",
         )
@@ -142,15 +142,17 @@ object NutritionApi {
      * left today. Calls the web server's POST /api/scan-menu with the user's bearer token, the same
      * way [Api] calls /api/scan-label. A 404 (route not deployed yet) is [NotYetAvailable].
      */
-    suspend fun scanMenu(jpegBase64: String, note: String, remaining: JSONObject, dietMode: String): MenuScan = withContext(Dispatchers.IO) {
+    suspend fun scanMenu(jpegBase64: String, note: String, remaining: JSONObject, dietMode: String, thumbBase64: String? = null): MenuScan = withContext(Dispatchers.IO) {
         SupabaseAuth.ensureFresh()
         val token = Session.accessToken ?: throw AuthException("Not signed in")
         val apiBase = BuildConfig.API_BASE.trimEnd('/')
         if (apiBase.isBlank()) throw ApiException("API_BASE is not set in this build")
         val payload = JSONObject().put("image", jpegBase64).put("media_type", "image/jpeg").put("note", note)
             .put("remaining", remaining).put("diet_mode", dietMode)
+        // A <= 320 px JPEG for the History list (scan-photos/<uid>/<id>.jpg), like the other scans.
+        if (thumbBase64 != null) payload.put("thumb", thumbBase64)
         val r = Request.Builder().url("$apiBase/api/scan-menu").header("Authorization", "Bearer $token").post(json(payload.toString())).build()
-        val c = client.newBuilder().callTimeout(120, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS).build()
+        val c = client.newBuilder().callTimeout(180, TimeUnit.SECONDS).readTimeout(180, TimeUnit.SECONDS).build()
         val body = c.newCall(r).execute().use { res ->
             val b = res.body?.string().orEmpty()
             if (res.code == 404 || res.code == 405) throw NotYetAvailable()

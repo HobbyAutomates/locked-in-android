@@ -1,63 +1,73 @@
 package com.sohum.bandlog.util
 
+import kotlin.math.floor
 import kotlin.math.max
-import kotlin.math.roundToInt
 
 /**
- * v2.13 §14 edit-meal item cards: the richer ⓘ facts about one logged row — where the numbers came
- * from (AI estimate vs a database match), the confidence with a one-line why, a gram range and the
- * row's own macros. Pure (twin of the web's src/lib/itemInfo.ts).
+ * v2.13 §14 edit-meal item cards — a port of the web's src/lib/itemInfo.ts: what the richer ⓘ
+ * sheet and the item card say about one row — AI estimate vs database match, the confidence with a
+ * one-line why, and a gram range.
  */
 object ItemInfo {
-    data class Facts(
-        /** "AI estimate" | "Database match" | "Nutrition label" | "Your recipe". */
-        val kind: String,
-        /** "high" | "medium" | "low". */
-        val level: String,
-        val why: String,
-        val gramsLow: Int,
-        val gramsHigh: Int,
+    data class Row(
+        val grams: Double,
+        val foodId: String?,
+        val source: String,
+        val confidence: Double?,
+        val unit: String? = null,
+        val cookedIn: String? = null,
+        val gramsLow: Double? = null,
+        val gramsHigh: Double? = null,
     )
 
-    /** How far the true amount could plausibly be from the logged grams, by confidence. */
-    fun spread(level: String): Double = when (level) { "high" -> 0.10; "medium" -> 0.20; else -> 0.35 }
-
-    private fun round5(v: Double): Int = max(0, (v / 5).roundToInt() * 5)
-
-    fun level(confidence: Double?, source: String?): String = when (Sources.confidenceLabel(confidence, source)) { "High" -> "high"; "Medium" -> "medium"; else -> "low" }
-
-    /**
-     * [sourceKind] is the SourceInfo kind when known (ifct, usda, dish, custom, off, label, estimate, ai, recipe).
-     * An explicit [gramsLow]/[gramsHigh] (plate scans) wins over the confidence-based spread.
-     */
-    fun facts(grams: Double, confidence: Double?, source: String?, foodId: String?, sourceKind: String?, gramsLow: Double? = null, gramsHigh: Double? = null): Facts {
-        val lvl = level(confidence, source)
-        val kind = when {
-            sourceKind == "recipe" -> "Your recipe"
-            source == "scan" || sourceKind == "label" || sourceKind == "off" -> "Nutrition label"
-            source == "estimated" || foodId == null || sourceKind == "estimate" || sourceKind == "ai" -> "AI estimate"
-            else -> "Database match"
-        }
-        val why = when (kind) {
-            "Your recipe" -> "Worked out from your own ingredients and servings."
-            "Nutrition label" -> "Read off the pack's nutrition table, so the numbers are the brand's own."
-            "AI estimate" -> when (lvl) {
-                "high" -> "The AI was sure what this is; the amount is the main guess."
-                "medium" -> "The AI matched a typical recipe; oil and portion size can vary."
-                else -> "The AI wasn't sure what this is or how much. Worth a quick check."
-            }
-            else -> when (lvl) {
-                "high" -> "Matched a food-table row by name; only the amount is estimated."
-                "medium" -> "Matched a close food-table row; the exact recipe may differ."
-                else -> "A loose match in the food table. Pick the right one if it's off."
-            }
-        }
-        val s = spread(lvl)
-        val lo = gramsLow?.takeIf { gramsHigh != null && gramsHigh > it } ?: grams * (1 - s)
-        val hi = gramsHigh?.takeIf { gramsLow != null && it > gramsLow } ?: grams * (1 + s)
-        return Facts(kind, lvl, why, round5(lo), max(round5(hi), round5(lo)))
+    /** database | ai | scan | recipe */
+    fun origin(r: Row): String = when {
+        Recipes.isRecipeItem(r.unit) -> "recipe"
+        r.source == "scan" -> "scan"
+        r.source == "estimated" || r.foodId == null -> "ai"
+        else -> "database"
     }
 
-    /** "120–160 g". */
-    fun rangeLabel(f: Facts): String = if (f.gramsHigh <= f.gramsLow) "${f.gramsLow} g" else "${f.gramsLow}–${f.gramsHigh} g"
+    val ORIGIN_LABEL = mapOf("database" to "Database match", "ai" to "AI estimate", "scan" to "From the label", "recipe" to "Your recipe")
+
+    /** "High" | "Medium" | "Low". */
+    fun level(r: Row): String = if (origin(r) == "recipe") "High" else Sources.confidenceLabel(r.confidence, r.source)
+
+    /** One line on why the confidence is what it is. */
+    fun why(r: Row): String {
+        val o = origin(r)
+        val lvl = level(r)
+        return when (o) {
+            "recipe" -> "Worked out from your own recipe's ingredients."
+            "scan" -> "Read off the pack's nutrition table, so only the amount can differ."
+            "database" -> when {
+                r.cookedIn == "restaurant" -> "A food-table match with extra oil for a restaurant portion; the oil is the big unknown."
+                lvl == "High" -> "Matched to a row in the food table; only the amount is an estimate."
+                else -> "Matched to a similar food in the table; the exact dish may differ."
+            }
+            else -> when (lvl) {
+                "High" -> "A common dish the AI recognised clearly; home recipes still vary a little."
+                "Medium" -> "A typical recipe: oil, ghee and portion size can move it either way."
+                else -> "Hard to tell from the words or the photo, so worth a quick check."
+            }
+        }
+    }
+
+    private fun round5(v: Double): Int = max(0, (floor(v / 5 + 0.5) * 5).toInt())
+
+    /** How far the amount could be off, as a share of the grams, by confidence (no model range). */
+    val RANGE_SHARE = mapOf("High" to 0.1, "Medium" to 0.25, "Low" to 0.4)
+
+    data class Range(val low: Int, val high: Int, val fromModel: Boolean)
+
+    /** A likely gram range: the model's own when the row came with one (plate photos), else ± a share of the grams. */
+    fun gramRange(r: Row): Range {
+        val lo = r.gramsLow
+        val hi = r.gramsHigh
+        if (lo != null && hi != null && hi >= lo && hi > 0) return Range(round5(lo), round5(hi), true)
+        val share = if (origin(r) == "recipe") 0.1 else RANGE_SHARE.getValue(level(r))
+        return Range(round5(r.grams * (1 - share)), round5(r.grams * (1 + share)), false)
+    }
+
+    fun gramRangeText(r: Row): String { val g = gramRange(r); return if (g.low == g.high) "${g.low} g" else "${g.low}–${g.high} g" }
 }

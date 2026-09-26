@@ -111,7 +111,7 @@ fun DietModeSection(vm: AppViewModel) {
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f).alpha(if (allowed) 1f else 0.5f)) {
                         Text(m.label, fontSize = 15.sp, fontWeight = FontWeight(if (sel) 800 else 600), color = p.ink)
-                        Text(if (allowed) m.blurb else DietModes.TEEN_NOT_RECOMMENDED, fontSize = 12.sp, color = if (allowed) p.muted else p.orange, lineHeight = 16.sp)
+                        Text(if (allowed) m.short else DietModes.NOT_FOR_TEENS, fontSize = 12.sp, color = if (allowed) p.muted else p.orange, lineHeight = 16.sp)
                     }
                     Box(
                         Modifier.size(44.dp).clickable { science = m }.semantics { contentDescription = "The science behind ${m.label}" },
@@ -133,8 +133,7 @@ fun DietModeSection(vm: AppViewModel) {
             title = { Text("Switch to ${m.label}?", fontWeight = FontWeight(800), color = p.ink) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (t == null) Text("Add your weight and date of birth in Personal details first.", color = p.orange, fontSize = 14.sp)
-                    else {
+                    run {
                         Text("Calories stay at ${prof.calorieTarget} kcal.", color = p.muted, fontSize = 13.sp)
                         Compare("Protein", prof.proteinTargetG, t.protein)
                         Compare("Carbs", prof.carbTargetG, t.carbs)
@@ -146,7 +145,7 @@ fun DietModeSection(vm: AppViewModel) {
                 }
             },
             confirmButton = {
-                TextButton(enabled = t != null && !busy, onClick = {
+                TextButton(enabled = !busy, onClick = {
                     confirm = null
                     scope.launch {
                         busy = true
@@ -164,7 +163,7 @@ fun DietModeSection(vm: AppViewModel) {
             Spacer(Modifier.height(10.dp))
             Text("Source", fontSize = 12.sp, fontWeight = FontWeight(700), color = p.muted)
             Text(m.source, fontSize = 13.sp, color = p.muted, lineHeight = 18.sp)
-            if (m.adultsOnly) Text("Adults only. " + DietModes.TEEN_NOT_RECOMMENDED + ".", fontSize = 12.sp, fontWeight = FontWeight(600), color = p.orange, modifier = Modifier.padding(top = 8.dp))
+            if (m.adultsOnly) Text("Adults only. " + DietModes.NOT_FOR_TEENS + ".", fontSize = 12.sp, fontWeight = FontWeight(600), color = p.orange, modifier = Modifier.padding(top = 8.dp))
         }
     }
 }
@@ -207,7 +206,7 @@ private fun AdaptiveCard(vm: AppViewModel, nvm: NutritionViewModel) {
                 when {
                     c?.newTarget != null && c.applied -> "Applied this week: ${c.newTarget} kcal."
                     c != null -> c.reason
-                    r != null -> r.reason
+                    r != null -> if (r.ok) r.reason else r.missing
                     else -> "Needs 10 of the last 14 days logged and 4 weigh-ins."
                 },
                 fontSize = 12.sp, color = p.ink, lineHeight = 17.sp,

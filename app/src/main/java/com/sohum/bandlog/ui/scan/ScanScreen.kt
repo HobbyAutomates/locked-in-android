@@ -335,11 +335,12 @@ private fun ScanForm(
                     "menu" -> {
                         bmp ?: return@launch
                         val rem = nvm.remaining(vm)
-                        val remJson = org.json.JSONObject().put("kcal", rem.kcal.roundToInt()).put("protein_g", rem.protein.roundToInt())
-                            .put("carbs_g", rem.carbs.roundToInt()).put("fat_g", rem.fat.roundToInt())
+                        val remJson = org.json.JSONObject().put("kcal", rem.kcal.roundToInt()).put("protein", rem.protein.roundToInt())
+                            .put("carbs", rem.carbs.roundToInt()).put("fat", rem.fat.roundToInt())
                         try {
                             menu = com.sohum.bandlog.data.NutritionApi.scanMenu(
                                 withContext(Dispatchers.IO) { toJpegBase64(scaleForUpload(bmp, 1600), 85) }, note, remJson, nvm.dietMode(vm.profile),
+                                withContext(Dispatchers.IO) { runCatching { toJpegBase64(scaleForUpload(bmp, 320), 75) }.getOrNull() },
                             )
                         } catch (e: com.sohum.bandlog.data.NotYetAvailable) { menuUnavailable = true }
                     }
@@ -496,7 +497,7 @@ private fun ScanForm(
                     "Restaurant menu scan", "Snap a menu and see each dish's calories and protein, with the best pick for what you have left today.",
                 )
                 menu?.let { m ->
-                    MenuResultView(m, nvm.remaining(vm), nvm.dietMode(vm.profile)) { dish ->
+                    MenuResultView(m, nvm.remaining(vm)) { dish ->
                         vm.saveMeal(Dates.today(), "Menu: ${dish.name}", listOf(dish.toMealItem()), mealType = MealTypes.default(), method = "menu")
                     }
                 }
@@ -1596,7 +1597,7 @@ private fun ScanDetailPage(item: ScanHistoryItem, onLogged: () -> Unit, onLogSer
             o == null -> { LinearProgressIndicator(Modifier.fillMaxWidth(), color = p.ink, trackColor = p.track); Text("Opening…", fontSize = 12.sp, color = p.muted) }
             item.isPlate -> PhotoReview(PlateEstimate.from(o), null, readOnly = true)
             // v2.13: a saved restaurant-menu scan; + opens Add food with that dish on the plate.
-            item.kind == "menu" -> MenuResultView(com.sohum.bandlog.data.MenuScan.from(o), com.sohum.bandlog.util.WhatToEat.Remaining(0.0, 0.0, 0.0, 0.0), "balanced", localPick = false) { d -> onLogServing(d.toMealItem()); true }
+            item.kind == "menu" -> MenuResultView(com.sohum.bandlog.data.MenuScan.from(o), null) { d -> onLogServing(d.toMealItem()); true }
             else -> ReportView(LabelReport.from(o), onLogged = onLogged, onLogServing = onLogServing)
         }
     }

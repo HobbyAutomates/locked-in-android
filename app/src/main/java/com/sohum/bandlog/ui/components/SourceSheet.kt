@@ -96,7 +96,7 @@ fun SourceSheet(
     onPickAnother: (() -> Unit)?,
     onReport: () -> Unit,
     /** v2.13 (optional): AI estimate vs database match, confidence + why, the gram range and this row's macros. */
-    facts: com.sohum.bandlog.util.ItemInfo.Facts? = null,
+    facts: com.sohum.bandlog.util.ItemInfo.Row? = null,
     macros: ItemMacros? = null,
 ) {
     val p = palette
@@ -138,23 +138,26 @@ fun SourceSheet(
 /** v2.13: one row's own numbers, for the richer ⓘ sheet. */
 data class ItemMacros(val grams: Double, val kcal: Double, val protein: Double, val carbs: Double, val fat: Double)
 
-/** The top of the v2.13 ⓘ sheet: kind + confidence chips, the one-line why, the gram range and the row's macros. */
+/** The top of the v2.13 ⓘ sheet: origin + confidence chips, the one-line why, the gram range and the row's macros. */
 @Composable
-private fun FactsBlock(f: com.sohum.bandlog.util.ItemInfo.Facts, m: ItemMacros?) {
+private fun FactsBlock(r: com.sohum.bandlog.util.ItemInfo.Row, m: ItemMacros?) {
     val p = palette
-    val (fg, bg) = when (f.level) { "high" -> p.green to p.greenBg; "medium" -> p.orange to p.orangeBg; else -> p.red to p.redBg }
+    val origin = com.sohum.bandlog.util.ItemInfo.origin(r)
+    val level = com.sohum.bandlog.util.ItemInfo.level(r)
+    val (fg, bg) = when (level) { "High" -> p.green to p.greenBg; "Medium" -> p.orange to p.orangeBg; else -> p.red to p.redBg }
+    val ai = origin == "ai"
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.background(if (f.kind == "AI estimate") p.purpleBg else p.blueBg, RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 3.dp)) {
-            Text(f.kind, fontSize = 12.sp, fontWeight = FontWeight(700), color = if (f.kind == "AI estimate") p.purple else p.blue)
+        Box(Modifier.background(if (ai) p.purpleBg else p.blueBg, RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 3.dp)) {
+            Text(com.sohum.bandlog.util.ItemInfo.ORIGIN_LABEL.getValue(origin), fontSize = 12.sp, fontWeight = FontWeight(700), color = if (ai) p.purple else p.blue)
         }
         Box(Modifier.background(bg, RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 3.dp)) {
-            Text("${f.level.replaceFirstChar { it.uppercase() }} confidence", fontSize = 12.sp, fontWeight = FontWeight(700), color = fg)
+            Text("$level confidence", fontSize = 12.sp, fontWeight = FontWeight(700), color = fg)
         }
     }
-    Text(f.why, fontSize = 13.sp, color = p.ink, lineHeight = 18.sp, modifier = Modifier.padding(top = 6.dp, start = 2.dp))
+    Text(com.sohum.bandlog.util.ItemInfo.why(r), fontSize = 13.sp, color = p.ink, lineHeight = 18.sp, modifier = Modifier.padding(top = 6.dp, start = 2.dp))
     Spacer(Modifier.height(10.dp))
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Fact(Modifier.weight(1f), "Amount", m?.let { "${it.grams.roundToInt()} g" } ?: "—", "likely " + com.sohum.bandlog.util.ItemInfo.rangeLabel(f))
+        Fact(Modifier.weight(1f), "Amount", m?.let { "${it.grams.roundToInt()} g" } ?: "—", "likely " + com.sohum.bandlog.util.ItemInfo.gramRangeText(r))
         if (m != null) Fact(Modifier.weight(1f), "Energy", "${m.kcal.roundToInt()} kcal", "P ${one(m.protein)} · C ${one(m.carbs)} · F ${one(m.fat)} g")
     }
     Spacer(Modifier.height(12.dp))

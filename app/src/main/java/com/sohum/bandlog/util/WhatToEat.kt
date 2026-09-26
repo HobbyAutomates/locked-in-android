@@ -1,111 +1,129 @@
 package com.sohum.bandlog.util
 
+import com.sohum.bandlog.data.FoodPreset
+import com.sohum.bandlog.data.MealItem
+import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.roundToInt
 
 /**
- * v2.13 §6 "What should I eat?" — pure ranking, the twin of the web's src/lib/whatToEat.ts.
+ * v2.13 §6 "What should I eat?" — a line-for-line port of the web's src/lib/whatToEat.ts. Ranks the
+ * Indian presets for what's left today:
  *
- * Candidates are Indian dishes from the presets / foods DB at their default portion. Each is scored
- *   0.5 × protein per 100 kcal  (normalised: 10 g per 100 kcal or more = 1)
- * + 0.3 × fits the remaining kcal (1 inside it, falling to 0 at twice it)
- * + 0.2 × closeness to this time of day's meal type (see [mealFit]).
- * The diet mode's food filter drops anything it rules out (suggestions only; logging is never blocked).
+ *   score = 0.5 × protein density + 0.3 × fits the kcal left + 0.2 × suits this meal time
+ *
+ *   protein density  protein g per 100 kcal of the portion, divided by 12 and capped at 1.
+ *   fits             1 when the portion's kcal is inside what's left; otherwise it falls off
+ *                    linearly and reaches 0 when the portion is twice what's left (or nothing is left).
+ *   meal time        the preset category's affinity for the meal type ([MEAL_FIT]).
+ *
+ * The portion is what one tap adds everywhere else (the preset's count unit at its default count,
+ * else 100 g). Fats are never suggested; the diet mode's food filter applies. Ties break on the label.
  */
 object WhatToEat {
 
-    data class Food(
-        val name: String,
-        /** Preset category: breakfast | staple | dal | sabzi | protein | snack | drink | sweet | fruit | restaurant … */
-        val category: String?,
-        /** "1 katori", "2 roti", "100 g". */
-        val portion: String,
-        val grams: Double,
-        val kcal: Double,
-        val protein: Double,
-        val carbs: Double,
-        val fat: Double,
-        val foodId: String? = null,
-        val micros: Map<String, Double> = emptyMap(),
-        val imageUrl: String? = null,
-    )
-
     data class Remaining(val kcal: Double, val protein: Double, val carbs: Double, val fat: Double)
 
-    data class Pick(val food: Food, val score: Double, val why: String)
+    data class Suggestion(
+        val preset: FoodPreset,
+        val portion: String,
+        /** Ready to save: priced like a one-tap preset add. */
+        val item: MealItem,
+        val score: Double,
+        val usual: Boolean = false,
+    )
 
     const val W_PROTEIN = 0.5
     const val W_FIT = 0.3
     const val W_MEAL = 0.2
-    /** Protein density that scores a full 1.0. */
-    const val FULL_PROTEIN_PER_100_KCAL = 10.0
+    const val PROTEIN_DENSITY_TOP = 12.0
 
-    fun proteinPer100Kcal(f: Food): Double = if (f.kcal <= 0) 0.0 else f.protein / f.kcal * 100
+    /** How well a preset category suits each meal time (0–1); unknown categories score 0.3. */
+    val MEAL_FIT: Map<String, Map<String, Double>> = mapOf(
+        "breakfast" to mapOf("breakfast" to 1.0, "lunch" to 0.3, "dinner" to 0.3, "snack" to 0.6),
+        "staple" to mapOf("breakfast" to 0.4, "lunch" to 1.0, "dinner" to 1.0, "snack" to 0.2),
+        "dal" to mapOf("breakfast" to 0.2, "lunch" to 1.0, "dinner" to 1.0, "snack" to 0.2),
+        "sabzi" to mapOf("breakfast" to 0.3, "lunch" to 1.0, "dinner" to 1.0, "snack" to 0.2),
+        "protein" to mapOf("breakfast" to 0.8, "lunch" to 1.0, "dinner" to 1.0, "snack" to 0.7),
+        "snack" to mapOf("breakfast" to 0.5, "lunch" to 0.3, "dinner" to 0.2, "snack" to 1.0),
+        "drink" to mapOf("breakfast" to 0.8, "lunch" to 0.3, "dinner" to 0.2, "snack" to 0.9),
+        "sweet" to mapOf("breakfast" to 0.1, "lunch" to 0.3, "dinner" to 0.3, "snack" to 0.5),
+        "fruit" to mapOf("breakfast" to 0.9, "lunch" to 0.3, "dinner" to 0.2, "snack" to 1.0),
+        "fat" to mapOf("breakfast" to 0.0, "lunch" to 0.0, "dinner" to 0.0, "snack" to 0.0),
+        "restaurant" to mapOf("breakfast" to 0.2, "lunch" to 0.8, "dinner" to 0.8, "snack" to 0.3),
+    )
 
-    fun proteinScore(f: Food): Double = min(1.0, proteinPer100Kcal(f) / FULL_PROTEIN_PER_100_KCAL)
+    private fun jsRound(v: Double): Double = floor(v + 0.5)
+    private fun r1(v: Double) = jsRound(v * 10) / 10
 
-    /** 1 when the portion fits the kcal left; linearly down to 0 at twice what's left (nothing left: small portions win). */
+    data class Portion(val grams: Double, val label: String, val count: Double?)
+
+    /** The portion one tap adds, from the preset's servings. */
+    fun portionOf(p: FoodPreset): Portion {
+        val cu = Counting.unitFor(p.servings, p.defaultServing) ?: return Portion(100.0, "100 g", null)
+        return Portion(jsRound(cu.grams * cu.defaultCount * 10) / 10, Counting.countLabel(cu, cu.defaultCount), cu.defaultCount)
+    }
+
+    fun presetItem(p: FoodPreset): MealItem {
+        val por = portionOf(p)
+        val k = por.grams / 100
+        return MealItem(
+            foodId = p.foodId, name = p.label, grams = por.grams,
+            calories = jsRound(p.calories * k), proteinG = r1(p.proteinG * k), carbsG = r1(p.carbsG * k), fatG = r1(p.fatG * k),
+            source = "table", confidence = 1.0,
+            micros = p.micros.filterValues { it.isFinite() }.mapValues { r1(it.value * k) },
+            unit = if (por.count != null) "serving" else "g", servings = por.count,
+            imageUrl = p.imageUrl,
+        )
+    }
+
+    fun proteinScore(protein: Double, kcal: Double): Double = if (!(kcal > 0)) 0.0 else min(1.0, protein / kcal * 100 / PROTEIN_DENSITY_TOP)
+
     fun fitScore(kcal: Double, remainingKcal: Double): Double {
-        if (remainingKcal <= 0) return max(0.0, 1 - kcal / 300.0)
+        if (remainingKcal <= 0) return 0.0
         if (kcal <= remainingKcal) return 1.0
         return max(0.0, 1 - (kcal - remainingKcal) / remainingKcal)
     }
 
-    /** How well a preset category suits [mealType] (breakfast | lunch | dinner | snack), 0..1. */
-    fun mealFit(category: String?, mealType: String): Double = when (category) {
-        "breakfast" -> if (mealType == "breakfast") 1.0 else if (mealType == "snack") 0.6 else 0.3
-        "staple", "dal", "sabzi", "restaurant" -> if (mealType == "lunch" || mealType == "dinner") 1.0 else 0.3
-        "protein" -> if (mealType == "lunch" || mealType == "dinner") 1.0 else 0.7
-        "snack", "fruit", "drink" -> if (mealType == "snack") 1.0 else if (mealType == "breakfast") 0.7 else 0.4
-        "sweet" -> if (mealType == "snack") 0.5 else 0.2
-        else -> 0.5
+    fun scorePreset(p: FoodPreset, remaining: Remaining, mealType: String): Double {
+        val item = presetItem(p)
+        val s = W_PROTEIN * proteinScore(item.proteinG, item.calories) + W_FIT * fitScore(item.calories, remaining.kcal) + W_MEAL * (MEAL_FIT[p.category]?.get(mealType) ?: 0.3)
+        return jsRound(s * 1000) / 1000
     }
 
-    fun score(f: Food, r: Remaining, mealType: String): Double =
-        W_PROTEIN * proteinScore(f) + W_FIT * fitScore(f.kcal, r.kcal) + W_MEAL * mealFit(f.category, mealType)
+    private fun toSuggestion(p: FoodPreset, score: Double, usual: Boolean = false) = Suggestion(p, portionOf(p).label, presetItem(p), score, usual)
 
-    private fun why(f: Food, r: Remaining): String {
-        val p = proteinPer100Kcal(f)
-        val bits = mutableListOf<String>()
-        if (p >= 8) bits += "high protein" else if (p >= 5) bits += "good protein"
-        if (r.kcal > 0 && f.kcal <= r.kcal) bits += "fits your ${r.kcal.roundToInt()} kcal left"
-        else if (r.kcal > 0) bits += "a bit over what's left"
-        return bits.joinToString(" · ").replaceFirstChar { it.uppercase() }.ifBlank { "Fits this time of day" }
+    private val collator: java.text.Collator = java.text.Collator.getInstance(java.util.Locale.ENGLISH)
+
+    /** Presets that can be suggested at all: no fats, zero-calorie rows or foods the mode leaves out. */
+    private fun eligible(presets: List<FoodPreset>, mode: String): List<FoodPreset> {
+        val seen = HashSet<String>()
+        return presets.filter { p ->
+            p.category != "fat" && p.calories > 0 && DietModes.allows(mode, "${p.label} ${p.foodName}") && seen.add(p.foodId)
+        }
     }
+
+    /** The top [limit] presets for what's left today, best first. */
+    fun suggest(remaining: Remaining, mode: String, mealType: String, presets: List<FoodPreset>, limit: Int = 5): List<Suggestion> =
+        eligible(presets, mode).map { it to scorePreset(it, remaining, mealType) }
+            .sortedWith { a, b -> if (a.second != b.second) b.second.compareTo(a.second) else collator.compare(a.first.label, b.first.label) }
+            .take(limit).map { (p, s) -> toSuggestion(p, s) }
 
     /**
-     * Top [n] picks for what's left today, filtered by the diet mode. Fats / oils and zero-kcal rows are
-     * skipped; ties break on protein, then name, so both apps list the same order.
+     * "Your usual": the foods this person eats most ([usage] = food_id → times in the last 60 days)
+     * that fit the mode and what's left, most eaten first. Never ones already suggested ([exclude] = preset ids).
      */
-    fun rank(foods: List<Food>, remaining: Remaining, mealType: String, dietMode: String, n: Int = 5): List<Pick> =
-        foods.asSequence()
-            .filter { it.kcal > 0 && it.category != "fat" }
-            .filter { DietModes.allows(dietMode, it.name, it.category) }
-            .distinctBy { (it.foodId ?: it.name).lowercase() }
-            .map { Pick(it, score(it, remaining, mealType), why(it, remaining)) }
-            .sortedWith(compareByDescending<Pick> { (it.score * 1e6).roundToInt() }.thenByDescending { it.food.protein }.thenBy { it.food.name })
-            .take(n)
-            .toList()
+    fun usual(remaining: Remaining, mode: String, mealType: String, presets: List<FoodPreset>, usage: Map<String, Int>, exclude: Collection<String> = emptyList(), limit: Int = 3): List<Suggestion> =
+        eligible(presets, mode)
+            .filter { (usage[it.foodId] ?: 0) > 0 && it.id !in exclude }
+            .filter { fitScore(presetItem(it).calories, remaining.kcal) > 0 }
+            .sortedWith { a, b -> val d = (usage[b.foodId] ?: 0) - (usage[a.foodId] ?: 0); if (d != 0) d else collator.compare(a.label, b.label) }
+            .take(limit).map { toSuggestion(it, scorePreset(it, remaining, mealType), usual = true) }
 
-    /** One of the user's own foods: how often it was logged, and the last portion. */
-    data class Usual(val food: Food, val times: Int)
-
-    /**
-     * "Your usual": the user's most-logged foods (2+ times), newest portion, filtered by the diet mode,
-     * most frequent first.
-     */
-    fun usual(logged: List<Pair<String, Food>>, dietMode: String, n: Int = 3): List<Usual> {
-        // [logged] is (createdAt, food), any order.
-        val groups = logged.groupBy { it.second.name.trim().lowercase() }
-        return groups.values.asSequence()
-            .filter { it.size >= 2 }
-            .map { g -> Usual(g.maxBy { it.first }.second, g.size) }
-            .filter { it.food.kcal > 0 && DietModes.allows(dietMode, it.food.name, it.food.category) }
-            .sortedWith(compareByDescending<Usual> { it.times }.thenBy { it.food.name })
-            .take(n)
-            .toList()
-    }
+    /** What's left today (never negative, whole numbers). */
+    fun remainingFrom(kcal: Double, protein: Double, carbs: Double, fat: Double, eatenKcal: Double, eatenProtein: Double, eatenCarbs: Double, eatenFat: Double): Remaining = Remaining(
+        max(0.0, jsRound(kcal - eatenKcal)), max(0.0, jsRound(protein - eatenProtein)), max(0.0, jsRound(carbs - eatenCarbs)), max(0.0, jsRound(fat - eatenFat)),
+    )
 
     /** "Try dal, paneer bhurji or curd" — the protein nudge's body (§3), from up to three picks. */
     fun tryLine(picks: List<String>): String = when (picks.size) {

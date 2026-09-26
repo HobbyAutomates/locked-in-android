@@ -121,13 +121,8 @@ fun RecipesScreen(vm: AppViewModel, nvm: NutritionViewModel, onBack: () -> Unit)
 
 /** One ingredient row being edited: grams as text so the field can be empty while typing. */
 private data class Draft(val base: Recipes.Ingredient, val gramsText: String) {
-    /** Re-priced at the typed grams (linear from what it was added at). */
-    fun priced(): Recipes.Ingredient {
-        val g = gramsText.toDoubleOrNull()?.coerceIn(0.0, 5000.0) ?: 0.0
-        if (base.grams <= 0) return base.copy(grams = g)
-        val k = g / base.grams
-        return base.copy(grams = g, kcal = base.kcal * k, protein = base.protein * k, carbs = base.carbs * k, fat = base.fat * k, fiber = base.fiber * k, micros = base.micros.mapValues { it.value * k })
-    }
+    /** Re-priced at the typed grams (per-100 g when known, else linear), like the web's priceIngredient. */
+    fun priced(): Recipes.Ingredient = Recipes.price(base, gramsText.toDoubleOrNull()?.coerceIn(0.0, 5000.0) ?: 0.0)
 }
 
 /** §8 the builder: name, ingredients from the food search with grams, servings and an optional cooked weight. */

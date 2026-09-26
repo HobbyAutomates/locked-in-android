@@ -1,133 +1,144 @@
 package com.sohum.bandlog.util
 
-import kotlin.math.roundToInt
+import kotlin.math.floor
+import kotlin.math.max
 
 /**
- * v2.13 §9 micronutrient dashboard — pure maths, the twin of the web's src/lib/micros.ts.
+ * v2.13 §9 micronutrient dashboard — a port of the web's src/lib/micros.ts. Uses the micros every
+ * meal item already carries (scaled to its grams): fibre, sugar, sodium, iron, calcium, vitamin C,
+ * potassium.
  *
- * Uses the micros the app already stores on meal_items (scaled to the portion): fiber_g, sugar_g,
- * sodium_mg, iron_mg, calcium_mg, vitamin_c_mg, potassium_mg. Targets: ICMR-NIN 2020 RDA by age
- * and sex (iron, calcium, vitamin C, potassium), fibre 30 g per 2000 kcal (ICMR-NIN; the profile's
- * own fibre goal wins when set), sugar under 10 % of calories (WHO), sodium under 2000 mg (WHO).
- *
- * TODO(before launch): re-check the adolescent vitamin C and potassium figures against the
- * ICMR-NIN 2020 RDA tables (nin.res.in/rdabook) — keep src/lib/micros.ts in step.
+ * Targets: ICMR-NIN 2020 RDA by age and sex for iron, calcium, vitamin C and potassium; fibre at
+ * 30 g per 2,000 kcal (ICMR-NIN) unless the user set their own; sugar under 10 % of calories (WHO)
+ * unless set in Nutrition goals; sodium under 2,000 mg (WHO).
+ * TODO(before launch): re-check the adolescent vitamin C and potassium bands against the ICMR-NIN
+ * 2020 tables. Keep src/lib/micros.ts in step.
  */
 object Micros {
 
-    data class Nutrient(
-        val key: String,
-        val label: String,
-        val unit: String,
-        /** "min" = aim to reach it; "max" = stay under it. */
-        val kind: String,
-    )
+    data class Target(val key: String, val label: String, val unit: String, /** "min" goal or "max" limit. */ val kind: String, val target: Double, val source: String)
 
-    val NUTRIENTS = listOf(
-        Nutrient("fiber_g", "Fibre", "g", "min"),
-        Nutrient("iron_mg", "Iron", "mg", "min"),
-        Nutrient("calcium_mg", "Calcium", "mg", "min"),
-        Nutrient("vitamin_c_mg", "Vitamin C", "mg", "min"),
-        Nutrient("potassium_mg", "Potassium", "mg", "min"),
-        Nutrient("sugar_g", "Sugar", "g", "max"),
-        Nutrient("sodium_mg", "Sodium", "mg", "max"),
-    )
+    val KEYS = listOf("fiber_g", "iron_mg", "calcium_mg", "vitamin_c_mg", "potassium_mg", "sugar_g", "sodium_mg")
 
-    /** WHO: sodium under 2 g a day. */
-    const val SODIUM_MAX_MG = 2000.0
-    /** WHO: free sugars under 10 % of calories (4 kcal per g). */
-    fun sugarMaxG(calorieTarget: Int): Double = (calorieTarget * 0.10 / 4).roundToInt().toDouble()
-    /** ICMR-NIN: 30 g fibre per 2000 kcal. */
-    fun fibreFor(calorieTarget: Int): Double = (calorieTarget / 2000.0 * 30).roundToInt().toDouble()
+    private fun jsRound(v: Double) = floor(v + 0.5)
 
-    /** ICMR-NIN 2020 RDA (mg/day) by age band and sex. "other" / unset uses the mean of the two. */
-    fun rda(key: String, age: Int?, sex: String?): Double? {
-        val a = age ?: 25
-        fun pick(boy: Double, girl: Double) = when (sex) { "male" -> boy; "female" -> girl; else -> (boy + girl) / 2 }
-        return when (key) {
-            "iron_mg" -> when {
-                a <= 12 -> pick(16.0, 28.0)
-                a <= 15 -> pick(22.0, 30.0)
-                a <= 17 -> pick(26.0, 32.0)
-                else -> pick(19.0, 29.0)
-            }
-            "calcium_mg" -> when {
-                a <= 12 -> 850.0
-                a <= 15 -> 1000.0
-                a <= 17 -> 1050.0
-                else -> 1000.0
-            }
-            "vitamin_c_mg" -> when {
-                a <= 12 -> pick(58.0, 57.0)
-                a <= 15 -> pick(79.0, 66.0)
-                a <= 17 -> pick(88.0, 71.0)
-                else -> pick(80.0, 65.0)
-            }
-            "potassium_mg" -> when {
-                a <= 12 -> 3050.0
-                a <= 15 -> 3750.0
-                else -> 3510.0
-            }
-            else -> null
+    /** ICMR-NIN 2020 iron RDA (mg/day). */
+    fun ironRda(age: Int?, sex: String?): Double {
+        fun pick(boy: Double, girl: Double) = when (sex) { "male" -> boy; "female" -> girl; else -> jsRound((boy + girl) / 2) }
+        return when {
+            age == null || age >= 18 -> pick(19.0, 29.0)
+            age <= 12 -> pick(16.0, 28.0)
+            age <= 15 -> pick(22.0, 30.0)
+            else -> pick(26.0, 32.0)
         }
     }
 
-    /** The day's target for one nutrient. */
-    fun target(key: String, age: Int?, sex: String?, calorieTarget: Int, fibreGoal: Int?): Double? = when (key) {
-        "fiber_g" -> fibreGoal?.toDouble()?.takeIf { it > 0 } ?: fibreFor(calorieTarget)
-        "sugar_g" -> sugarMaxG(calorieTarget)
-        "sodium_mg" -> SODIUM_MAX_MG
-        else -> rda(key, age, sex)
+    /** ICMR-NIN 2020 calcium RDA (mg/day). */
+    fun calciumRda(age: Int?): Double = when {
+        age == null || age >= 18 -> 1000.0
+        age <= 12 -> 850.0
+        age <= 15 -> 1000.0
+        else -> 1050.0
     }
 
-    /** One logged item's micros (already scaled to its grams) with the day it was eaten. */
-    data class Entry(val date: String, val micros: Map<String, Double>, val kcal: Double)
+    /** ICMR-NIN 2020 vitamin C RDA (mg/day). */
+    fun vitaminCRda(sex: String?): Double = when (sex) { "male" -> 80.0; "female" -> 65.0; else -> 72.0 }
 
-    data class Row(
-        val nutrient: Nutrient,
-        val target: Double,
-        val today: Double,
-        /** Mean over the logged days of the 7 ending today (days with nothing logged don't count). */
-        val weekAvg: Double,
-        /** Share of this week's kcal whose items carried this nutrient at all (0..1). */
-        val coverage: Double,
-    ) {
-        val todayPct: Double get() = if (target <= 0) 0.0 else today / target
-        val weekPct: Double get() = if (target <= 0) 0.0 else weekAvg / target
-        /** A "min" nutrient under 70 % this week, or a "max" one over its limit. */
-        val flagged: Boolean get() = coverage >= 0.3 && (if (nutrient.kind == "min") weekPct < 0.7 else weekPct > 1.0)
+    /** ICMR-NIN 2020 potassium (mg/day). */
+    fun potassiumRda(age: Int?): Double = if (age != null && age < 16) 3000.0 else 3510.0
+
+    const val SODIUM_LIMIT_MG = 2000.0
+
+    /** [fiberTarget] / [sugarTarget]: the user's own goals (null = the formula). */
+    fun targets(age: Int?, sex: String?, calorieTarget: Int, fiberTarget: Int?, sugarTarget: Int?): List<Target> {
+        val kcal = max(1000, if (calorieTarget > 0) calorieTarget else 2000)
+        return listOf(
+            Target("fiber_g", "Fibre", "g", "min", fiberTarget?.toDouble() ?: jsRound(30.0 * kcal / 2000), "ICMR-NIN 2020: 30 g per 2,000 kcal"),
+            Target("iron_mg", "Iron", "mg", "min", ironRda(age, sex), "ICMR-NIN 2020 RDA for your age and sex"),
+            Target("calcium_mg", "Calcium", "mg", "min", calciumRda(age), "ICMR-NIN 2020 RDA for your age"),
+            Target("vitamin_c_mg", "Vitamin C", "mg", "min", vitaminCRda(sex), "ICMR-NIN 2020 RDA"),
+            Target("potassium_mg", "Potassium", "mg", "min", potassiumRda(age), "ICMR-NIN 2020"),
+            Target("sugar_g", "Sugar", "g", "max", sugarTarget?.toDouble() ?: jsRound(kcal * 0.1 / 4), "WHO: under 10 % of your calories"),
+            Target("sodium_mg", "Sodium", "mg", "max", SODIUM_LIMIT_MG, "WHO: under 2,000 mg (about 5 g salt)"),
+        )
     }
 
-    fun rows(entries: List<Entry>, today: String, age: Int?, sex: String?, calorieTarget: Int, fibreGoal: Int?): List<Row> {
-        val week = (0..6).map { Dates.addDays(today, -it.toLong()) }.toSet()
-        val weekEntries = entries.filter { it.date in week }
-        val loggedDays = weekEntries.map { it.date }.distinct().size.coerceAtLeast(1)
-        val weekKcal = weekEntries.sumOf { it.kcal }
-        return NUTRIENTS.mapNotNull { n ->
-            val t = target(n.key, age, sex, calorieTarget, fibreGoal) ?: return@mapNotNull null
-            val todaySum = entries.filter { it.date == today }.sumOf { it.micros[n.key] ?: 0.0 }
-            val weekSum = weekEntries.sumOf { it.micros[n.key] ?: 0.0 }
-            val covered = weekEntries.filter { it.micros.containsKey(n.key) }.sumOf { it.kcal }
-            Row(n, t, todaySum, weekSum / loggedDays, if (weekKcal > 0) covered / weekKcal else 0.0)
+    /** One logged item: the day, its micros (already scaled to its grams). */
+    data class Item(val date: String, val micros: Map<String, Double>)
+
+    data class Day(val values: Map<String, Double>, val items: Int, val itemsWithData: Int)
+
+    /** One day's totals. [Day.itemsWithData] counts items that carried any micro at all. */
+    fun day(items: List<Item>, date: String): Day {
+        val values = KEYS.associateWith { 0.0 }.toMutableMap()
+        var n = 0
+        var withData = 0
+        for (it in items) {
+            if (it.date != date) continue
+            n++
+            var any = false
+            for (k in KEYS) {
+                val v = it.micros[k] ?: continue
+                if (v.isFinite() && v > 0) { values[k] = values.getValue(k) + v; any = true }
+            }
+            if (any) withData++
         }
+        for (k in KEYS) values[k] = jsRound(values.getValue(k) * 10) / 10
+        return Day(values, n, withData)
     }
 
-    /** "Low this week" / "High this week" hints with Indian foods that help. */
-    fun hint(key: String): String = when (key) {
-        "fiber_g" -> "Add whole dal, rajma or chana, a bajra or jowar roti, guava, or a bowl of oats."
-        "iron_mg" -> "Try rajma, chana, palak, bajra, poha or a little jaggery, with lemon or amla to help absorb it."
-        "calcium_mg" -> "Curd, paneer, ragi, til (sesame) and a glass of milk all help."
-        "vitamin_c_mg" -> "Amla, guava, oranges, mosambi, or lemon squeezed over dal and sabzi."
-        "potassium_mg" -> "Banana, coconut water, rajma, dal, curd and leafy sabzi are good sources."
-        "sugar_g" -> "Swap one sweet drink or mithai for fruit, lassi without sugar, or chaas."
-        "sodium_mg" -> "Go easy on pickles, papad, namkeen and instant noodles; add salt at the table last."
-        else -> ""
+    data class Week(val values: Map<String, Double>, val loggedDays: Int, val coverage: Double)
+
+    /** The average over the days with anything logged among the [days] days ending [today]. */
+    fun weekAverage(items: List<Item>, today: String, days: Int = 7): Week {
+        val sum = KEYS.associateWith { 0.0 }.toMutableMap()
+        var logged = 0
+        var n = 0
+        var withData = 0
+        for (i in 0 until days) {
+            val d = day(items, Dates.addDays(today, -i.toLong()))
+            if (d.items == 0) continue
+            logged++; n += d.items; withData += d.itemsWithData
+            for (k in KEYS) sum[k] = sum.getValue(k) + d.values.getValue(k)
+        }
+        val values = KEYS.associateWith { k -> if (logged > 0) jsRound(sum.getValue(k) / logged * 10) / 10 else 0.0 }
+        return Week(values, logged, if (n > 0) withData.toDouble() / n else 0.0)
+    }
+
+    /** Indian foods that are good sources, per nutrient (filtered by diet mode before showing). */
+    val FOOD_HINTS: Map<String, List<String>> = mapOf(
+        "fiber_g" to listOf("Rajma", "Whole moong or chana", "Oats", "Guava", "Bajra or jowar roti", "Apple with the skin", "Cucumber and carrot salad"),
+        "iron_mg" to listOf("Rajma", "Chana", "Palak", "Bajra roti", "Ragi dosa", "Poha with lemon", "Eggs", "Mutton"),
+        "calcium_mg" to listOf("Ragi", "Curd (dahi)", "Paneer", "Til (sesame) chikki", "Milk", "Tofu"),
+        "vitamin_c_mg" to listOf("Amla", "Guava", "Orange or mosambi", "Lemon on your dal", "Capsicum", "Papaya"),
+        "potassium_mg" to listOf("Banana", "Coconut water", "Rajma", "Curd", "Palak", "Sweet potato"),
+    )
+
+    data class Hint(val key: String, val label: String, val kind: String, val pct: Double, val text: String, val foods: List<String>)
+
+    private fun grouped(v: Double): String = String.format(java.util.Locale.US, "%,d", jsRound(v).toLong())
+    private fun num(v: Double): String = if (v == floor(v)) grouped(v) else v.toString()
+
+    /** "Low this week": goals under 70 % of target on average, limits over 100 %. Needs 3+ logged days. */
+    fun weekHints(targets: List<Target>, avg: Map<String, Double>, loggedDays: Int, mode: String): List<Hint> {
+        if (loggedDays < 3) return emptyList()
+        val out = mutableListOf<Hint>()
+        for (t in targets) {
+            val a = avg[t.key] ?: 0.0
+            val pct = if (t.target > 0) a / t.target else 0.0
+            if (t.kind == "min" && pct < 0.7) {
+                val foods = (FOOD_HINTS[t.key] ?: emptyList()).filter { DietModes.allows(mode, it) }.take(4)
+                out += Hint(t.key, t.label, "low", pct, "${t.label} was low this week (about ${jsRound(pct * 100).toLong()}% of your ${num(t.target)} ${t.unit}).", foods)
+            } else if (t.kind == "max" && pct > 1) {
+                out += Hint(t.key, t.label, "high", pct, "${t.label} averaged over your limit this week (${grouped(a)} of ${num(t.target)} ${t.unit}).", emptyList())
+            }
+        }
+        return out
     }
 
     fun fmt(v: Double, unit: String): String = when {
-        unit == "mg" && v >= 1000 -> String.format(java.util.Locale.US, "%,d mg", v.roundToInt())
-        v >= 100 -> "${v.roundToInt()} $unit"
-        v >= 10 -> "${v.roundToInt()} $unit"
-        else -> "${(v * 10).roundToInt() / 10.0} $unit".replace(".0 ", " ")
+        v >= 100 -> "${grouped(v)} $unit"
+        v >= 10 -> "${jsRound(v).toLong()} $unit"
+        else -> "${(jsRound(v * 10) / 10).let { if (it == floor(it)) it.toLong().toString() else it.toString() }} $unit"
     }
 }

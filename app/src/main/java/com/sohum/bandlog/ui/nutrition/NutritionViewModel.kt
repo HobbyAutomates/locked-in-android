@@ -64,43 +64,38 @@ class NutritionViewModel : ViewModel() {
     /** The mode the maths uses for this profile (adult-only modes fall back to balanced under 18). */
     fun dietMode(p: Profile): String = DietModes.effective(settings.dietMode, Goals.ageYears(p.dob))
 
-    /** What a switch would do: new macro targets at the same calories, or null without weight / DOB. */
-    fun previewMode(p: Profile, mode: String): Goals.Targets? =
-        DietModes.targets(mode, p.calorieTarget, Goals.ageYears(p.dob), p.weightKg, p.gender, p.weeklyWorkoutTarget)
+    /** What a switch would do: new macro targets at the same calories (DietModes.targets, as the web's dietTargets). */
+    fun previewMode(p: Profile, mode: String): Goals.Targets = DietModes.targets(p, p.calorieTarget.toDouble(), mode)
 
-    data class ModeUndo(val mode: String, val profile: Profile)
+    data class ModeUndo(val mode: String, val protein: Int, val carbs: Int, val fat: Int)
 
     /**
-     * Switches the diet mode and recomputes protein / carbs / fat for it (calories unchanged). Returns
-     * the undo snapshot, or null when it couldn't save (the reason is in [message]).
+     * Switches the diet mode and recomputes protein / carbs / fat for it (calories unchanged), in one
+     * profile update like the web's setDietMode. Returns the undo snapshot, or null (reason in [message]).
      */
     suspend fun setDietMode(vm: AppViewModel, mode: String): ModeUndo? {
+        if (!DietModes.isMode(mode)) { message = "Pick a diet from the list"; return null }
         val p = vm.profile
-        val age = Goals.ageYears(p.dob)
-        if (!DietModes.allowed(mode, age)) { message = DietModes.TEEN_NOT_RECOMMENDED; return null }
-        val t = previewMode(p, mode) ?: run { message = "Add your weight and date of birth in Personal details first."; return null }
-        val before = ModeUndo(settings.dietMode, p)
+        if (!DietModes.allowed(mode, Goals.ageYears(p.dob))) { message = DietModes.NOT_FOR_TEENS; return null }
+        val before = ModeUndo(settings.dietMode, p.proteinTargetG, p.carbTargetG, p.fatTargetG)
+        val t = previewMode(p, mode)
         try {
-            NutritionApi.patchSettings(JSONObject().put("diet_mode", mode))
+            NutritionApi.patchSettings(JSONObject().put("diet_mode", mode).put("protein_target_g", t.protein).put("carb_target_g", t.carbs).put("fat_target_g", t.fat))
         } catch (e: NotYetAvailable) { message = NotYetAvailable.COMING; return null }
-        catch (e: Exception) { message = e.message ?: "Couldn't save that"; return null }
+        catch (e: Exception) { message = e.message ?: "Could not switch the diet"; return null }
         settings = settings.copy(dietMode = mode)
-        val ok = vm.saveProfile(p.copy(proteinTargetG = t.protein, carbTargetGSet = t.carbs, fatTargetGSet = t.fat))
-        if (!ok) {
-            runCatching { NutritionApi.patchSettings(JSONObject().put("diet_mode", before.mode)) }
-            settings = settings.copy(dietMode = before.mode)
-            message = vm.error ?: "Couldn't save the new targets"
-            return null
-        }
+        // Same values again through the normal save, so every screen shows them at once.
+        vm.saveProfile(p.copy(proteinTargetG = t.protein, carbTargetGSet = t.carbs, fatTargetGSet = t.fat))
         return before
     }
 
-    /** Puts the previous mode and the previous targets back. */
+    /** Undo a switch: the old mode and the old macro targets exactly as they were. */
     suspend fun undoDietMode(vm: AppViewModel, u: ModeUndo): Boolean {
-        runCatching { NutritionApi.patchSettings(JSONObject().put("diet_mode", u.mode)) }.onFailure { message = it.message; return false }
+        try {
+            NutritionApi.patchSettings(JSONObject().put("diet_mode", u.mode).put("protein_target_g", u.protein).put("carb_target_g", u.carbs).put("fat_target_g", u.fat))
+        } catch (e: Exception) { message = if (e is NotYetAvailable) NotYetAvailable.COMING else e.message ?: "Could not undo that"; return false }
         settings = settings.copy(dietMode = u.mode)
-        val cur = vm.profile
-        return vm.saveProfile(cur.copy(proteinTargetG = u.profile.proteinTargetG, carbTargetGSet = u.profile.carbTargetGSet, fatTargetGSet = u.profile.fatTargetGSet))
+        return vm.saveProfile(vm.profile.copy(proteinTargetG = u.protein, carbTargetGSet = u.carbs, fatTargetGSet = u.fat))
     }
 
     suspend fun setAdaptive(on: Boolean): Boolean {
@@ -122,67 +117,54 @@ class NutritionViewModel : ViewModel() {
     fun checkinHandled(ctx: Context, week: String): Boolean { handledTick; return prefs(ctx).getBoolean("checkin_done_$week", false) }
     private fun markHandled(ctx: Context, week: String) { prefs(ctx).edit().putBoolean("checkin_done_$week", true).apply(); handledTick++ }
 
-    /** Floor / ceiling for a profile: Goals' floor; under 18 never under maintenance (no deficit), at most maintenance + the growth surplus. */
-    private fun bounds(p: Profile): Pair<Int, Int> {
-        val floor = Goals.floorFor(p)
-        val plan = Goals.plan(p) ?: return floor to 6000
-        if (!plan.teen) return floor to 6000
-        val eer = plan.maintenance
-        return maxOf(floor, eer.roundToInt()) to (eer + Goals.teenGainSurplus(eer)).roundToInt()
-    }
-
-    fun inputFor(p: Profile, meals: List<Meal>, weights: List<com.sohum.bandlog.data.WeightEntry>, weekStart: String): Adaptive.Input {
-        val end = Adaptive.endFor(weekStart)
-        val days = (0 until Adaptive.SERIES_DAYS).map { Dates.addDays(end, -it.toLong()) }
-        val kcal = days.associateWith { d -> totalsFor(meals, d).calories }.filterValues { it > 0 }
-        val (floor, ceiling) = bounds(p)
-        val teen = Goals.isTeen(Goals.ageYears(p.dob))
-        return Adaptive.Input(
-            endDate = end,
-            weights = weights.map { Adaptive.WeighIn(it.date, it.weightKg) },
-            kcalByDay = kcal,
-            goalRateKgPerWeek = Adaptive.goalRate(Goals.effectiveGoal(p.goalType, Goals.ageYears(p.dob)), p.goalSpeedKgWk, p.weightKg, teen),
-            oldTarget = p.calorieTarget,
-            floor = floor,
-            ceiling = ceiling,
-        )
-    }
+    /** Daily kcal (rounded) on the days with at least one food log, from [from] to [to]. Same as the web's dayKcalOf. */
+    fun dayKcalOf(meals: List<Meal>, from: String, to: String): Map<String, Double> =
+        meals.filter { it.date in from..to && it.items.isNotEmpty() }.map { it.date }.distinct()
+            .associateWith { d -> kotlin.math.floor(totalsFor(meals, d).calories + 0.5) }
 
     /**
-     * Monday (or the first open after it): computes this week's check-in once and stores it in
-     * weekly_checkins. Only when adaptive targets are on and schema_v36 is there.
+     * This week's check-in, computed and stored on the first open on / after Monday when adaptive
+     * targets are on and there's enough data (not enough: [checkinResult] says what's missing and
+     * nothing is stored). Never applies anything. Mirrors the web's getWeeklyCheckin.
      */
     fun ensureCheckin(vm: AppViewModel) {
         if (!settings.supported || !settings.adaptiveTargets || !vm.loadedOnce) return
-        val week = Adaptive.weekStart(vm.today)
-        if (checkinWeek == week) return
-        checkinWeek = week
+        val (weekStart, asOf) = Adaptive.checkinWeek(vm.today)
+        if (checkinWeek == weekStart) return
+        checkinWeek = weekStart
         viewModelScope.launch {
-            val weights = if (vm.weights.isEmpty()) runCatching { com.sohum.bandlog.data.Api.weights() }.getOrDefault(emptyList()) else vm.weights
-            val res = Adaptive.check(inputFor(vm.profile, vm.meals, weights, week))
-            checkinResult = res
-            val existing = runCatching { NutritionApi.checkins(4) }.getOrNull()?.firstOrNull { it.weekStart == week }
+            val existing = try { NutritionApi.checkins(4).firstOrNull { it.weekStart == weekStart } }
+            catch (e: NotYetAvailable) { return@launch } catch (e: Exception) { checkinWeek = null; return@launch }
             if (existing != null) { checkin = existing; return@launch }
-            val row = WeeklyCheckin(
-                null, week, res.avgWeightKg, res.trendKgPerWeek, res.avgKcal?.roundToInt(), res.oldTarget, res.newTarget, res.reason, applied = false,
+            val weights = runCatching { com.sohum.bandlog.data.Api.weights() }.getOrDefault(vm.weights)
+            val p = vm.profile
+            val res = Adaptive.weeklyCheckin(
+                asOf, weights.map { Adaptive.WeighIn(it.date, it.weightKg) }, dayKcalOf(vm.meals, Dates.addDays(asOf, -13), asOf),
+                Adaptive.goalRateFor(p), p.calorieTarget, Adaptive.adaptiveFloor(p),
             )
+            checkinResult = res
+            if (!res.ok) return@launch
+            val row = WeeklyCheckin(null, weekStart, res.avgWeightKg, res.trendKgPerWeek, res.avgKcal, res.oldTarget, res.newTarget, res.reason, applied = false)
             checkin = runCatching { NutritionApi.upsertCheckin(row) }.getOrDefault(row)
         }
     }
 
-    fun checkinVisible(ctx: Context): Boolean = checkin?.let { !it.applied && !checkinHandled(ctx, it.weekStart) } == true
+    /** The not-enough-data note, until it's dismissed for the week. */
+    fun pendingVisible(ctx: Context): Boolean = checkin == null && checkinResult?.let { !it.ok && !checkinHandled(ctx, "pending-" + it.asOf) } == true
+    fun dismissPending(ctx: Context) { checkinResult?.let { markHandled(ctx, "pending-" + it.asOf) } }
 
-    /** Apply: the new calorie target, macros recomputed per the diet mode; applied = true. */
+    fun checkinVisible(ctx: Context): Boolean = checkin?.let { !it.applied && !checkinHandled(ctx, it.weekStart) } == true || pendingVisible(ctx)
+
+    /** Apply: calorie_target = new_target (never under the floor), macros recomputed for the diet mode, applied = true. */
     suspend fun applyCheckin(ctx: Context, vm: AppViewModel): Boolean {
         val c = checkin ?: return false
         val target = c.newTarget ?: return false
         val p = vm.profile
-        val mode = dietMode(p)
-        val age = Goals.ageYears(p.dob)
-        val t = DietModes.targets(mode, target, age, p.weightKg, p.gender, p.weeklyWorkoutTarget) ?: Goals.macrosFor(target.toDouble(), p.proteinTargetG)
-        val ok = vm.saveProfile(p.copy(calorieTarget = target, proteinTargetG = t.protein, carbTargetGSet = t.carbs, fatTargetGSet = t.fat))
-        if (!ok) { message = vm.error ?: "Couldn't apply it"; return false }
-        runCatching { NutritionApi.markCheckinApplied(c.weekStart, true) }
+        val (cal, _) = Goals.capToFloor(target, Goals.floorFor(p))
+        val t = DietModes.targets(p, cal.toDouble(), dietMode(p))
+        val ok = vm.saveProfile(p.copy(calorieTarget = t.calories, proteinTargetG = t.protein, carbTargetGSet = t.carbs, fatTargetGSet = t.fat))
+        if (!ok) { message = vm.error ?: "Could not update your target"; return false }
+        runCatching { NutritionApi.markCheckinApplied(c.weekStart, true) }.onFailure { message = "Updated your target, but couldn't mark the check-in" }
         checkin = c.copy(applied = true)
         markHandled(ctx, c.weekStart)
         return true
@@ -283,61 +265,34 @@ class NutritionViewModel : ViewModel() {
 
     // ---------------------------------------------------------------- §6 what to eat
 
-    /** Today's remaining macros (never below 0). */
+    /** Today's remaining macros (never below 0, whole numbers): the calorie budget (burned + rollover) and the macro targets. */
     fun remaining(vm: AppViewModel): WhatToEat.Remaining {
         val t = totalsFor(vm.meals, vm.today)
         val p = vm.profile
-        return WhatToEat.Remaining(
-            (vm.budgetToday - t.calories).coerceAtLeast(0.0), (p.proteinTargetG - t.protein).coerceAtLeast(0.0),
-            (p.carbTargetG - t.carbs).coerceAtLeast(0.0), (p.fatTargetG - t.fat).coerceAtLeast(0.0),
-        )
-    }
-
-    /** Presets as what-to-eat candidates at their default serving. */
-    fun candidates(vm: AppViewModel): List<Pair<WhatToEat.Food, com.sohum.bandlog.data.FoodPreset>> = vm.presets.filter { it.category != "fat" }.map { pr ->
-        val s = pr.default
-        val g = s?.grams ?: 100.0
-        val k = g / 100
-        WhatToEat.Food(
-            pr.label, pr.category, s?.label ?: "100 g", g, pr.calories * k, pr.proteinG * k, pr.carbsG * k, pr.fatG * k,
-            pr.foodId, pr.micros.mapValues { it.value * k }, pr.imageUrl,
-        ) to pr
+        return WhatToEat.remainingFrom(vm.budgetToday, p.proteinTargetG.toDouble(), p.carbTargetG.toDouble(), p.fatTargetG.toDouble(), t.calories, t.protein, t.carbs, t.fat)
     }
 
     /** Home shows the card once something is logged today and at least 150 kcal are left. */
     fun whatToEatVisible(vm: AppViewModel): Boolean =
         vm.meals.any { it.date == vm.today } && remaining(vm).kcal >= 150 && vm.presets.isNotEmpty()
 
-    fun picks(vm: AppViewModel, n: Int = 5): List<WhatToEat.Pick> =
-        WhatToEat.rank(candidates(vm).map { it.first }, remaining(vm), MealTypes.default(), dietMode(vm.profile), n)
+    private fun mealTypeNow(): String = pickType?.takeIf { MealTypes.isType(it) } ?: MealTypes.default()
 
-    /** "Your usual": the user's own frequent foods over the loaded window. */
-    fun usual(vm: AppViewModel): List<WhatToEat.Usual> {
-        val logged = vm.meals.filter { Dates.daysBetween(it.date, vm.today) <= 60 }.flatMap { m ->
-            m.items.filter { it.grams > 0 && it.calories > 0 }.map { i ->
-                m.createdAt to WhatToEat.Food(i.name, null, i.quantityLabel, i.grams, i.calories, i.proteinG, i.carbsG, i.fatG, i.foodId, i.micros, i.imageUrl)
-            }
-        }
-        return WhatToEat.usual(logged, dietMode(vm.profile))
-    }
+    fun picks(vm: AppViewModel, n: Int = 5): List<WhatToEat.Suggestion> =
+        WhatToEat.suggest(remaining(vm), dietMode(vm.profile), mealTypeNow(), vm.presets, n)
 
-    fun itemFor(f: WhatToEat.Food, vm: AppViewModel): MealItem {
-        val pr = vm.presets.firstOrNull { it.foodId == f.foodId && it.category != "fat" }
-        if (pr != null) return com.sohum.bandlog.util.QuantityFood.from(pr).item(com.sohum.bandlog.util.Quantity(com.sohum.bandlog.util.QUnit.G, f.grams))
-        return MealItem(
-            foodId = f.foodId, name = f.name, grams = f.grams, calories = f.kcal, proteinG = f.protein, carbsG = f.carbs, fatG = f.fat,
-            source = "table", confidence = 1.0, micros = f.micros, imageUrl = f.imageUrl,
-        )
-    }
+    /** "Your usual": most-eaten presets (60 days) that fit, never ones already in [shown]. */
+    fun usual(vm: AppViewModel, shown: List<WhatToEat.Suggestion>): List<WhatToEat.Suggestion> =
+        WhatToEat.usual(remaining(vm), dietMode(vm.profile), mealTypeNow(), vm.presets, vm.foodUse(60), shown.map { it.preset.id })
 
     /** The meal the sheet logs into when opened from Add food (its chosen type); null = the hour rule. */
     var pickType by mutableStateOf<String?>(null)
 
-    /** One tap: logs [f] into [pickType], else the meal type for this time of day. */
-    suspend fun logPick(vm: AppViewModel, f: WhatToEat.Food): Boolean {
-        val type = pickType?.takeIf { MealTypes.isType(it) } ?: MealTypes.default()
-        val ok = vm.saveMeal(vm.today, f.name, listOf(itemFor(f, vm)), mealType = type, method = "what_to_eat")
-        message = if (ok) "Logged ${f.name} to ${MealTypes.label(type)}" else vm.error
+    /** One tap: logs the suggestion (priced like a one-tap preset add) into [pickType], else the meal type for now. */
+    suspend fun logPick(vm: AppViewModel, sg: WhatToEat.Suggestion): Boolean {
+        val type = mealTypeNow()
+        val ok = vm.saveMeal(vm.today, sg.preset.label, listOf(sg.item), mealType = type, method = "what_to_eat")
+        message = if (ok) "Logged ${sg.preset.label} to ${MealTypes.label(type)}" else vm.error
         return ok
     }
 

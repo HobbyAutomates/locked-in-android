@@ -1,105 +1,116 @@
 package com.sohum.bandlog.util
 
+import com.sohum.bandlog.data.Profile
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.time.LocalDate
 
-/** v2.13 §5: the spec's test vectors (web: scripts/check-adaptive.ts must print the same). */
+/**
+ * v2.13 §5 adaptive weekly targets: the spec's three test vectors plus every case in the web's
+ * scripts/check-adaptive.ts, against util/Adaptive.kt. Both apps must print the same numbers.
+ */
 class AdaptiveTest {
 
-    private val halfKgPerWeek = -0.5 / 7
+    private val halfKgWeek = -0.5 / 7
 
-    @Test fun vector1_onPace() {
-        val (tdee, raw, next) = Adaptive.target(avgKcal = 2200.0, slopeKgPerDay = halfKgPerWeek, goalRateKgPerWeek = -0.5, oldTarget = 2200, floor = 1200)
-        assertEquals(2750.0, tdee, 1e-9)
-        assertEquals(2200.0, raw, 1e-9)
-        assertEquals(2200, next)
+    // ---- the spec's three test vectors (steps 5–7) ----
+
+    @Test fun vector1() {
+        val r = Adaptive.adaptiveTarget(avgKcal = 2200.0, slopeKgPerDay = halfKgWeek, goalRateKgPerWeek = -0.5, oldTarget = 2200, floor = 1500)
+        assertEquals(2750.0, r.tdee, 1e-6); assertEquals(2200.0, r.raw, 1e-6); assertEquals(2200, r.newTarget)
     }
 
-    @Test fun vector2_fasterGoalClampedTo150() {
-        val (tdee, raw, next) = Adaptive.target(2200.0, halfKgPerWeek, -0.75, 2200, 1200)
-        assertEquals(2750.0, tdee, 1e-9)
-        assertEquals(1925.0, raw, 1e-9)
-        assertEquals(2050, next)
+    @Test fun vector2() {
+        val r = Adaptive.adaptiveTarget(2200.0, halfKgWeek, -0.75, 2200, 1500)
+        assertEquals(2750.0, r.tdee, 1e-6); assertEquals(1925.0, r.raw, 1e-6); assertEquals(2050, r.newTarget)
     }
 
-    @Test fun vector3_flatTrend() {
-        val (tdee, raw, next) = Adaptive.target(2000.0, 0.0, -0.5, 2000, 1200)
-        assertEquals(2000.0, tdee, 1e-9)
-        assertEquals(1450.0, raw, 1e-9)
-        assertEquals(1850, next)
+    @Test fun vector3() {
+        val r = Adaptive.adaptiveTarget(2000.0, 0.0, -0.5, 2000, 1500)
+        assertEquals(2000.0, r.tdee, 1e-6); assertEquals(1450.0, r.raw, 1e-6); assertEquals(1850, r.newTarget)
     }
 
-    @Test fun safetyFloorWins() {
-        // Same as vector 3 but the person's floor is 1900: never below it.
-        assertEquals(1900, Adaptive.target(2000.0, 0.0, -0.5, 2000, 1900).third)
+    // ---- safety floor / ceiling and rounding ----
+
+    @Test fun floorCeilingRounding() {
+        assertEquals(1500, Adaptive.adaptiveTarget(1300.0, 0.0, -0.5, 1600, 1500).newTarget)
+        assertEquals(Adaptive.ADAPTIVE_CEILING, Adaptive.adaptiveTarget(6000.0, 0.0, 0.0, 4950, 1500).newTarget)
+        assertEquals(2100, Adaptive.adaptiveTarget(2104.0, 0.0, 0.0, 2100, 1500).newTarget)
+        assertEquals(2110, Adaptive.adaptiveTarget(2106.0, 0.0, 0.0, 2100, 1500).newTarget)
+        assertEquals(2550, Adaptive.adaptiveTarget(2500.0, 0.0, 0.25, 2400, 1500).newTarget)
     }
 
-    @Test fun roundsToNearest10() {
-        assertEquals(2130, Adaptive.target(2126.0, 0.0, 0.0, 2100, 1200).third)
+    // ---- steps 1–3 ----
+
+    @Test fun seriesEwmaSlope() {
+        assertEquals(listOf(null, 70.0, 70.0, 71.0, 71.0), Adaptive.dailyWeights(listOf(Adaptive.WeighIn("2026-09-03", 70.0), Adaptive.WeighIn("2026-09-05", 71.0)), "2026-09-06", 5))
+        assertEquals(listOf(70.5), Adaptive.dailyWeights(listOf(Adaptive.WeighIn("2026-09-06", 70.0), Adaptive.WeighIn("2026-09-06", 71.0)), "2026-09-06", 1))
+        assertEquals(listOf(null, null), Adaptive.dailyWeights(listOf(Adaptive.WeighIn("2026-08-01", 60.0), Adaptive.WeighIn("2026-09-07", 99.0)), "2026-09-06", 2))
+        assertEquals(listOf(null, 70.0, 71.0), Adaptive.ewma(listOf(null, 70.0, 80.0)))
+        assertEquals(2.0, Adaptive.lsSlope(listOf(1.0, 3.0, 5.0, 7.0)), 1e-9)
+        assertEquals(1.0, Adaptive.lsSlope(listOf(null, 1.0, 2.0, 3.0)), 1e-9)
+        assertEquals(0.0, Adaptive.lsSlope(listOf(null, 5.0)), 0.0)
     }
 
-    /**
-     * Full pipeline: daily weigh-ins chosen so the EWMA trend falls exactly 0.5 kg/week
-     * (w_t = w0 + r(t−1) + r/α makes e_t = w0 + r·t), 14 logged days of 2200 kcal.
-     */
-    @Test fun fullCheckMatchesVector1() {
-        val end = "2026-09-27"
-        val start = LocalDate.parse(end).minusDays(20)
-        val r = halfKgPerWeek
-        val weights = (0 until 21).map { t ->
-            val kg = if (t == 0) 80.0 else 80.0 + r * (t - 1) + r / Adaptive.ALPHA
-            Adaptive.WeighIn(start.plusDays(t.toLong()).toString(), kg)
-        }
-        val kcal = (0 until 14).associate { LocalDate.parse(end).minusDays(it.toLong()).toString() to 2200.0 }
-        val res = Adaptive.check(Adaptive.Input(end, weights, kcal, -0.5, 2200, 1200))
-        assertTrue(res.ready)
-        assertEquals(-0.5, res.trendKgPerWeek!!, 1e-9)
-        assertEquals(2750.0, res.tdee!!, 1e-6)
-        assertEquals(2200.0, res.raw!!, 1e-6)
-        assertEquals(2200, res.newTarget)
-        assertEquals(
-            "Your weight trend is −0.5 kg/week (goal −0.5) and you ate about 2,200 kcal a day, so your burn is about 2,750. Keeping your target at 2,200 kcal.",
-            res.reason,
-        )
+    /** A weigh-in series whose EWMA trend is exactly a line falling 0.5 kg/week (w_t = T0 + b·t + b(1 − α)/α). */
+    private val asOf = "2026-09-27" // a Sunday
+    private val series = (0 until 21).map { i ->
+        Adaptive.WeighIn(Adaptive.shiftDay(asOf, (i - 20).toLong()), if (i == 0) 80.0 else 80.0 + halfKgWeek * i + (halfKgWeek * 0.9) / 0.1)
     }
+    private val dayKcal = (0 until 14).associate { Adaptive.shiftDay(asOf, -it.toLong()) to 2200.0 }
 
-    @Test fun reasonTextLowering() {
-        assertEquals(
-            "Your weight trend is −0.3 kg/week (goal −0.5) and you ate about 2,180 kcal a day, so your burn is about 2,510. Lowering your target by 110 kcal.",
-            Adaptive.reason(-0.3, -0.5, 2180.0, 2510.0, 2200, 2090),
-        )
-        assertEquals("goal +0.25", Adaptive.goalWords(0.25))
-        assertEquals("goal: hold steady", Adaptive.goalWords(0.0))
+    @Test fun pipelineVectors() {
+        assertEquals(-0.5, Adaptive.trendSlopeKgPerDay(series, asOf) * 7, 1e-9)
+        val r = Adaptive.weeklyCheckin(asOf, series, dayKcal, -0.5, 2200, 1500)
+        assertTrue(r.ok)
+        assertEquals(2750, r.tdee); assertEquals(2200, r.newTarget); assertEquals(-0.5, r.trendKgPerWeek, 0.0); assertEquals(2200, r.avgKcal)
+        assertEquals("Your weight trend is −0.5 kg/week (goal −0.5) and you ate about 2,200 kcal a day, so your burn is about 2,750. Keeping your target at 2,200 kcal.", r.reason)
+        assertEquals(2050, Adaptive.weeklyCheckin(asOf, series, dayKcal, -0.75, 2200, 1500).newTarget)
+
+        // Flat weight, 2000 kcal: vector 3 end to end (a weigh-in every 3 days is enough).
+        val flat = listOf(0, 3, 6, 9, 12, 15, 18).map { Adaptive.WeighIn(Adaptive.shiftDay(asOf, -it.toLong()), 72.0) }
+        val kcal = (0 until 12).associate { Adaptive.shiftDay(asOf, -it.toLong()) to 2000.0 }
+        val v3 = Adaptive.weeklyCheckin(asOf, flat, kcal, -0.5, 2000, 1500)
+        assertEquals(listOf(2000, 1450, 1850), listOf(v3.tdee, v3.raw, v3.newTarget))
+        assertEquals(72.0, v3.avgWeightKg, 0.0)
+        assertEquals("Your weight trend is 0 kg/week (goal −0.5) and you ate about 2,000 kcal a day, so your burn is about 2,000. Lowering your target by 150 kcal.", v3.reason)
     }
 
     @Test fun notEnoughData() {
-        val end = "2026-09-27"
-        val weights = listOf(Adaptive.WeighIn("2026-09-20", 80.0), Adaptive.WeighIn("2026-09-25", 79.8))
-        val kcal = (0 until 6).associate { LocalDate.parse(end).minusDays(it.toLong()).toString() to 2000.0 }
-        val res = Adaptive.check(Adaptive.Input(end, weights, kcal, -0.5, 2000, 1200))
-        assertFalse(res.ready)
-        assertNull(res.newTarget)
-        assertEquals(2, res.missing.size)
-        assertTrue(res.missing[0].startsWith("Log food on 4 more days"))
-        assertTrue(res.missing[1].startsWith("Weigh in 2 more times"))
+        val few = listOf(Adaptive.WeighIn(asOf, 70.0), Adaptive.WeighIn(Adaptive.shiftDay(asOf, -2), 70.0))
+        val kcal = (0 until 7).associate { Adaptive.shiftDay(asOf, -it.toLong()) to 2000.0 } + (Adaptive.shiftDay(asOf, -20) to 2000.0)
+        val r = Adaptive.weeklyCheckin(asOf, few, kcal, 0.0, 2000, 1500)
+        assertFalse(r.ok)
+        assertEquals(listOf(7, 2), listOf(r.loggedDays, r.weighIns))
+        assertEquals("Log food on 3 more days and weigh in 2 more times in the last 2 weeks, and your next check-in can adjust your target.", r.missing)
+        assertEquals("Log food on 1 more day and weigh in 1 more time in the last 2 weeks, and your next check-in can adjust your target.", Adaptive.missingText(9, 3))
+        assertEquals("", Adaptive.missingText(10, 4))
     }
 
-    @Test fun seriesForwardFillsWithoutExtrapolating() {
-        val s = Adaptive.dailySeries(listOf(Adaptive.WeighIn("2026-09-10", 70.0), Adaptive.WeighIn("2026-09-12", 71.0)), "2026-09-13", days = 5)
-        // 09-09 (before the first weigh-in) stays null; 09-11 forward-fills 70; 09-13 forward-fills 71.
-        assertEquals(listOf(null, 70.0, 70.0, 71.0, 71.0), s)
-        val e = Adaptive.ewma(s)
-        assertNull(e[0]); assertEquals(70.0, e[1]!!, 1e-12); assertEquals(70.1, e[3]!!, 1e-12)
+    @Test fun reasonText() {
+        assertEquals(
+            "Your weight trend is −0.3 kg/week (goal −0.5) and you ate about 2,180 kcal a day, so your burn is about 2,510. Lowering your target by 110 kcal.",
+            Adaptive.reasonText(-0.3, -0.5, 2180.0, 2510.0, 2250, 2140),
+        )
+        assertTrue(Adaptive.reasonText(0.2, 0.0, 2000.0, 1850.0, 1800, 1850).endsWith("Raising your target by 50 kcal."))
+        assertEquals("−0.8", Adaptive.signed(-0.75))
     }
 
-    @Test fun goalRateCapsAndTeens() {
-        assertEquals(-0.5, Adaptive.goalRate("lose", 0.5, 80.0, false), 1e-12)
-        assertEquals(-0.5, Adaptive.goalRate("lose", 1.5, 50.0, false), 1e-12) // 1 % of 50 kg
-        assertEquals(0.0, Adaptive.goalRate("lose", 0.5, 60.0, true), 1e-12)
-        assertEquals(0.0, Adaptive.goalRate("maintain", 0.5, 60.0, false), 1e-12)
+    @Test fun week() {
+        assertEquals("2026-09-21", Adaptive.mondayOf("2026-09-27"))
+        assertEquals("2026-09-28", Adaptive.mondayOf("2026-09-28"))
+        assertEquals("2026-09-28" to "2026-09-27", Adaptive.checkinWeek("2026-09-30"))
+    }
+
+    @Test fun profileHelpers() {
+        val adult = Profile(dob = "1998-01-01", gender = "male", heightCm = 175.0, weightKg = 80.0, goalType = "lose", goalSpeedKgWk = 0.5, weeklyWorkoutTarget = 3)
+        assertEquals(-0.5, Adaptive.goalRateFor(adult, "2026-09-26"), 0.0)
+        assertEquals(-0.5, Adaptive.goalRateFor(adult.copy(weightKg = 50.0, goalSpeedKgWk = 1.0), "2026-09-26"), 0.0)
+        assertEquals(0.0, Adaptive.goalRateFor(adult.copy(goalType = "maintain"), "2026-09-26"), 0.0)
+        val teen = adult.copy(dob = "2010-06-01", weightKg = 60.0, heightCm = 168.0)
+        assertEquals(0.0, Adaptive.goalRateFor(teen, "2026-09-26"), 0.0)
+        assertTrue(Adaptive.adaptiveFloor(teen, "2026-09-26") > 2000)
+        assertEquals(1500, Adaptive.adaptiveFloor(adult, "2026-09-26"))
     }
 }

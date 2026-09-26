@@ -1,57 +1,70 @@
 package com.sohum.bandlog.util
 
-import kotlin.math.roundToInt
+import kotlin.math.floor
 
 /**
- * v2.13 §7 fasting timer — pure helpers (the twin of the web's src/lib/fasting.ts). The stages use
- * soft wording on purpose: these are rough, average timings, not medical claims.
+ * v2.13 §7 fasting timer — a port of the web's src/lib/fasting.ts: protocols, stages and the "who
+ * can use it" rule. The wording is soft on purpose: rough, commonly cited windows, not medical claims.
  */
 object Fasting {
-    data class Protocol(val key: String, val label: String, val hours: Double)
+    data class Protocol(val key: String, val label: String, val fastHours: Double, val eatHours: Double)
 
     val PROTOCOLS = listOf(
-        Protocol("12:12", "12:12", 12.0),
-        Protocol("14:10", "14:10", 14.0),
-        Protocol("16:8", "16:8", 16.0),
-        Protocol("18:6", "18:6", 18.0),
-        Protocol("20:4", "20:4", 20.0),
+        Protocol("12:12", "12:12", 12.0, 12.0),
+        Protocol("14:10", "14:10", 14.0, 10.0),
+        Protocol("16:8", "16:8", 16.0, 8.0),
+        Protocol("18:6", "18:6", 18.0, 6.0),
+        Protocol("20:4", "20:4", 20.0, 4.0),
     )
+    const val DEFAULT_HOURS = 16.0
     const val MIN_HOURS = 1.0
     const val MAX_HOURS = 72.0
-    const val DEFAULT_HOURS = 16.0
 
-    fun clampHours(h: Double): Double = (h.coerceIn(MIN_HOURS, MAX_HOURS) * 10).roundToInt() / 10.0
+    private fun jsRound(v: Double) = floor(v + 0.5)
 
-    /** "16:8" for the standard protocols, else "20 h". */
-    fun label(hours: Double): String = PROTOCOLS.firstOrNull { it.hours == hours }?.label ?: "${fmtH(hours)} h"
+    /** Target hours clamped to 1–72, to the nearest half hour (NaN → 16). */
+    fun clampHours(h: Double): Double {
+        if (!h.isFinite()) return DEFAULT_HOURS
+        return minOf(MAX_HOURS, maxOf(MIN_HOURS, jsRound(h * 2) / 2))
+    }
 
-    data class Stage(val key: String, val label: String, val fromHours: Double, val blurb: String)
+    /** "16:8" for the standard protocols, else "20 h" / "30.5 h". */
+    fun label(hours: Double): String = PROTOCOLS.firstOrNull { it.fastHours == hours }?.label ?: "${fmtH(hours)} h"
+
+    data class Stage(val key: String, val label: String, val from: Double, val note: String)
 
     val STAGES = listOf(
-        Stage("fed", "Fed", 0.0, "Digesting your last meal and using that energy."),
-        Stage("fat", "Fat-burning", 12.0, "Around now your body tends to lean more on stored fat."),
-        Stage("ketosis", "Ketosis", 18.0, "Some people start making more ketones around here. It varies a lot."),
+        Stage("fed", "Fed", 0.0, "Your body is still using your last meal."),
+        Stage("fat_burning", "Fat-burning", 12.0, "Around 12 hours in, many people start leaning more on stored fat."),
+        Stage("ketosis", "Ketosis", 18.0, "From about 18 hours, ketone levels tend to rise. It varies a lot between people."),
     )
 
-    fun stageAt(hours: Double): Stage = STAGES.last { hours >= it.fromHours }
+    fun stageAt(hours: Double): Stage = STAGES.last { hours >= it.from }
 
-    fun elapsedHours(startedAtMs: Long, nowMs: Long): Double = ((nowMs - startedAtMs).coerceAtLeast(0L)) / 3_600_000.0
+    /** Hours between two instants (ms), never negative. */
+    fun hoursBetween(startMs: Long, endMs: Long): Double = maxOf(0.0, (endMs - startMs) / 3_600_000.0)
 
-    fun progress(startedAtMs: Long, nowMs: Long, targetHours: Double): Float =
-        (elapsedHours(startedAtMs, nowMs) / targetHours.coerceAtLeast(0.1)).toFloat().coerceIn(0f, 1f)
-
-    /** "3:07:12" (h:mm:ss) for the ring. */
+    /** "15:42:08" for an elapsed number of milliseconds. */
     fun clock(ms: Long): String {
-        val s = (ms.coerceAtLeast(0L) / 1000)
+        val s = maxOf(0L, ms / 1000)
         return String.format(java.util.Locale.US, "%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60)
     }
 
-    /** "15 h 20 m" for history rows. */
-    fun duration(ms: Long): String {
-        val m = (ms.coerceAtLeast(0L) / 60_000)
-        val h = m / 60
-        return if (h > 0) "$h h ${m % 60} m" else "${m % 60} m"
+    /** "16 h" / "16.5 h" / "45 min". */
+    fun durationText(hours: Double): String {
+        if (hours < 1) return "${jsRound(hours * 60).toLong()} min"
+        val r = jsRound(hours * 10) / 10
+        return "${fmtH(r)} h"
     }
 
-    fun fmtH(h: Double): String = if (h == h.toLong().toDouble()) h.toLong().toString() else String.format(java.util.Locale.US, "%.1f", h)
+    fun fmtH(h: Double): String = if (h == floor(h)) h.toLong().toString() else String.format(java.util.Locale.US, "%.1f", h)
+
+    data class Access(val ok: Boolean, val reason: String? = null, val title: String = "", val body: String = "")
+
+    /** Hidden under 18 and for anyone the eating-disorder safety screen flags (Goals.edFlags). */
+    fun access(age: Int?, flags: List<String> = emptyList()): Access = when {
+        Goals.isTeen(age) -> Access(false, "teen", "Not available under 18", "Your body is still growing, so Locked In doesn't offer fasting timers under 18. Regular meals fuel growing, training and school.")
+        flags.isNotEmpty() -> Access(false, "safety", "Not available right now", "Fasting isn't a good fit when food or weight feels heavy. Regular meals are the kinder plan for now. If food has been on your mind a lot, talking to someone can really help.")
+        else -> Access(true)
+    }
 }

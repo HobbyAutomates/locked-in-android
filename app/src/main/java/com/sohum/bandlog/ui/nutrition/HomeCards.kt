@@ -45,7 +45,6 @@ import com.sohum.bandlog.ui.components.MacroDot
 import com.sohum.bandlog.ui.components.PillButton
 import com.sohum.bandlog.ui.theme.palette
 import com.sohum.bandlog.ui.today.fmt
-import com.sohum.bandlog.util.Adaptive
 import com.sohum.bandlog.util.DietModes
 import com.sohum.bandlog.util.MealTypes
 import com.sohum.bandlog.util.WhatToEat
@@ -81,15 +80,18 @@ private fun Shortcut(icon: ImageVector, label: String, onClick: () -> Unit) {
 /**
  * §5 the Monday check-in card: the reason in plain English and Apply / Keep current. Never
  * applies on its own; shown until one is tapped (per week, on this device), or once applied.
+ * Not enough data yet: what's missing, until "Got it".
  */
 @Composable
 fun CheckinCard(vm: AppViewModel, nvm: NutritionViewModel) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    val c = nvm.checkin ?: return
-    if (c.applied || nvm.checkinHandled(ctx, c.weekStart)) return
     val p = palette
     var busy by remember { mutableStateOf(false) }
+    val c = nvm.checkin
+    val pending = nvm.checkinResult?.takeIf { c == null && !it.ok }
+    if (c == null && pending == null) return
+    if (c != null && (c.applied || nvm.checkinHandled(ctx, c.weekStart))) return
     Card {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(34.dp).background(p.purpleBg, CircleShape), contentAlignment = Alignment.Center) {
@@ -98,16 +100,15 @@ fun CheckinCard(vm: AppViewModel, nvm: NutritionViewModel) {
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text("Your weekly check-in", fontSize = 16.sp, fontWeight = FontWeight(800), color = p.ink)
-                Text("Week of ${com.sohum.bandlog.util.Dates.short(c.weekStart)}", fontSize = 12.sp, color = p.muted)
+                Text(if (c != null) "Week of ${com.sohum.bandlog.util.Dates.short(c.weekStart)}" else "Not enough data yet", fontSize = 12.sp, color = p.muted)
             }
         }
         Spacer(Modifier.height(10.dp))
-        val next = c.newTarget
-        if (next == null) {
-            Text(c.reason, fontSize = 13.sp, color = p.ink, lineHeight = 18.sp)
-            nvm.checkinResult?.missing?.forEach { Text("•  $it", fontSize = 12.sp, color = p.muted, lineHeight = 17.sp) }
+        val next = c?.newTarget
+        if (c == null || next == null) {
+            Text(pending?.missing?.ifBlank { null } ?: c?.reason.orEmpty(), fontSize = 13.sp, color = p.ink, lineHeight = 18.sp)
             Spacer(Modifier.height(10.dp))
-            PillButton("Got it", { nvm.keepCheckin(ctx) }, height = 44.dp, bg = p.card2, fg = p.ink)
+            PillButton("Got it", { if (c == null) nvm.dismissPending(ctx) else nvm.keepCheckin(ctx) }, height = 44.dp, bg = p.card2, fg = p.ink)
             return@Card
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -129,11 +130,10 @@ fun CheckinCard(vm: AppViewModel, nvm: NutritionViewModel) {
 fun WhatToEatCard(vm: AppViewModel, nvm: NutritionViewModel) {
     val p = palette
     val scope = rememberCoroutineScope()
-    LaunchedEffect(Unit) { vm.loadPresets() }
     val rem = nvm.remaining(vm)
     // Only once something is logged and there's a real gap left.
     if (vm.meals.none { it.date == vm.today } || rem.kcal < 150) return
-    val picks = remember(vm.presets, vm.meals, nvm.settings.dietMode, vm.profile) { nvm.picks(vm, 3) }
+    val picks = remember(vm.presets, vm.meals, nvm.settings.dietMode, vm.profile) { nvm.pickType = null; nvm.picks(vm, 3) }
     if (picks.isEmpty()) return
     var logging by remember { mutableStateOf<String?>(null) }
     Card(padding = 14.dp) {
@@ -146,33 +146,43 @@ fun WhatToEatCard(vm: AppViewModel, nvm: NutritionViewModel) {
                 Text("See all", fontSize = 13.sp, fontWeight = FontWeight(700), color = p.ink)
             }
         }
-        picks.forEach { pk ->
+        picks.forEach { sg ->
             Hair()
-            PickRow(pk.food, pk.why, logging == pk.food.name) {
-                scope.launch { logging = pk.food.name; nvm.logPick(vm, pk.food); logging = null }
-            }
+            PickRow(sg, null, logging == sg.preset.id) { scope.launch { logging = sg.preset.id; nvm.logPick(vm, sg); logging = null } }
         }
     }
 }
 
+/** Why a pick is up there, in a few words, from the same numbers the score uses. */
+private fun whyOf(sg: WhatToEat.Suggestion, rem: WhatToEat.Remaining): String {
+    val k = sg.item.calories
+    val density = if (k > 0) sg.item.proteinG / k * 100 else 0.0
+    val bits = mutableListOf<String>()
+    if (density >= 8) bits += "High protein" else if (density >= 5) bits += "Good protein"
+    if (rem.kcal > 0 && k <= rem.kcal) bits += "fits what's left"
+    return bits.joinToString(" · ")
+}
+
 @Composable
-private fun PickRow(f: WhatToEat.Food, why: String, busy: Boolean, onLog: () -> Unit) {
+private fun PickRow(sg: WhatToEat.Suggestion, note: String?, busy: Boolean, onLog: () -> Unit) {
     val p = palette
+    val it = sg.item
+    val name = sg.preset.label
     Row(
         Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(vertical = 6.dp).semantics(mergeDescendants = true) {
-            contentDescription = "${f.name}, ${f.portion}, ${f.kcal.roundToInt()} kcal, ${fmt((f.protein * 10).roundToInt() / 10.0)} grams protein"
+            contentDescription = "$name, ${sg.portion}, ${it.calories.roundToInt()} kcal, ${fmt(it.proteinG)} grams protein"
         },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        FoodImage(f.name, f.imageUrl, kind = "preset", size = 40.dp, foodId = f.foodId)
+        FoodImage(name, sg.preset.imageUrl, kind = "preset", size = 40.dp, foodId = sg.preset.foodId)
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            Text(f.name, fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text("${f.portion} · ${f.kcal.roundToInt()} kcal · ${fmt((f.protein * 10).roundToInt() / 10.0)} g protein", fontSize = 12.sp, color = p.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (why.isNotBlank()) Text(why, fontSize = 11.sp, color = p.green, maxLines = 1)
+            Text(name, fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text("${sg.portion} · ${it.calories.roundToInt()} kcal · ${fmt(it.proteinG)} g protein", fontSize = 12.sp, color = p.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (!note.isNullOrBlank()) Text(note, fontSize = 11.sp, color = p.green, maxLines = 1)
         }
         Box(
-            Modifier.size(44.dp).clickable(enabled = !busy, onClickLabel = "Log ${f.name}", onClick = onLog),
+            Modifier.size(44.dp).clickable(enabled = !busy, onClickLabel = "Log $name", onClick = onLog),
             contentAlignment = Alignment.Center,
         ) {
             Box(Modifier.size(32.dp).background(p.btn, CircleShape), contentAlignment = Alignment.Center) {
@@ -191,8 +201,8 @@ fun WhatToEatSheet(vm: AppViewModel, nvm: NutritionViewModel, onDismiss: () -> U
     LaunchedEffect(Unit) { vm.loadPresets(); nvm.loadSettings() }
     val rem = nvm.remaining(vm)
     val mode = nvm.dietMode(vm.profile)
-    val picks = remember(vm.presets, vm.meals, mode) { nvm.picks(vm, 5) }
-    val usual = remember(vm.meals, mode) { nvm.usual(vm) }
+    val picks = remember(vm.presets, vm.meals, mode, nvm.pickType) { nvm.picks(vm, 5) }
+    val usual = remember(vm.presets, vm.meals, mode, picks) { nvm.usual(vm, picks) }
     var logging by remember { mutableStateOf<String?>(null) }
     val type = MealTypes.label(nvm.pickType?.takeIf { MealTypes.isType(it) } ?: MealTypes.default())
     BottomSheet(
@@ -202,23 +212,23 @@ fun WhatToEatSheet(vm: AppViewModel, nvm: NutritionViewModel, onDismiss: () -> U
     ) {
         NoticeLine(nvm)
         if (mode != DietModes.BALANCED) Text(
-            "${DietModes.byKey(mode).label}" + (DietModes.excludes(mode)?.let { ": leaving out $it" } ?: ""),
+            DietModes.byKey(mode).label + (DietModes.excludes(mode)?.let { ": leaving out $it" } ?: ""),
             fontSize = 12.sp, fontWeight = FontWeight(600), color = p.muted, modifier = Modifier.padding(bottom = 6.dp),
         )
         if (vm.presets.isEmpty()) Text(if (vm.presetsLoading) "Loading foods…" else "The food list didn't load. Try again in a moment.", fontSize = 13.sp, color = p.muted)
         if (picks.isNotEmpty()) {
             Text("Best fits right now", fontSize = 13.sp, fontWeight = FontWeight(800), color = p.ink)
-            picks.forEachIndexed { i, pk ->
+            picks.forEachIndexed { i, sg ->
                 if (i > 0) Hair()
-                PickRow(pk.food, pk.why, logging == pk.food.name) { scope.launch { logging = pk.food.name; nvm.logPick(vm, pk.food); logging = null } }
+                PickRow(sg, whyOf(sg, rem), logging == sg.preset.id) { scope.launch { logging = sg.preset.id; nvm.logPick(vm, sg); logging = null } }
             }
         }
         if (usual.isNotEmpty()) {
             Spacer(Modifier.height(12.dp))
             Text("Your usual", fontSize = 13.sp, fontWeight = FontWeight(800), color = p.ink)
-            usual.forEachIndexed { i, u ->
+            usual.forEachIndexed { i, sg ->
                 if (i > 0) Hair()
-                PickRow(u.food, "Logged ${u.times} times lately", logging == "u-" + u.food.name) { scope.launch { logging = "u-" + u.food.name; nvm.logPick(vm, u.food); logging = null } }
+                PickRow(sg, "One of your regulars", logging == "u-" + sg.preset.id) { scope.launch { logging = "u-" + sg.preset.id; nvm.logPick(vm, sg); logging = null } }
             }
         }
         Text(
@@ -227,6 +237,3 @@ fun WhatToEatSheet(vm: AppViewModel, nvm: NutritionViewModel, onDismiss: () -> U
         )
     }
 }
-
-/** A small "Adaptive targets" hint for the Goals screen when the check-in can't run yet. */
-fun adaptiveSummary(r: Adaptive.Result?): String? = r?.let { if (it.ready) null else it.missing.joinToString(" · ") }

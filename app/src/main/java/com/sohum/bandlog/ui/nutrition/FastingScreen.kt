@@ -71,12 +71,14 @@ import java.util.Locale
  * Why fasting is hidden for this person, or null when it's available: under 18, or a v2.10 safety
  * flag (very low BMI, rapid loss, repeated lowering) — the science spec's eating-disorder safeguards.
  */
-fun fastingBlock(vm: AppViewModel, ctx: Context): String? {
+fun fastingAccess(vm: AppViewModel, ctx: Context): Fasting.Access {
     val p = vm.profile
-    if (Goals.isTeen(Goals.ageYears(p.dob))) return "Not available under 18"
     val flags = Goals.edFlags(Goals.screenInput(p, weights = vm.weights.map { Goals.WeighIn(it.date, it.weightKg) }, edits = TargetEdits.read(ctx)))
-    return if (flags.any { it in setOf("very_low_bmi", "very_low_bmi_for_age", "rapid_loss", "repeated_lowering") }) "Not available right now" else null
+    return Fasting.access(Goals.ageYears(p.dob), flags)
 }
+
+/** The title of why fasting is hidden, or null when it's available. */
+fun fastingBlock(vm: AppViewModel, ctx: Context): String? = fastingAccess(vm, ctx).takeIf { !it.ok }?.title
 
 private val WHEN = DateTimeFormatter.ofPattern("EEE d MMM, h:mm a", Locale.ENGLISH)
 private fun whenLabel(ms: Long): String = Instant.ofEpochMilli(ms).atZone(com.sohum.bandlog.util.Dates.ZONE).format(WHEN)
@@ -87,7 +89,8 @@ fun FastingScreen(vm: AppViewModel, nvm: NutritionViewModel, onBack: () -> Unit)
     val p = palette
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    val block = fastingBlock(vm, ctx)
+    val access = fastingAccess(vm, ctx)
+    val block = access.title.takeIf { !access.ok }
     LaunchedEffect(Unit) { if (block == null) nvm.loadFasting(ctx) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(nvm.active) { while (nvm.active != null) { now = System.currentTimeMillis(); delay(1000) } }
@@ -104,11 +107,7 @@ fun FastingScreen(vm: AppViewModel, nvm: NutritionViewModel, onBack: () -> Unit)
                     Card {
                         Text(block, fontSize = 17.sp, fontWeight = FontWeight(800), color = p.ink)
                         Spacer(Modifier.height(6.dp))
-                        Text(
-                            if (block.contains("18")) "While your body is still growing, regular meals matter more than timing them. Fuel your training and school days."
-                            else "Regular meals look like the kinder choice for you right now. If food or your body has been on your mind a lot, talking to someone can help.",
-                            fontSize = 13.sp, color = p.muted, lineHeight = 18.sp,
-                        )
+                        Text(access.body, fontSize = 13.sp, color = p.muted, lineHeight = 18.sp)
                     }
                 }
                 return@SubPage
@@ -120,7 +119,7 @@ fun FastingScreen(vm: AppViewModel, nvm: NutritionViewModel, onBack: () -> Unit)
                 Card(padding = 20.dp) {
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                         val target = a?.targetHours ?: hours
-                        val elapsed = if (a != null) Fasting.elapsedHours(a.startedAtMs, now) else 0.0
+                        val elapsed = if (a != null) Fasting.hoursBetween(a.startedAtMs, now) else 0.0
                         FastRing(elapsed, target, Modifier.size(232.dp))
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(if (a != null) Fasting.clock(now - a.startedAtMs) else "0:00:00", fontSize = 34.sp, fontWeight = FontWeight(800), letterSpacing = (-1).sp, color = p.ink)
@@ -132,10 +131,10 @@ fun FastingScreen(vm: AppViewModel, nvm: NutritionViewModel, onBack: () -> Unit)
                     if (a != null) {
                         val left = a.goalAtMs - now
                         Text(
-                            if (left > 0) "Goal at ${whenLabel(a.goalAtMs)} · ${Fasting.duration(left)} to go" else "Goal reached. End whenever you're ready.",
+                            if (left > 0) "Goal at ${whenLabel(a.goalAtMs)} · ${Fasting.durationText(left / 3_600_000.0)} to go" else "Goal reached. End whenever you're ready.",
                             fontSize = 13.sp, color = p.muted, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
                         )
-                        Text(Fasting.stageAt(Fasting.elapsedHours(a.startedAtMs, now)).blurb, fontSize = 12.sp, color = p.muted, textAlign = TextAlign.Center, lineHeight = 16.sp, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+                        Text(Fasting.stageAt(Fasting.hoursBetween(a.startedAtMs, now)).note, fontSize = 12.sp, color = p.muted, textAlign = TextAlign.Center, lineHeight = 16.sp, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
                     }
                     Spacer(Modifier.height(14.dp))
                     if (a == null) {
@@ -153,10 +152,10 @@ fun FastingScreen(vm: AppViewModel, nvm: NutritionViewModel, onBack: () -> Unit)
                     Text("Hours fasting : hours eating", fontSize = 12.sp, color = p.muted)
                     Spacer(Modifier.height(10.dp))
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Fasting.PROTOCOLS.forEach { pr -> Chip(pr.label, !custom && hours == pr.hours, { custom = false; hours = pr.hours }) }
-                        Chip("Custom", custom || Fasting.PROTOCOLS.none { it.hours == hours }, { custom = true })
+                        Fasting.PROTOCOLS.forEach { pr -> Chip(pr.label, !custom && hours == pr.fastHours, { custom = false; hours = pr.fastHours }) }
+                        Chip("Custom", custom || Fasting.PROTOCOLS.none { it.fastHours == hours }, { custom = true })
                     }
-                    if (custom || Fasting.PROTOCOLS.none { it.hours == hours }) {
+                    if (custom || Fasting.PROTOCOLS.none { it.fastHours == hours }) {
                         Spacer(Modifier.height(10.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("Custom length", fontSize = 14.sp, color = p.ink, modifier = Modifier.weight(1f))
@@ -178,8 +177,8 @@ fun FastingScreen(vm: AppViewModel, nvm: NutritionViewModel, onBack: () -> Unit)
                             Box(Modifier.padding(top = 4.dp).size(10.dp).background(stageColor(s.key), CircleShape))
                             Spacer(Modifier.width(10.dp))
                             Column {
-                                Text("${s.label} · ${Fasting.fmtH(s.fromHours)} h+", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink)
-                                Text(s.blurb, fontSize = 12.sp, color = p.muted, lineHeight = 16.sp)
+                                Text("${s.label} · ${Fasting.fmtH(s.from)} h+", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink)
+                                Text(s.note, fontSize = 12.sp, color = p.muted, lineHeight = 16.sp)
                             }
                         }
                     }
@@ -202,14 +201,14 @@ fun FastingScreen(vm: AppViewModel, nvm: NutritionViewModel, onBack: () -> Unit)
     if (confirmEnd) AlertDialog(
         onDismissRequest = { confirmEnd = false }, containerColor = p.card,
         title = { Text("End this fast?", fontWeight = FontWeight(800), color = p.ink) },
-        text = { Text(nvm.active?.let { "You're at ${Fasting.duration(now - it.startedAtMs)} of ${Fasting.label(it.targetHours)}." } ?: "", color = p.muted) },
+        text = { Text(nvm.active?.let { "You're at ${Fasting.durationText(Fasting.hoursBetween(it.startedAtMs, now))} of ${Fasting.label(it.targetHours)}." } ?: "", color = p.muted) },
         confirmButton = { TextButton(onClick = { confirmEnd = false; scope.launch { busy = true; nvm.endFast(ctx); busy = false } }) { Text("End fast", color = p.ink, fontWeight = FontWeight(700)) } },
         dismissButton = { TextButton(onClick = { confirmEnd = false }) { Text("Keep going", color = p.muted) } },
     )
 }
 
 @Composable
-private fun stageColor(key: String) = when (key) { "fed" -> palette.blue; "fat" -> palette.orange; else -> palette.purple }
+private fun stageColor(key: String) = when (key) { "fed" -> palette.blue; "fat_burning" -> palette.orange; else -> palette.purple }
 
 @Composable
 private fun Stepper(label: String, enabled: Boolean, onClick: () -> Unit) {
@@ -227,7 +226,7 @@ private fun HistoryRow(f: FastingSession, onDelete: () -> Unit) {
     val hit = f.reachedGoal()
     Row(Modifier.fillMaxWidth().heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text(Fasting.duration(dur) + " of " + Fasting.label(f.targetHours), fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink)
+            Text(Fasting.durationText(dur / 3_600_000.0) + " of " + Fasting.label(f.targetHours), fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink)
             Text(whenLabel(f.startedAtMs), fontSize = 12.sp, color = p.muted)
         }
         Tag(if (hit) "Goal hit" else "Ended early", if (hit) p.green else p.muted, if (hit) p.greenBg else p.card2)
@@ -272,7 +271,7 @@ fun FastingHomeCard(nvm: NutritionViewModel, onOpen: () -> Unit) {
     val p = palette
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(a) { while (true) { now = System.currentTimeMillis(); delay(1000) } }
-    val elapsed = Fasting.elapsedHours(a.startedAtMs, now)
+    val elapsed = Fasting.hoursBetween(a.startedAtMs, now)
     Card(onClick = onOpen, padding = 14.dp) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(contentAlignment = Alignment.Center) {
@@ -284,7 +283,7 @@ fun FastingHomeCard(nvm: NutritionViewModel, onOpen: () -> Unit) {
                 Text("Fasting · ${Fasting.clock(now - a.startedAtMs)}", fontSize = 16.sp, fontWeight = FontWeight(800), color = p.ink)
                 val left = a.goalAtMs - now
                 Text(
-                    (if (left > 0) "${Fasting.duration(left)} to your ${Fasting.label(a.targetHours)} goal" else "Goal reached") + " · ${Fasting.stageAt(elapsed).label}",
+                    (if (left > 0) "${Fasting.durationText(left / 3_600_000.0)} to your ${Fasting.label(a.targetHours)} goal" else "Goal reached") + " · ${Fasting.stageAt(elapsed).label}",
                     fontSize = 12.sp, color = p.muted, maxLines = 1,
                 )
             }
