@@ -81,6 +81,11 @@ fun PreferencesScreen(vm: AppViewModel, themeMode: ThemeMode, onBack: () -> Unit
                         PrefValue(if (on == 0) "Off" else "$on on", if (on == 0) p.muted else p.green)
                     }
                     Hair()
+                    // v2.13 platform: Notifications (permission, protein nudge, inbox).
+                    SettingRow(com.sohum.bandlog.ui.components.LineIcons.Bell, p.ink, "Notifications", subtitle = "Squad nudges, protein check, inbox", onClick = { com.sohum.bandlog.ui.platform.PlatformNav.open(com.sohum.bandlog.ui.platform.PlatformPage.NOTIFICATIONS) }) {
+                        PrefValue(if (com.sohum.bandlog.notify.PlatformNotifications.permitted(ctx)) "On" else "Off", if (com.sohum.bandlog.notify.PlatformNotifications.permitted(ctx)) p.green else p.muted)
+                    }
+                    Hair()
                     SettingRow(Icons.Outlined.Lock, p.ink, "Privacy", subtitle = "Squad sharing: what your squads see", onClick = { onOpen(ProfilePage.PRIVACY) }) {
                         PrefValue(if (prof.shareStats) "Sharing stats" else "Streaks only")
                     }

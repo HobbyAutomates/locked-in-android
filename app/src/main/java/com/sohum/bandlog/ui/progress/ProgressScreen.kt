@@ -150,6 +150,9 @@ fun ProgressScreen(vm: AppViewModel, onOpenBadges: () -> Unit, onLogWeight: () -
             item(key = "macros") { Entrance(5, key = "macros") { MacrosCardV2(vm, range) } }
             item(key = "bmi") { Entrance(6, key = "bmi") { BmiCardV2(vm, bodyKg) } }
             item(key = "mealTimes") { Entrance(7, key = "mealTimes") { MealTimesCard(vm) } }
+            // v2.13 platform: muscles trained this week, and body / training / recaps / share cards.
+            item(key = "musclesWeek") { Entrance(7, key = "musclesWeek") { com.sohum.bandlog.ui.platform.MusclesWeekCard(vm) } }
+            item(key = "bodyTraining") { Entrance(8, key = "bodyTraining") { com.sohum.bandlog.ui.platform.BodyTrainingCard(vm) } }
             item(key = "moreToggle") {
                 Entrance(8, key = "moreToggle") {
                     Box(
@@ -528,7 +531,11 @@ private fun PhotosCard(vm: AppViewModel) {
     Card {
         RowSpaceBetween {
             Text("Progress photos", fontSize = 17.sp, fontWeight = FontWeight(700), color = p.ink)
-            if (vm.progressPhotos.isNotEmpty()) Text("${vm.progressPhotos.size}", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted)
+            // v2.13: the full manager (edit, delete, month grid, before / after).
+            Text(
+                if (vm.progressPhotos.isNotEmpty()) "See all ${vm.progressPhotos.size} ›" else "Manage ›", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.ink,
+                modifier = Modifier.heightIn(min = 44.dp).clickable { com.sohum.bandlog.ui.platform.PlatformNav.open(com.sohum.bandlog.ui.platform.PlatformPage.PHOTOS) }.padding(horizontal = 4.dp, vertical = 12.dp),
+            )
         }
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {

@@ -517,7 +517,9 @@ fun BmiCardV2(vm: AppViewModel, weightKg: Double?) {
             drawRoundRect(ink, Offset(x - 1.5.dp.toPx(), 14.dp.toPx()), Size(3.dp.toPx(), 20.dp.toPx()), CornerRadius(1.5.dp.toPx()), alpha = a)
         }
         val range = Bmi.healthyRange(prof.heightCm)
-        val whtr = Bmi.waistToHeight(prof.waistCm, prof.heightCm)
+        // v2.13: the newest body measurement's waist first, then the profile's.
+        val pvm: com.sohum.bandlog.ui.platform.PlatformViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+        val whtr = Bmi.waistToHeight(pvm.latestWaist ?: prof.waistCm, prof.heightCm)
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             BmiTile("Healthy weight", "${range.min.roundToInt()} – ${range.max.roundToInt()} kg", null, Modifier.weight(1f))

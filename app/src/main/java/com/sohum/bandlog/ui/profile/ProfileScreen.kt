@@ -358,6 +358,9 @@ fun ProfileScreen(
                 // ---- the list ----
                 Entrance(7, key = "list") {
                     ProfileCard(padding = 0.dp) {
+                        // v2.13 platform: Locked In Pro (everyone's on the beta, so every Pro feature is free).
+                        ListRow(LineIcons.Crown, "Locked In Pro", "Beta · all features", valueColor = accent) { com.sohum.bandlog.ui.platform.PlatformNav.open(com.sohum.bandlog.ui.platform.PlatformPage.PRO) }
+                        ListDivider()
                         ListRow(LineIcons.User, "Personal details", listOfNotNull(prof.age?.toString(), prof.heightCm?.let { "${it.roundToInt()} cm" }).joinToString(" · ")) { onOpen(ProfilePage.PERSONAL) }
                         ListDivider()
                         ListRow(LineIcons.Target, "Nutrition goals", if (prof.hideNumbers == true) "Set" else "${prof.calorieTarget} kcal") { onOpen(ProfilePage.GOALS) }

@@ -128,6 +128,8 @@ fun TodayScreen(
     val caloriesLeft = (budget - totals.calories).toInt().coerceAtLeast(0)
     if (isToday && vm.loadedOnce) androidx.compose.runtime.LaunchedEffect(caloriesLeft) { com.sohum.bandlog.widget.CaloriesWidget.publish(ctx, caloriesLeft, if (prof.hideNumbers == true) com.sohum.bandlog.util.Goals.calorieWords(totals.calories, budget.toDouble()) else null) }
 
+    val showRecap = com.sohum.bandlog.ui.platform.recapDue(vm) // v2.13 platform
+    val showSession = com.sohum.bandlog.ui.platform.todaySessionVisible() // v2.13 platform
     // v2.12: cards rise out of a soft blur one after another, once per visit (ui/motion).
     MotionScreen {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 110.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -141,7 +143,10 @@ fun TodayScreen(
                     }
                     // v2.8 declutter: the header keeps only Calendar. Refresh happens on resume and after
                     // every save; the week streak lives on Calendar and Progress.
-                    HeaderButton(onClick = onOpenCalendar) { Icon(Icons.Outlined.CalendarMonth, "Calendar", tint = p.ink, modifier = Modifier.size(18.dp)) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        com.sohum.bandlog.ui.platform.InboxBell() // v2.13 platform
+                        HeaderButton(onClick = onOpenCalendar) { Icon(Icons.Outlined.CalendarMonth, "Calendar", tint = p.ink, modifier = Modifier.size(18.dp)) }
+                    }
                 }
                 ErrorNote(vm.error, Modifier.padding(top = 8.dp))
             }
@@ -157,6 +162,7 @@ fun TodayScreen(
                 }
             }
         }
+        if (isToday && showRecap) item(key = "recapPrompt") { com.sohum.bandlog.ui.platform.RecapPrompt(vm) } // v2.13 platform
         item(key = "streak") { Entrance(1, key = "streak") { DayStreakRow(vm.dayStreak, vm.notice) { vm.dismissNotice() } } }
         item { Entrance(1, key = "weekStrip") { WeekStrip(today, selected, trained) { selected = it } } }
         item {
@@ -244,6 +250,7 @@ fun TodayScreen(
                 } }
             }
         }
+        if (isToday && showSession) item(key = "todaySession") { Entrance(4, key = "todaySession") { com.sohum.bandlog.ui.platform.TodaySessionCard(vm) } } // v2.13 platform
         item {
             Entrance(4, key = "card5") {
                 RowSpaceBetween {
