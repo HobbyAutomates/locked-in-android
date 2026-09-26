@@ -1,7 +1,5 @@
 package com.sohum.bandlog.ui.squad
 
-import com.sohum.bandlog.ui.components.hatchTrack
-
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -358,7 +356,7 @@ private fun ProgressBar(fraction: Float, color: Color, modifier: Modifier = Modi
     var go by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { go = true }
     val f by animateFloatAsState(if (go) fraction.coerceIn(0f, 1f) else 0f, Motion.spatialSlow(), label = "bar")
-    Box(modifier.fillMaxWidth().height(6.dp).hatchTrack(CircleShape)) {
+    Box(modifier.fillMaxWidth().height(6.dp).clip(CircleShape).background(p.track)) {
         if (f > 0f) Box(Modifier.fillMaxWidth(f).height(6.dp).clip(CircleShape).background(color))
     }
 }
