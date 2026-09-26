@@ -22,6 +22,8 @@ import com.sohum.bandlog.ui.platform.PlatformNav
  */
 object PlatformNotifications {
     const val INBOX_CHANNEL = "squad_inbox"
+    /** v2.14: the coach's morning note / evening nudge (kind 'coach'). */
+    const val COACH_CHANNEL = "coach_notes"
     const val PROTEIN_CHANNEL = "protein_nudge"
     const val REST_CHANNEL = "rest_timer"
     const val REST_DONE_CHANNEL = "rest_timer_done"
@@ -40,7 +42,8 @@ object PlatformNotifications {
                 },
             )
         }
-        make(INBOX_CHANNEL, "Squad & inbox", NotificationManager.IMPORTANCE_DEFAULT, "Nudges from your squad and other notices")
+        make(INBOX_CHANNEL, "Squad & inbox", NotificationManager.IMPORTANCE_DEFAULT, "Nudges from your squad and buddy, and other notices")
+        make(COACH_CHANNEL, "Coach", NotificationManager.IMPORTANCE_DEFAULT, "Your AI coach's morning note and evening nudge")
         make(PROTEIN_CHANNEL, "Protein nudge", NotificationManager.IMPORTANCE_DEFAULT, "An afternoon heads-up when you're well short on protein")
         make(REST_CHANNEL, "Rest timer", NotificationManager.IMPORTANCE_LOW, "The countdown between sets during a live workout", silent = true)
         make(REST_DONE_CHANNEL, "Rest timer done", NotificationManager.IMPORTANCE_HIGH, "Buzzes when your rest between sets is over")
@@ -63,6 +66,8 @@ object PlatformNotifications {
     /** Where tapping an inbox row goes: nudges (and anything pointing at /squad) open Squad, the rest the inbox. */
     fun targetFor(item: InboxItem): String = when {
         item.kind == "nudge" || item.url?.startsWith("/squad") == true -> PlatformNav.OPEN_SQUAD
+        item.kind == "coach" || item.url?.startsWith("/coach") == true -> PlatformNav.OPEN_COACH
+        item.kind == "buddy" || item.url?.startsWith("/buddy") == true -> PlatformNav.OPEN_BUDDY
         item.kind == "protein" -> PlatformNav.OPEN_MEAL
         else -> PlatformNav.OPEN_INBOX
     }
@@ -71,12 +76,12 @@ object PlatformNotifications {
     fun postInbox(context: Context, item: InboxItem) {
         ensureChannels(context)
         val code = 9400 + (item.id.hashCode() and 0x3FF)
-        val n = NotificationCompat.Builder(context, INBOX_CHANNEL)
+        val n = NotificationCompat.Builder(context, if (item.kind == "coach") COACH_CHANNEL else INBOX_CHANNEL)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(item.title)
             .setContentText(item.body.ifBlank { null })
             .setStyle(NotificationCompat.BigTextStyle().bigText(item.body))
-            .setCategory(if (item.kind == "nudge") NotificationCompat.CATEGORY_SOCIAL else NotificationCompat.CATEGORY_REMINDER)
+            .setCategory(if (item.kind == "nudge" || item.kind == "buddy") NotificationCompat.CATEGORY_SOCIAL else NotificationCompat.CATEGORY_REMINDER)
             .setAutoCancel(true)
             .setContentIntent(openIntent(context, code, targetFor(item), item.id))
             .build()

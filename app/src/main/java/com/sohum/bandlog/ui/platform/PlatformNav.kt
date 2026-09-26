@@ -30,6 +30,9 @@ object PlatformNav {
     const val OPEN_INBOX = "inbox"
     const val OPEN_WORKOUT = "workout"
     const val OPEN_MEAL = MainActivity.OPEN_MEAL
+    /** v2.14: a coach note (kind 'coach') opens the chat; a buddy notice (kind 'buddy') the buddy page. */
+    const val OPEN_COACH = "coach"
+    const val OPEN_BUDDY = "buddy"
     const val EXTRA_NOTIFICATION_ID = "notificationId"
 
     val stack = mutableStateListOf<PlatformPage>()
@@ -74,6 +77,8 @@ object PlatformNav {
             OPEN_SQUAD -> { closeAll(); squadTick++ }
             OPEN_INBOX -> open(PlatformPage.INBOX)
             OPEN_WORKOUT -> open(PlatformPage.WORKOUT)
+            OPEN_COACH -> { closeAll(); com.sohum.bandlog.ui.coach.CoachNav.open(com.sohum.bandlog.ui.coach.CoachPage.CHAT) }
+            OPEN_BUDDY -> { closeAll(); com.sohum.bandlog.ui.coach.CoachNav.open(com.sohum.bandlog.ui.coach.CoachPage.BUDDY) }
         }
     }
 

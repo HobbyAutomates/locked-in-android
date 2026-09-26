@@ -85,6 +85,9 @@ fun InboxScreen(pvm: PlatformViewModel, onBack: () -> Unit) {
                             pvm.markRead(item)
                             when (com.sohum.bandlog.notify.PlatformNotifications.targetFor(item)) {
                                 PlatformNav.OPEN_SQUAD -> { PlatformNav.closeAll(); PlatformNav.squadTick++ }
+                                // v2.14: the coach's note opens the chat, a buddy notice the buddy page.
+                                PlatformNav.OPEN_COACH -> { PlatformNav.closeAll(); com.sohum.bandlog.ui.coach.CoachNav.open(com.sohum.bandlog.ui.coach.CoachPage.CHAT) }
+                                PlatformNav.OPEN_BUDDY -> { PlatformNav.closeAll(); com.sohum.bandlog.ui.coach.CoachNav.open(com.sohum.bandlog.ui.coach.CoachPage.BUDDY) }
                                 else -> Unit
                             }
                         }
@@ -100,7 +103,12 @@ private fun InboxRow(item: InboxItem, onClick: () -> Unit) {
     val p = palette
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(16.dp), verticalAlignment = Alignment.Top) {
         Box(Modifier.size(36.dp).background(p.card2, CircleShape), contentAlignment = Alignment.Center) {
-            Icon(if (item.kind == "nudge") FistIcon else LineIcons.Bell, null, tint = p.ink, modifier = Modifier.size(17.dp))
+            when (item.kind) {
+                "nudge" -> Icon(FistIcon, null, tint = p.ink, modifier = Modifier.size(17.dp))
+                "coach" -> Icon(com.sohum.bandlog.ui.onboarding.OnbIcons.Star, null, tint = p.iris, modifier = Modifier.size(17.dp))
+                "buddy" -> Icon(com.sohum.bandlog.ui.onboarding.OnbIcons.Flame, null, tint = p.ember, modifier = Modifier.size(17.dp))
+                else -> Icon(LineIcons.Bell, null, tint = p.ink, modifier = Modifier.size(17.dp))
+            }
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
