@@ -145,7 +145,8 @@ fun TodayScreen(
 
     // v2.12: cards rise out of a soft blur one after another, once per visit (ui/motion).
     MotionScreen {
-    Box(Modifier.fillMaxSize().onGloballyPositioned { rootOrigin = it.positionInRoot() }) {
+    // v2.14 "the day warms up": an ember glow behind the top ring as today's targets are hit.
+    Box(Modifier.fillMaxSize().dayGlow(if (isToday && vm.loadedOnce) DayGlow.warmth(vm) else 0f).onGloballyPositioned { rootOrigin = it.positionInRoot() }) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 110.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Entrance(0, key = "header") {
