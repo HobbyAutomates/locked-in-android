@@ -98,6 +98,9 @@ import com.sohum.bandlog.ui.theme.DarkPalette
 import com.sohum.bandlog.ui.theme.Palette
 import com.sohum.bandlog.ui.theme.palette
 import com.sohum.bandlog.util.Names
+import com.sohum.bandlog.ui.theme.Brand
+import com.sohum.bandlog.ui.theme.Bricolage
+import com.sohum.bandlog.ui.theme.EyebrowStyle
 import kotlinx.coroutines.launch
 
 // v2.12 login: "Login B" welcome (floating preview cards + bottom sheet), an email sign-in form, and
@@ -131,10 +134,6 @@ internal fun parseInviteCode(raw: String): String? {
 
 @Composable
 private fun isDark(p: Palette) = p == DarkPalette
-
-/** Ink on the solid green (white in light mode, black in dark, like the mockups). */
-@Composable
-private fun onGreen(p: Palette) = if (isDark(p)) Color.Black else Color.White
 
 /**
  * [onInviteCode] hands a squad invite typed before sign-in to the shell, which joins it once the
@@ -223,8 +222,9 @@ fun LoginScreen(
 private fun Welcome(reason: String?, onStart: () -> Unit, onEmail: () -> Unit, onInvite: () -> Unit) {
     val p = palette
     val dark = isDark(p)
-    val glowA = if (dark) p.green.copy(alpha = 0.16f) else p.greenBg
-    val glowB = if (dark) p.blue.copy(alpha = 0.16f) else p.blueBg
+    // v2.14 brand: a mono wash (bone on ink / ink on bone); ember is saved for the one action.
+    val glowA = if (dark) Color.White.copy(alpha = 0.06f) else p.card2
+    val glowB = if (dark) Color.White.copy(alpha = 0.04f) else p.card
     Column(Modifier.fillMaxSize().background(p.bg)) {
         // Soft gradient with the floating preview cards. Decorative sample content: hidden from TalkBack.
         BoxWithConstraints(
@@ -256,7 +256,7 @@ private fun Welcome(reason: String?, onStart: () -> Unit, onEmail: () -> Unit, o
                 LockedInLogo(44.dp)
                 Spacer(Modifier.width(12.dp))
                 Column {
-                    Text("Locked In", fontSize = 24.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink, modifier = Modifier.semantics { heading() })
+                    Text("Locked In", fontFamily = Bricolage, fontSize = 24.sp, fontWeight = FontWeight(800), letterSpacing = (-0.8).sp, color = p.ink, modifier = Modifier.semantics { heading() })
                     Text("Your food, training and squad in one place", fontSize = 14.sp, color = p.muted, lineHeight = 19.sp)
                 }
             }
@@ -291,9 +291,9 @@ private fun PreviewCard(bg: Color, content: @Composable ColumnScope.() -> Unit) 
 @Composable
 private fun StreakCard(p: Palette) = PreviewCard(p.card) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(FlameLine, null, tint = p.orange, modifier = Modifier.size(26.dp))
+        Icon(FlameLine, null, tint = p.ember, modifier = Modifier.size(26.dp))
         Spacer(Modifier.width(6.dp))
-        Text("19", fontSize = 34.sp, fontWeight = FontWeight(800), letterSpacing = (-1).sp, color = p.ink, lineHeight = 36.sp)
+        Text("19", fontFamily = Bricolage, fontSize = 34.sp, fontWeight = FontWeight(800), letterSpacing = (-1).sp, color = p.ink, lineHeight = 36.sp)
         Spacer(Modifier.width(6.dp))
         Text("day\nstreak", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted, lineHeight = 15.sp)
     }
@@ -302,22 +302,23 @@ private fun StreakCard(p: Palette) = PreviewCard(p.card) {
 @Composable
 private fun RingsCard(p: Palette) = PreviewCard(p.card) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Ring(0.80f, p.blue, 46.dp, 6.dp)
-        Ring(0.95f, p.orange, 46.dp, 6.dp)
-        Ring(1f, p.purple, 46.dp, 6.dp)
+        Ring(0.80f, p.ink, 46.dp, 6.dp)
+        Ring(0.65f, p.ink, 46.dp, 6.dp)
+        Ring(0.9f, p.ink, 46.dp, 6.dp)
     }
     Text("Protein · Carbs · Fat", fontSize = 12.sp, fontWeight = FontWeight(600), color = p.muted, modifier = Modifier.padding(top = 6.dp))
 }
 
 @Composable
 private fun SquadCard(p: Palette) = PreviewCard(p.card) {
-    val onColor = onGreen(p)
+    // Mono avatars; "you" (the last one) is ember.
     Row(horizontalArrangement = Arrangement.spacedBy((-8).dp)) {
-        listOf("A" to p.blue, "R" to p.orange, "K" to p.purple, "S" to p.green).forEach { (l, c) ->
+        listOf("A", "R", "K", "S").forEachIndexed { i, l ->
+            val you = i == 3
             Box(
-                Modifier.size(34.dp).background(p.card, CircleShape).padding(2.dp).background(c, CircleShape),
+                Modifier.size(34.dp).background(p.card, CircleShape).padding(2.dp).background(if (you) p.ember else p.card2, CircleShape),
                 contentAlignment = Alignment.Center,
-            ) { Text(l, fontSize = 13.sp, fontWeight = FontWeight(800), color = onColor) }
+            ) { Text(l, fontSize = 13.sp, fontWeight = FontWeight(800), color = if (you) p.onEmber else p.ink) }
         }
     }
     Text("Ayaan logged lunch", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink, modifier = Modifier.padding(top = 8.dp))
@@ -325,29 +326,22 @@ private fun SquadCard(p: Palette) = PreviewCard(p.card) {
 }
 
 @Composable
-private fun KcalCard(p: Palette) = PreviewCard(p.green) {
-    val c = onGreen(p)
-    Text("Today", fontSize = 12.sp, fontWeight = FontWeight(600), color = c.copy(alpha = 0.8f))
-    Text("1,892", fontSize = 30.sp, fontWeight = FontWeight(800), letterSpacing = (-1).sp, color = c, lineHeight = 32.sp)
-    Text("of 2,200 kcal", fontSize = 12.sp, fontWeight = FontWeight(600), color = c.copy(alpha = 0.8f))
+private fun KcalCard(p: Palette) = PreviewCard(Brand.Ink) {
+    val c = Brand.Bone
+    Text("TODAY", style = EyebrowStyle.copy(fontSize = 10.sp), color = Brand.Mute)
+    Text("1,892", fontFamily = Bricolage, fontSize = 30.sp, fontWeight = FontWeight(800), letterSpacing = (-1).sp, color = c, lineHeight = 32.sp)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("of 2,200 kcal", fontSize = 12.sp, fontWeight = FontWeight(600), color = c.copy(alpha = 0.7f))
+        Spacer(Modifier.width(6.dp))
+        // Mint = on track (the only place it shows here).
+        Box(Modifier.size(6.dp).background(DarkPalette.mint, CircleShape))
+    }
 }
 
-/** The app mark: green tile, lock, and a flame cut into the lock body. */
+/** v2.14 brand: the padlock mark (ink tile, bone lock, ember keyhole). */
 @Composable
 private fun LockedInLogo(size: Dp) {
-    val p = palette
-    val fg = onGreen(p)
-    val shackle = remember { PathParser().parsePathString("M19 26v-5a9 9 0 0 1 18 0v5").toPath() }
-    val flame = remember { PathParser().parsePathString("M28 29c3 3 4 5 4 7a4 4 0 0 1-8 0c0-1.5.7-2.5 1.5-3.2.2 1.2 1 1.9 1.7 1.9-.7-2-.2-4 .8-5.7z").toPath() }
-    Canvas(Modifier.size(size).semantics { contentDescription = "Locked In logo" }) {
-        val k = this.size.width / 56f
-        scale(k, k, pivot = Offset.Zero) {
-            drawRoundRect(p.green, Offset.Zero, Size(56f, 56f), CornerRadius(16f, 16f))
-            drawPath(shackle, fg, style = Stroke(4f, cap = StrokeCap.Round))
-            drawRoundRect(fg, Offset(14f, 25f), Size(28f, 20f), CornerRadius(6f, 6f))
-            drawPath(flame, p.green)
-        }
-    }
+    com.sohum.bandlog.ui.components.LockedInMark(size, Modifier.semantics { contentDescription = "Locked In logo" })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -367,7 +361,7 @@ private fun SignInForm(
     FormScaffold(
         top = { BackButton(onBack) },
         bottom = {
-            SolidPill("Sign in", { focus.clearFocus(); onSubmit() }, enabled = canSubmit, busy = busy)
+            SolidPill("Sign in", { focus.clearFocus(); onSubmit() }, enabled = canSubmit, busy = busy, bg = p.ember, fg = p.onEmber)
             TextLink("New here? ", "Create account", onCreate)
         },
     ) {
@@ -390,7 +384,7 @@ private fun SignInForm(
         }
         Spacer(Modifier.height(12.dp))
         ErrorNote(error)
-        if (info != null) Text(info, color = p.green, fontSize = 13.sp, fontWeight = FontWeight(600))
+        if (info != null) Text(info, color = p.ink, fontSize = 13.sp, fontWeight = FontWeight(600))
     }
 }
 
@@ -405,7 +399,7 @@ private fun InviteForm(text: String, onText: (String) -> Unit, error: String?, o
     FormScaffold(
         top = { BackButton(onBack) },
         bottom = {
-            SolidPill("Continue", { focus.clearFocus(); onContinue() }, enabled = text.isNotBlank(), bg = p.green, fg = onGreen(p))
+            SolidPill("Continue", { focus.clearFocus(); onContinue() }, enabled = text.isNotBlank(), bg = p.ember, fg = p.onEmber)
             TextLink("Have an account? ", "Sign in", onSignIn)
         },
     ) {
@@ -450,8 +444,8 @@ private fun CreateFlow(
     FormScaffold(
         top = { StepHeader(step, onBack) },
         bottom = {
-            if (done) SolidPill("Go to sign in", onSignIn)
-            else SolidPill(if (step == 3) "Create account" else "Continue", { next() }, enabled = canNext, busy = busy, bg = p.green, fg = onGreen(p))
+            if (done) SolidPill("Go to sign in", onSignIn, bg = p.ember, fg = p.onEmber)
+            else SolidPill(if (step == 3) "Create account" else "Continue", { next() }, enabled = canNext, busy = busy, bg = p.ember, fg = p.onEmber)
             if (!done) TextLink("Have an account? ", "Sign in", onSignIn)
         },
     ) {
@@ -472,10 +466,10 @@ private fun CreateFlow(
                     if (pendingInvite != null) {
                         Spacer(Modifier.height(14.dp))
                         Row(
-                            Modifier.loginEnter(3, step).fillMaxWidth().background(p.greenBg, RoundedCornerShape(14.dp)).padding(12.dp, 10.dp),
+                            Modifier.loginEnter(3, step).fillMaxWidth().background(p.card2, RoundedCornerShape(14.dp)).padding(12.dp, 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Icon(TicketIcon, null, tint = p.green, modifier = Modifier.size(18.dp))
+                            Icon(TicketIcon, null, tint = p.ink, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(10.dp))
                             Text("Invite $pendingInvite saved. You'll join the squad after you sign up.", fontSize = 13.sp, color = p.ink, lineHeight = 18.sp)
                         }
@@ -515,8 +509,8 @@ private fun CreateFlow(
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Text(
-                                        c, fontSize = 14.sp, fontWeight = FontWeight(700), color = if (sel) onGreen(p) else p.ink,
-                                        modifier = Modifier.background(if (sel) p.green else p.card2, CircleShape).padding(horizontal = 14.dp, vertical = 10.dp),
+                                        c, fontSize = 14.sp, fontWeight = FontWeight(700), color = if (sel) p.btnInk else p.ink,
+                                        modifier = Modifier.background(if (sel) p.btn else p.card2, CircleShape).padding(horizontal = 14.dp, vertical = 10.dp),
                                     )
                                 }
                             }
@@ -528,8 +522,8 @@ private fun CreateFlow(
                         Modifier.loginEnter(3, step).fillMaxWidth().background(p.card, RoundedCornerShape(18.dp)).padding(horizontal = 16.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Box(Modifier.size(42.dp).background(p.orange, CircleShape), contentAlignment = Alignment.Center) {
-                            Text(shown.take(1).uppercase(), fontWeight = FontWeight(800), color = onGreen(p), fontSize = 16.sp)
+                        Box(Modifier.size(42.dp).background(p.ember, CircleShape), contentAlignment = Alignment.Center) {
+                            Text(shown.take(1).uppercase(), fontWeight = FontWeight(800), color = p.onEmber, fontSize = 16.sp)
                         }
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
@@ -542,14 +536,14 @@ private fun CreateFlow(
                             )
                             Text("How your posts will look", fontSize = 13.sp, color = p.muted)
                         }
-                        Icon(FlameLine, null, tint = p.orange, modifier = Modifier.size(20.dp))
+                        Icon(FlameLine, null, tint = p.ember, modifier = Modifier.size(20.dp))
                     }
                 }
                 else -> {
                     Headline(if (done) "Check your\ninbox" else "Ready to\nlock in?", Modifier.loginEnter(0, step))
                     Text(
                         if (done) info!! else "One tap and your account is made.",
-                        fontSize = 16.sp, color = if (done) p.green else p.muted, lineHeight = 22.sp,
+                        fontSize = 16.sp, color = if (done) p.ink else p.muted, lineHeight = 22.sp,
                         fontWeight = if (done) FontWeight(600) else FontWeight(400), modifier = Modifier.loginEnter(1, step),
                     )
                     Spacer(Modifier.height(24.dp))
@@ -587,7 +581,7 @@ private fun StepHeader(step: Int, onBack: () -> Unit) {
         Spacer(Modifier.width(14.dp))
         Row(Modifier.weight(1f).semantics(mergeDescendants = true) { contentDescription = "Step ${step + 1} of 4" }, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             repeat(4) { i ->
-                val c by animateColorAsState(if (i <= step) p.green else p.track, tween(600, easing = LoginEase), label = "seg$i")
+                val c by animateColorAsState(if (i <= step) p.ink else p.track, tween(600, easing = LoginEase), label = "seg$i")
                 Box(Modifier.weight(1f).height(5.dp).background(c, RoundedCornerShape(3.dp)))
             }
         }
@@ -619,11 +613,11 @@ private fun FormScaffold(top: @Composable () -> Unit, bottom: @Composable Column
 
 @Composable
 private fun Eyebrow(text: String, modifier: Modifier = Modifier) =
-    Text(text, fontSize = 14.sp, fontWeight = FontWeight(700), color = palette.green, modifier = modifier)
+    Text(text.uppercase(), style = EyebrowStyle, color = palette.ember, modifier = modifier)
 
 @Composable
 private fun Headline(text: String, modifier: Modifier = Modifier) =
-    Text(text, fontSize = 34.sp, fontWeight = FontWeight(800), letterSpacing = (-1).sp, lineHeight = 38.sp, color = palette.ink, modifier = modifier.semantics { heading() })
+    Text(text, fontFamily = Bricolage, fontSize = 34.sp, fontWeight = FontWeight(800), letterSpacing = (-1.2).sp, lineHeight = 38.sp, color = palette.ink, modifier = modifier.semantics { heading() })
 
 @Composable
 private fun BackButton(onClick: () -> Unit) {
@@ -677,7 +671,7 @@ private fun SolidPill(text: String, onClick: () -> Unit, enabled: Boolean = true
 @Composable
 private fun OutlinePill(text: String, onClick: () -> Unit, icon: ImageVector? = null) {
     val p = palette
-    val line = if (isDark(p)) Color(0xFF2A2A2D) else Color(0xFFD6D6DB)
+    val line = if (isDark(p)) Color(0xFF2A2A2D) else Color(0xFFD9D4CA)
     Row(
         Modifier.fillMaxWidth().height(54.dp).clip(CircleShape).border(1.5.dp, line, CircleShape)
             .clickable(onClick = onClick).semantics { role = Role.Button },
@@ -689,7 +683,7 @@ private fun OutlinePill(text: String, onClick: () -> Unit, icon: ImageVector? = 
 }
 
 /**
- * Soft filled field with a green focus ring. [big] is the one-question-per-screen size. Passwords
+ * Soft filled field with an ink focus ring. [big] is the one-question-per-screen size. Passwords
  * get a show/hide eye (a 48 dp target).
  */
 @Composable
@@ -701,7 +695,7 @@ private fun LoginField(
     val p = palette
     val source = remember { MutableInteractionSource() }
     val focused by source.collectIsFocusedAsState()
-    val ring by animateColorAsState(if (focused) p.green else Color.Transparent, tween(300), label = "ring")
+    val ring by animateColorAsState(if (focused) p.ink else Color.Transparent, tween(300), label = "ring")
     val shape = RoundedCornerShape(18.dp)
     Column {
         if (!big) Text(label, fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted, modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
@@ -713,7 +707,7 @@ private fun LoginField(
             BasicTextField(
                 value, onChange,
                 Modifier.weight(1f).semantics { contentDescription = label },
-                singleLine = true, textStyle = style, cursorBrush = SolidColor(p.green),
+                singleLine = true, textStyle = style, cursorBrush = SolidColor(p.ink),
                 keyboardOptions = keyboardOptions, keyboardActions = keyboardActions,
                 visualTransformation = if (password && !shown) PasswordVisualTransformation() else VisualTransformation.None,
                 interactionSource = source,
