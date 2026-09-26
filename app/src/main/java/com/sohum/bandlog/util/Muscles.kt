@@ -84,7 +84,7 @@ object MuscleMap {
         "lat pulldown" to t("lats", "biceps,upper_back,rear_delts"),
         "seated cable row" to t("upper_back,lats", "rear_delts,biceps"),
         "t-bar row" to t("upper_back,lats", "rear_delts,biceps,lower_back"),
-        "pull-up" to t("lats", "biceps,upper_back,forearms"),
+        "pull-up" to t("lats", "biceps,upper_back,rear_delts,forearms"),
         "chin-up" to t("lats,biceps", "upper_back,forearms"),
         "inverted row" to t("upper_back,lats", "rear_delts,biceps"),
         "back extension" to t("lower_back", "glutes,hamstrings"),
@@ -140,9 +140,14 @@ object MuscleMap {
         "cable crunch" to t("abs"),
         "burpee" to t("quads,chest", "front_delts,triceps,abs"),
         "jumping jack" to t("calves", "side_delts"),
-        "kettlebell swing" to t("glutes,hamstrings", "lower_back,front_delts,forearms"),
+        "kettlebell swing" to t("glutes,hamstrings", "lower_back,front_delts,abs"),
         "farmer’s walk" to t("forearms,traps", "abs,obliques"),
-        "clean and press" to t("front_delts,quads", "glutes,traps,triceps,hamstrings"),
+        "clean and press" to t("front_delts,glutes,quads", "traps,triceps,hamstrings,upper_back"),
+        // Web library names (v2.13 merge: canonical table is web src/lib/muscles.ts)
+        "dips" to t("chest,triceps", "front_delts"),
+        "diamond push-up" to t("triceps", "chest,front_delts"),
+        "ab wheel rollout" to t("abs", "lats,obliques"),
+        "jumping jacks" to t("calves", "glutes,side_delts"),
     )
 
     /** The older coarse groups ([Muscles.ALL], the workouts.muscles column) to regions, for band sessions. */
