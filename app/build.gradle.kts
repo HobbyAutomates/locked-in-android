@@ -89,5 +89,12 @@ dependencies {
     // On-device EAN/UPC reading for the barcode scanner (same Play-Services delivery as the OCR model).
     implementation("com.google.android.gms:play-services-mlkit-barcode-scanning:18.3.1")
 
+    // v2.13 platform: inbox polling every 15 min (no FCM project) + on app open.
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
+
+    // v2.13 platform: plain JVM unit tests (Pro, Epley, muscle map, routines, protein nudge).
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }
