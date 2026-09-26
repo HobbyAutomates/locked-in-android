@@ -322,9 +322,12 @@ class NutritionViewModel : ViewModel() {
         )
     }
 
-    /** One tap: logs [f] into the meal type for this time of day. */
+    /** The meal the sheet logs into when opened from Add food (its chosen type); null = the hour rule. */
+    var pickType by mutableStateOf<String?>(null)
+
+    /** One tap: logs [f] into [pickType], else the meal type for this time of day. */
     suspend fun logPick(vm: AppViewModel, f: WhatToEat.Food): Boolean {
-        val type = MealTypes.default()
+        val type = pickType?.takeIf { MealTypes.isType(it) } ?: MealTypes.default()
         val ok = vm.saveMeal(vm.today, f.name, listOf(itemFor(f, vm)), mealType = type, method = "what_to_eat")
         message = if (ok) "Logged ${f.name} to ${MealTypes.label(type)}" else vm.error
         return ok

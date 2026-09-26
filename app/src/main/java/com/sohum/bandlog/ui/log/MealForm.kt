@@ -109,6 +109,7 @@ private val CATEGORIES = listOf(
 )
 private const val YOURS = "yours"
 private const val RESTAURANT = "restaurant"
+private const val RECIPES = "recipes"
 private val SOURCE_LABEL = mapOf("dish" to "INDB", "ifct" to "IFCT", "usda" to "USDA", "custom" to "Curated", "off" to "OFF")
 
 private val UNIT_WORD = Regex(
@@ -216,6 +217,9 @@ fun MealForm(
     }
     LaunchedEffect(toastTick) { if (toast != null) { delay(1800); toast = null } }
 
+    // v2.13: recipes (Log → Recipes) and "What should I eat?" live in the nutrition view model.
+    val nvm: com.sohum.bandlog.ui.nutrition.NutritionViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    LaunchedEffect(Unit) { if (!nvm.recipesLoaded) nvm.loadRecipes() }
     val use = remember(vm.meals) { vm.foodUse() }
     val fats = remember(vm.presets) { vm.presets.filter { it.category == "fat" } }
 
@@ -347,6 +351,17 @@ fun MealForm(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 dictation.error?.let { Text(it, fontSize = 12.sp, color = p.orange, modifier = Modifier.padding(horizontal = 4.dp)) }
+                // v2.13 §6: suggestions for what's left today, logged into this meal type.
+                if (existing == null && text.isBlank() && date == com.sohum.bandlog.util.Dates.today()) Row(
+                    Modifier.fillMaxWidth().heightIn(min = 44.dp).background(p.card, RoundedCornerShape(14.dp))
+                        .clickable { nvm.pickType = type; nvm.page = com.sohum.bandlog.ui.nutrition.NutritionPage.WhatToEat }.padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(com.sohum.bandlog.ui.nutrition.NutritionIcons.Sparkles, null, tint = p.ink, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("What should I eat?", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink, modifier = Modifier.weight(1f))
+                    Text("Ideas for what's left", fontSize = 12.sp, color = p.muted)
+                }
                 ErrorNote(error)
 
                 val q = text.trim()
@@ -377,6 +392,9 @@ fun MealForm(
                         onPlate = items.mapNotNull { it.foodId }.groupingBy { it }.eachCount(),
                         onPreset = { pr -> sheet = SheetReq(QuantityFood.from(pr), null, -1, raw = pr.label, restaurant = pr.category == RESTAURANT) },
                         onSaved = { addSaved(it) },
+                        recipes = if (nvm.recipesUnavailable) null else nvm.recipes,
+                        onRecipe = { r -> val it = r.servingItem(); add(it, "Your recipe: ${r.name}", "1 serving") },
+                        onRecipes = { nvm.page = com.sohum.bandlog.ui.nutrition.NutritionPage.Recipes },
                     )
                 }
                 if (items.isEmpty() && pending.isEmpty()) Spacer(Modifier.navigationBarsPadding())
@@ -467,6 +485,8 @@ fun MealForm(
             onDismiss = { infoIdx = null },
             onPickVariant = { v -> pickVariant(idx, v); infoIdx = null },
             onPickAnother = { infoIdx = null; swapIdx = idx; text = row.name.removeSuffix(" (restaurant)") },
+            facts = com.sohum.bandlog.util.ItemInfo.facts(row.grams, row.confidence, row.source, row.foodId, row.sourceInfo?.kind),
+            macros = com.sohum.bandlog.ui.components.ItemMacros(row.grams, row.calories, row.proteinG, row.carbsG, row.fatG),
             onReport = {
                 reported = reported + key
                 val info = row.sourceInfo?.label ?: row.source
@@ -730,6 +750,10 @@ private fun PresetGrid(
     onPlate: Map<String, Int>,
     onPreset: (FoodPreset) -> Unit,
     onSaved: (SavedMeal) -> Unit,
+    /** v2.13 §8: your recipes (null = the table isn't there yet: no chip). */
+    recipes: List<com.sohum.bandlog.data.Recipe>? = null,
+    onRecipe: (com.sohum.bandlog.data.Recipe) -> Unit = {},
+    onRecipes: () -> Unit = {},
 ) {
     val p = palette
     val presets = vm.presets
@@ -741,7 +765,8 @@ private fun PresetGrid(
     val cats = remember(presets, use) {
         CATEGORIES.withIndex().sortedWith(compareByDescending<IndexedValue<Pair<String, String>>> { (_, c) -> presets.filter { it.category == c.first }.sumOf { use[it.foodId] ?: 0 } }.thenBy { it.index }).map { it.value }
     }
-    val chips = (if (hasYours) listOf(YOURS to "Yours") else emptyList()) + cats + (if (presets.any { it.category == RESTAURANT }) listOf(RESTAURANT to "Restaurant") else emptyList())
+    val chips = (if (hasYours) listOf(YOURS to "Yours") else emptyList()) + (if (recipes != null) listOf(RECIPES to "Recipes") else emptyList()) +
+        cats + (if (presets.any { it.category == RESTAURANT }) listOf(RESTAURANT to "Restaurant") else emptyList())
     val cat = selected?.takeIf { s -> chips.any { it.first == s } } ?: chips.first().first
 
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -757,6 +782,33 @@ private fun PresetGrid(
                 Text("The presets didn't load.", fontSize = 14.sp, color = p.ink)
                 Spacer(Modifier.height(10.dp))
                 PillButton("Try again", { vm.loadPresets(force = true) }, height = 46.dp)
+            }
+        }
+        return
+    }
+    if (cat == RECIPES && recipes != null) {
+        recipes.chunked(2).forEach { row ->
+            Row(Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { r ->
+                    val ps = r.perServing
+                    FoodCard(Modifier.weight(1f).fillMaxHeight(), r.name, "Your recipe · 1 serving · ${ps.kcal.roundToInt()} kcal · ${fmt(ps.protein)} g P", 0, image = {
+                        Box(Modifier.size(44.dp).background(p.orangeBg, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                            Icon(com.sohum.bandlog.ui.nutrition.NutritionIcons.ChefHat, null, tint = p.orange, modifier = Modifier.size(22.dp))
+                        }
+                    }) { onRecipe(r) }
+                }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+        Card(onClick = onRecipes) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(com.sohum.bandlog.ui.nutrition.NutritionIcons.ChefHat, null, tint = p.ink, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(if (recipes.isEmpty()) "Build your first recipe" else "Your recipes", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)
+                    Text("Add ingredients once, log a serving in one tap", fontSize = 12.sp, color = p.muted)
+                }
+                Text("›", fontSize = 18.sp, color = p.muted)
             }
         }
         return
@@ -974,13 +1026,20 @@ private fun PlateRow(
         if (d != 0) { delta = d; showDelta = true; delay(1400); showDelta = false }
     }
     // v2.5: two lines so nothing collides at fontScale 1.3 — [pic] name … [2 roti] [×], then kcal + macros (wrapping as whole chips).
+    // v2.13: the full name wraps to two lines and a tap shows all of it; a line under the macros says
+    // where the numbers came from, how sure we are and the likely gram range (the ⓘ has the detail).
+    var expanded by remember { mutableStateOf(false) }
+    val facts = remember(item.grams, item.confidence, item.source, item.foodId, item.sourceInfo) {
+        com.sohum.bandlog.util.ItemInfo.facts(item.grams, item.confidence, item.source, item.foodId, item.sourceInfo?.kind)
+    }
     Column(Modifier.padding(vertical = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             FoodImage(item.name, item.imageUrl, kind = FoodImages.kindFor(item.source), size = 38.dp, foodId = item.foodId)
             Spacer(Modifier.width(10.dp))
             Text(
                 item.name + if (item.source == "estimated") " ~" else "", fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink,
-                maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
+                maxLines = if (expanded) Int.MAX_VALUE else 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false).clickable(onClickLabel = if (expanded) "Show less" else "Show the full name") { expanded = !expanded },
             )
             InfoButton(item.name, check, onInfo)
             Spacer(Modifier.weight(1f))
@@ -1003,6 +1062,14 @@ private fun PlateRow(
                         Text((if (delta > 0) "+" else "") + "$delta kcal", fontSize = 11.sp, fontWeight = FontWeight(700), color = if (delta > 0) p.btnInk else p.ink, maxLines = 1)
                     }
                 }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val (dot, _) = com.sohum.bandlog.ui.nutrition.confidenceColors(facts.level)
+                Box(Modifier.size(6.dp).background(dot, CircleShape))
+                Text(
+                    "  ${facts.kind} · ${facts.level.replaceFirstChar { it.uppercase() }} · likely ${com.sohum.bandlog.util.ItemInfo.rangeLabel(facts)}",
+                    fontSize = 11.sp, color = p.muted, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
             }
             if (cookedInLabel != null) Text(cookedInLabel, fontSize = 11.sp, color = p.muted)
             else if (showCookedIn) Row(

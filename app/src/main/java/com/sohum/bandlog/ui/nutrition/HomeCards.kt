@@ -58,7 +58,7 @@ fun NutritionShortcuts(vm: AppViewModel, nvm: NutritionViewModel) {
     val ctx = LocalContext.current
     val fastingOk = fastingBlock(vm, ctx) == null
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Shortcut(NutritionIcons.Sparkles, "What to eat") { nvm.page = NutritionPage.WhatToEat }
+        Shortcut(NutritionIcons.Sparkles, "What to eat") { nvm.pickType = null; nvm.page = NutritionPage.WhatToEat }
         if (fastingOk) Shortcut(NutritionIcons.Timer, "Fasting") { nvm.page = NutritionPage.Fasting }
         Shortcut(NutritionIcons.Pill, "Micros") { nvm.page = NutritionPage.Micros }
         Shortcut(NutritionIcons.ChefHat, "Recipes") { nvm.page = NutritionPage.Recipes }
@@ -143,7 +143,7 @@ fun WhatToEatCard(vm: AppViewModel, nvm: NutritionViewModel) {
                 Text("What should I eat?", fontSize = 16.sp, fontWeight = FontWeight(800), color = p.ink)
                 Text("${rem.kcal.roundToInt()} kcal and ${rem.protein.roundToInt()} g protein left", fontSize = 12.sp, color = p.muted)
             }
-            Box(Modifier.heightIn(min = 44.dp).clickable { nvm.page = NutritionPage.WhatToEat }.padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.heightIn(min = 44.dp).clickable { nvm.pickType = null; nvm.page = NutritionPage.WhatToEat }.padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {
                 Text("See all", fontSize = 13.sp, fontWeight = FontWeight(700), color = p.ink)
             }
         }
@@ -195,7 +195,7 @@ fun WhatToEatSheet(vm: AppViewModel, nvm: NutritionViewModel, onDismiss: () -> U
     val picks = remember(vm.presets, vm.meals, mode) { nvm.picks(vm, 5) }
     val usual = remember(vm.meals, mode) { nvm.usual(vm) }
     var logging by remember { mutableStateOf<String?>(null) }
-    val type = MealTypes.label(MealTypes.default())
+    val type = MealTypes.label(nvm.pickType?.takeIf { MealTypes.isType(it) } ?: MealTypes.default())
     BottomSheet(
         title = "What should I eat?",
         subtitle = "${rem.kcal.roundToInt()} kcal · ${rem.protein.roundToInt()} g protein · ${rem.carbs.roundToInt()} g carbs · ${rem.fat.roundToInt()} g fat left. Tap + to log to $type.",

@@ -95,10 +95,14 @@ fun SourceSheet(
     onPickVariant: ((FoodVariant) -> Unit)?,
     onPickAnother: (() -> Unit)?,
     onReport: () -> Unit,
+    /** v2.13 (optional): AI estimate vs database match, confidence + why, the gram range and this row's macros. */
+    facts: com.sohum.bandlog.util.ItemInfo.Facts? = null,
+    macros: ItemMacros? = null,
 ) {
     val p = palette
     val uri = LocalUriHandler.current
     BottomSheet(title = "Where's this from?", subtitle = name, onDismiss = onDismiss) {
+        if (facts != null) FactsBlock(facts, macros)
         Column(Modifier.fillMaxWidth().background(p.card2, RoundedCornerShape(16.dp)).padding(14.dp, 12.dp)) {
             if (info == null) Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = p.muted)
@@ -114,7 +118,7 @@ fun SourceSheet(
             }
         }
         Spacer(Modifier.height(12.dp))
-        Text("Confidence: $confidence", fontSize = 13.sp, color = p.ink, modifier = Modifier.padding(horizontal = 4.dp))
+        if (facts == null) Text("Confidence: $confidence", fontSize = 13.sp, color = p.ink, modifier = Modifier.padding(horizontal = 4.dp))
         Text(per100, fontSize = 13.sp, color = p.muted, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
         Spacer(Modifier.height(6.dp))
         if (variants.size > 1 && onPickVariant != null) {
@@ -128,5 +132,42 @@ fun SourceSheet(
         Box(Modifier.heightIn(min = 44.dp).clickable(enabled = !reported, onClick = onReport).padding(horizontal = 4.dp), contentAlignment = Alignment.CenterStart) {
             Text(if (reported) "Reported — thanks, we'll check it" else "Report a wrong number", fontSize = 13.sp, fontWeight = FontWeight(600), color = if (reported) p.muted else p.red)
         }
+    }
+}
+
+/** v2.13: one row's own numbers, for the richer ⓘ sheet. */
+data class ItemMacros(val grams: Double, val kcal: Double, val protein: Double, val carbs: Double, val fat: Double)
+
+/** The top of the v2.13 ⓘ sheet: kind + confidence chips, the one-line why, the gram range and the row's macros. */
+@Composable
+private fun FactsBlock(f: com.sohum.bandlog.util.ItemInfo.Facts, m: ItemMacros?) {
+    val p = palette
+    val (fg, bg) = when (f.level) { "high" -> p.green to p.greenBg; "medium" -> p.orange to p.orangeBg; else -> p.red to p.redBg }
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.background(if (f.kind == "AI estimate") p.purpleBg else p.blueBg, RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 3.dp)) {
+            Text(f.kind, fontSize = 12.sp, fontWeight = FontWeight(700), color = if (f.kind == "AI estimate") p.purple else p.blue)
+        }
+        Box(Modifier.background(bg, RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 3.dp)) {
+            Text("${f.level.replaceFirstChar { it.uppercase() }} confidence", fontSize = 12.sp, fontWeight = FontWeight(700), color = fg)
+        }
+    }
+    Text(f.why, fontSize = 13.sp, color = p.ink, lineHeight = 18.sp, modifier = Modifier.padding(top = 6.dp, start = 2.dp))
+    Spacer(Modifier.height(10.dp))
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Fact(Modifier.weight(1f), "Amount", m?.let { "${it.grams.roundToInt()} g" } ?: "—", "likely " + com.sohum.bandlog.util.ItemInfo.rangeLabel(f))
+        if (m != null) Fact(Modifier.weight(1f), "Energy", "${m.kcal.roundToInt()} kcal", "P ${one(m.protein)} · C ${one(m.carbs)} · F ${one(m.fat)} g")
+    }
+    Spacer(Modifier.height(12.dp))
+}
+
+private fun one(v: Double): String = ((v * 10).roundToInt() / 10.0).let { if (it == it.toLong().toDouble()) it.toLong().toString() else it.toString() }
+
+@Composable
+private fun Fact(modifier: Modifier, label: String, value: String, sub: String) {
+    val p = palette
+    Column(modifier.background(p.card2, RoundedCornerShape(14.dp)).padding(12.dp, 10.dp)) {
+        Text(label, fontSize = 11.sp, fontWeight = FontWeight(700), color = p.muted)
+        Text(value, fontSize = 17.sp, fontWeight = FontWeight(800), color = p.ink)
+        Text(sub, fontSize = 11.sp, color = p.muted, maxLines = 2)
     }
 }
