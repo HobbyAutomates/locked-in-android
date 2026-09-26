@@ -51,15 +51,25 @@ import com.sohum.bandlog.util.OnboardingV2
 /** Whether Home should offer "Tune your plan": onboarded_v2 is false (not missing), the profile is complete, and it wasn't dismissed. */
 fun tuneVisible(vm: AppViewModel): Boolean {
     val pr = vm.profile
-    return pr.onboardedV2 == false && pr.weightKg != null && pr.heightCm != null && pr.dob != null && !OnbStore.tuneDismissed && !OnbStore.doneLocally
+    return (pr.onboardedV2 == false && pr.weightKg != null && pr.heightCm != null && pr.dob != null && !OnbStore.tuneDismissed && !OnbStore.doneLocally) ||
+        skippedIncomplete(vm)
+}
+
+/**
+ * v2.15 beta: onboarding was skipped and the profile still has no height / weight / birthday. Home
+ * offers "Tune your plan" (not dismissible), and it reopens the full flow rather than the three questions.
+ */
+fun skippedIncomplete(vm: AppViewModel): Boolean {
+    val pr = vm.profile
+    return com.sohum.bandlog.util.Beta.SKIP_ONBOARDING && OnbStore.skipped && (pr.weightKg == null || pr.heightCm == null || pr.dob == null)
 }
 
 @Composable
-fun TuneCard(onDismiss: () -> Unit) {
+fun TuneCard(onOpen: () -> Unit = { CoachNav.open(CoachPage.TUNE) }, onDismiss: (() -> Unit)?) {
     val p = palette
     Box(Modifier.fillMaxWidth().background(p.card, RoundedCornerShape(20.dp))) {
         Row(
-            Modifier.fillMaxWidth().pressable().clickable { CoachNav.open(CoachPage.TUNE) }.padding(start = 14.dp, end = 44.dp, top = 14.dp, bottom = 14.dp),
+            Modifier.fillMaxWidth().pressable().clickable(onClick = onOpen).padding(start = 14.dp, end = 44.dp, top = 14.dp, bottom = 14.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             CoachAvatar(40.dp)
@@ -68,7 +78,7 @@ fun TuneCard(onDismiss: () -> Unit) {
                 Text("Three quick questions and your new AI coach knows how to talk to you.", fontSize = 13.sp, lineHeight = 18.sp, color = p.muted)
             }
         }
-        Box(Modifier.align(Alignment.TopEnd).padding(4.dp).size(36.dp).clickable(onClickLabel = "Hide", onClick = onDismiss).semantics { contentDescription = "Hide" }, contentAlignment = Alignment.Center) {
+        if (onDismiss != null) Box(Modifier.align(Alignment.TopEnd).padding(4.dp).size(36.dp).clickable(onClickLabel = "Hide", onClick = onDismiss).semantics { contentDescription = "Hide" }, contentAlignment = Alignment.Center) {
             Icon(OnbIcons.X, null, tint = p.muted, modifier = Modifier.size(16.dp))
         }
     }
@@ -158,7 +168,8 @@ fun v214CardsVisible(vm: AppViewModel, cvm: CoachViewModel): Boolean = cvm.noteA
 fun V214HomeCards(vm: AppViewModel, cvm: CoachViewModel, onLogMeal: (String) -> Unit) {
     var tuneHidden by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        if (!tuneHidden && tuneVisible(vm)) TuneCard { OnbStore.tuneDismissed = true; tuneHidden = true }
+        if (skippedIncomplete(vm)) TuneCard(onOpen = { OnbStore.skipped = false; vm.onboardingSkipped = false }, onDismiss = null)
+        else if (!tuneHidden && tuneVisible(vm)) TuneCard { OnbStore.tuneDismissed = true; tuneHidden = true }
         TodayNoteCards(cvm, onLogMeal)
         BuddyCard(cvm)
     }

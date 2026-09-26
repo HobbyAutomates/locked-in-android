@@ -163,6 +163,7 @@ fun onbSteps(a: OnboardingV2.Answers, hasLog: Boolean, signedIn: Boolean): List<
  * @param onSignIn "I already have an account" / "I've confirmed my email": the sign-in form (the
  *   answers stay on the device and are saved after that sign-in).
  * @param onSquadCode a squad code typed on the buddy screen (joined once the shell is up).
+ * @param onSkip v2.15 beta: the top bar's "Skip" (shown only while [com.sohum.bandlog.util.Beta.SKIP_ONBOARDING] is on).
  */
 @Composable
 fun OnboardingV2Screen(
@@ -172,6 +173,7 @@ fun OnboardingV2Screen(
     onAccountReady: () -> Unit = {},
     onSignIn: () -> Unit = {},
     onSquadCode: (String) -> Unit = {},
+    onSkip: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     var a by remember { mutableStateOf(OnbStore.answers) }
@@ -217,6 +219,8 @@ fun OnboardingV2Screen(
         }
     }
 
+    val skip = onSkip?.takeIf { com.sohum.bandlog.util.Beta.SKIP_ONBOARDING }?.let { f -> { if (!busy) f() } }
+    androidx.compose.runtime.CompositionLocalProvider(LocalOnbSkip provides skip) {
     AnimatedContent(step, label = "onb", transitionSpec = { fadeIn(tween(260)).togetherWith(fadeOut(tween(160))) }) { s ->
         MotionScreen {
             when (s) {
@@ -257,6 +261,7 @@ fun OnboardingV2Screen(
                 OnbStep.SAVE -> SaveScreen(a, plan, onName = { update(a.copy(name = it)) }, onAccountReady = onAccountReady, onSignIn = onSignIn, onBack = ::back)
             }
         }
+    }
     }
 }
 

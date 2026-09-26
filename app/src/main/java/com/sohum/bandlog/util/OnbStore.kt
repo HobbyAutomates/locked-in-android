@@ -90,6 +90,11 @@ object OnbStore {
         get() = ready && prefs.getBoolean("tune_dismissed", false)
         set(v) { if (ready) prefs.edit().putBoolean("tune_dismissed", v).apply() }
 
+    /** v2.15 beta: the flow was skipped on this device, so Home shows instead of onboarding (until sign-out or Tune your plan). */
+    var skipped: Boolean
+        get() = ready && prefs.getBoolean("skipped", false)
+        set(v) { if (ready) prefs.edit().putBoolean("skipped", v).apply() }
+
     /** Clears the flow once it has been saved (keeps the device id and the local flags). */
     fun clearFlow() {
         if (!ready) return

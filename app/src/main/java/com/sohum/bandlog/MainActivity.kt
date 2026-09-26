@@ -133,7 +133,11 @@ class MainActivity : ComponentActivity() {
                         // so a brand-new account never flashes the empty tab shell.
                         !vm.loadedOnce && vm.error == null -> BootSplash()
                         // v2.14: a signed-in account without height / weight / birthday gets the new flow (no Save screen).
-                        vm.needsOnboarding -> OnboardingV2Screen(signedIn = true, onExit = { vm.onboardingSkipped = true }, onFinished = { vm.refresh() }, onSquadCode = { joinCode.value = it })
+                        vm.needsOnboarding -> OnboardingV2Screen(
+                            signedIn = true, onExit = { vm.onboardingSkipped = true }, onFinished = { vm.refresh() }, onSquadCode = { joinCode.value = it },
+                            // v2.15 beta Skip: save nothing extra, land on Home ("Tune your plan" brings the flow back).
+                            onSkip = { com.sohum.bandlog.util.OnbStore.skipped = true; vm.onboardingSkipped = true },
+                        )
                         else -> MainShell(vm, updateVm, themeMode, openMealTick.intValue, openWrapTick.intValue, openWaterTick.intValue, joinCode.value, { joinCode.value = null }) { themeMode = it; ThemePrefs.set(this, it) }
                     }
                 }
@@ -197,6 +201,7 @@ class MainActivity : ComponentActivity() {
 private fun SignedOut(vm: AppViewModel, onSquadCode: (String) -> Unit) {
     var onboarding by rememberSaveable { mutableStateOf(com.sohum.bandlog.util.OnbStore.step > 0 && vm.signOutReason == null) }
     var signInFirst by rememberSaveable { mutableStateOf(false) }
+    var createFirst by rememberSaveable { mutableStateOf(false) }
     if (onboarding) {
         OnboardingV2Screen(
             signedIn = false,
@@ -204,11 +209,20 @@ private fun SignedOut(vm: AppViewModel, onSquadCode: (String) -> Unit) {
             onAccountReady = { vm.onSignedIn() },
             onSignIn = { onboarding = false; signInFirst = true },
             onSquadCode = onSquadCode,
+            // v2.15 beta Skip: straight to the email sign-up / sign-in. Nothing is replayed after it,
+            // so the account gets the default targets and Home (not the flow) shows once signed in.
+            onSkip = {
+                com.sohum.bandlog.util.OnbStore.pending = false
+                com.sohum.bandlog.util.OnbStore.step = 0
+                com.sohum.bandlog.util.OnbStore.skipped = true
+                onboarding = false; signInFirst = false; createFirst = true
+            },
         )
     } else {
         LoginScreen(
             reason = vm.signOutReason, onInviteCode = onSquadCode, onSignedIn = { vm.onSignedIn() },
-            onGetStarted = { onboarding = true }, startOnSignIn = signInFirst, prefillEmail = com.sohum.bandlog.util.OnbStore.pendingEmail,
+            onGetStarted = { com.sohum.bandlog.util.OnbStore.skipped = false; createFirst = false; onboarding = true }, startOnSignIn = signInFirst, prefillEmail = com.sohum.bandlog.util.OnbStore.pendingEmail,
+            startOnCreate = createFirst,
         )
     }
 }

@@ -147,9 +147,11 @@ fun LoginScreen(
     /** v2.14: back from the onboarding's "I already have an account" / "I've confirmed". */
     startOnSignIn: Boolean = false,
     prefillEmail: String? = null,
+    /** v2.15 beta: onboarding's "Skip" opens the email sign-up (the old default-targets path; it links to sign-in). */
+    startOnCreate: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
-    var stage by rememberSaveable { mutableIntStateOf(if (reason != null || startOnSignIn) SIGN_IN else WELCOME) }
+    var stage by rememberSaveable { mutableIntStateOf(if (reason != null || startOnSignIn) SIGN_IN else if (startOnCreate) CREATE else WELCOME) }
     var step by rememberSaveable { mutableIntStateOf(0) }
     var email by rememberSaveable { mutableStateOf(prefillEmail.orEmpty()) }
     var password by rememberSaveable { mutableStateOf("") }

@@ -108,10 +108,17 @@ object OnbIcons {
     val SECTIONS by lazy { listOf(Utensils, Flame, User, Dumbbell, Brain, Users) }
 }
 
-/** Back button + the 6-icon section pill ([section] 0..5 is dark, the rest dimmed). */
+/**
+ * v2.15 beta: the onboarding's "Skip" (see [com.sohum.bandlog.util.Beta.SKIP_ONBOARDING]). The
+ * flow provides it; null (the default, and in Tune your plan) means no Skip button.
+ */
+val LocalOnbSkip = androidx.compose.runtime.staticCompositionLocalOf<(() -> Unit)?> { null }
+
+/** Back button + the 6-icon section pill ([section] 0..5 is dark, the rest dimmed), then a quiet "Skip" in the beta. */
 @Composable
 fun OnbTopBar(section: Int?, onBack: (() -> Unit)?) {
     val p = palette
+    val skip = LocalOnbSkip.current
     Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         if (onBack != null) {
             Box(Modifier.size(40.dp).background(p.card, CircleShape).clickable(onClickLabel = "Back", onClick = onBack), contentAlignment = Alignment.Center) {
@@ -129,6 +136,12 @@ fun OnbTopBar(section: Int?, onBack: (() -> Unit)?) {
                     ) { Icon(icon, null, tint = if (on) p.btnInk else p.ink, modifier = Modifier.size(15.dp)) }
                 }
             }
+        }
+        if (skip != null) {
+            Text(
+                "Skip", fontSize = 14.5.sp, fontWeight = FontWeight(600), color = p.muted,
+                modifier = Modifier.padding(start = 6.dp).clickable(onClickLabel = "Skip onboarding", onClick = skip).padding(horizontal = 8.dp, vertical = 10.dp),
+            )
         }
     }
 }
@@ -166,7 +179,7 @@ fun OnbScaffold(
 ) {
     val p = palette
     Column(Modifier.fillMaxSize().background(p.bg).statusBarsPadding().imePadding()) {
-        if (section != null || onBack != null) OnbTopBar(section, onBack)
+        if (section != null || onBack != null || LocalOnbSkip.current != null) OnbTopBar(section, onBack)
         Column(Modifier.weight(1f).fillMaxWidth().then(if (scroll) Modifier.verticalScroll(rememberScrollState()) else Modifier).padding(bottom = 16.dp), content = body)
         Column(
             Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 20.dp, end = 20.dp, bottom = 18.dp, top = 6.dp),

@@ -100,7 +100,7 @@ class AppViewModel : ViewModel() {
      * (or filled them in by hand), which is exactly what the plan generator needs.
      */
     val needsOnboarding: Boolean
-        get() = signedIn && loadedOnce && !onboardingSkipped &&
+        get() = signedIn && loadedOnce && !onboardingSkipped && !(com.sohum.bandlog.util.Beta.SKIP_ONBOARDING && com.sohum.bandlog.util.OnbStore.skipped) &&
             (profile.weightKg == null || profile.heightCm == null || profile.dob == null)
 
     // ---- v2.14 milestone flood ----
@@ -913,7 +913,7 @@ class AppViewModel : ViewModel() {
             SupabaseAuth.signOut()
             signedIn = false; workouts = emptyList(); meals = emptyList(); weights = emptyList(); exercises = emptyList(); water = emptyList(); progressPhotos = emptyList()
             profile = Profile(); loadedOnce = false; totalMeals = 0; allWorkoutDates = emptyList()
-            onboardingSkipped = false; nudges = emptyList(); rolledYesterday = false
+            onboardingSkipped = false; com.sohum.bandlog.util.OnbStore.skipped = false; nudges = emptyList(); rolledYesterday = false
         }
     }
 }
