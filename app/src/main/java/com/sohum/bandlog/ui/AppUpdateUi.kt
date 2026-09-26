@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
@@ -94,7 +96,8 @@ fun UpdateDialog(vm: UpdateViewModel) {
         onDismissRequest = { if (!vm.downloading) vm.dismiss() },
         title = { Text("Update available") },
         text = {
-            Column {
+            // v2.13: long release notes scroll instead of pushing the buttons off screen.
+            Column(Modifier.heightIn(max = 360.dp).verticalScroll(androidx.compose.foundation.rememberScrollState())) {
                 Text("Version ${update.versionName} is ready to install.")
                 if (update.notes.isNotBlank()) {
                     Spacer(Modifier.height(8.dp))

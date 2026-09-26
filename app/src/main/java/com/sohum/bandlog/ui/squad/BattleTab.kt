@@ -21,10 +21,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -290,7 +288,8 @@ private fun SnapSheet(vm: AppViewModel, groupId: String, onDismiss: () -> Unit) 
     }
 
     com.sohum.bandlog.ui.components.BottomSheet(title = "Snap your plate", onDismiss = onDismiss) {
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+        // v2.13: BottomSheet scrolls its body itself now (a second unbounded scroll would crash).
+        Column(Modifier.fillMaxWidth()) {
             ErrorNote(error, Modifier.padding(bottom = 8.dp))
             val e = est
             if (e == null) {

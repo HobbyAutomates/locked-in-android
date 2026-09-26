@@ -2,6 +2,7 @@ package com.sohum.bandlog.ui.profile
 
 import android.app.DatePickerDialog
 import androidx.compose.foundation.background
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -159,7 +160,8 @@ private fun LogWeightDialog(vm: AppViewModel, entry: com.sohum.bandlog.data.Weig
     var busy by remember { mutableStateOf(false) }
 
     Dialog(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().background(p.card, RoundedCornerShape(28.dp)).padding(22.dp)) {
+        // v2.13: scrolls on short screens / big font sizes / with the keyboard up.
+        Column(Modifier.fillMaxWidth().background(p.card, RoundedCornerShape(28.dp)).verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(22.dp)) {
             Text(if (entry != null) "Edit weigh-in" else "Log weight", fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.5).sp, color = p.ink)
             Spacer(Modifier.height(14.dp))
             RowSpaceBetween {
