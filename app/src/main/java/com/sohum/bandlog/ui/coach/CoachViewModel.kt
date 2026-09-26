@@ -31,6 +31,8 @@ object CoachNav {
     val page: CoachPage? get() = stack.lastOrNull()
     /** A message to put in the chat box when it opens (Today's note "Reply" leaves it empty). */
     var prompt by mutableStateOf<String?>(null)
+    /** A buddy code from an invite link (…/buddy/<code>), filled into the buddy page once. */
+    var buddyCode by mutableStateOf<String?>(null)
 
     fun open(p: CoachPage) { if (stack.lastOrNull() == p) return; stack.remove(p); stack.add(p) }
     fun back() { if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex) }

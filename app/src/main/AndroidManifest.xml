@@ -71,6 +71,8 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" android:host="web-production-ff1cf.up.railway.app" android:pathPrefix="/join/" />
+                <!-- v2.14 buddy invites: …/buddy/<code> -->
+                <data android:scheme="https" android:host="web-production-ff1cf.up.railway.app" android:pathPrefix="/buddy/" />
             </intent-filter>
         </activity>
         <!-- v2.6 water reminders (fire inside the window until the goal is hit) + the "+1 glass" action. -->

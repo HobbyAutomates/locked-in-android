@@ -677,8 +677,8 @@ private fun pickTime(ctx: android.content.Context, current: String, onPick: (Str
 fun BuddyPage(cvm: CoachViewModel, onBack: () -> Unit) {
     val p = palette
     val ctx = LocalContext.current
-    var code by remember { mutableStateOf("") }
-    LaunchedEffect(Unit) { cvm.loadBuddies() }
+    var code by remember { mutableStateOf(CoachNav.buddyCode.orEmpty()) }
+    LaunchedEffect(Unit) { CoachNav.buddyCode = null; cvm.loadBuddies() }
     Column(Modifier.fillMaxSize().background(p.bg).statusBarsPadding().imePadding()) {
         CoachTopBar("Buddy streaks", onBack)
         if (cvm.buddyAvailable == false) { ComingSoonCard("Buddy streaks need a quick server update."); return@Column }

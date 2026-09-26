@@ -168,6 +168,12 @@ class MainActivity : ComponentActivity() {
             val segs = uri.pathSegments
             val at = segs.indexOf("join")
             segs.getOrNull(at + 1)?.filter { it.isLetterOrDigit() }?.uppercase()?.takeIf { at >= 0 && it.length in 4..12 }?.let { joinCode.value = it }
+            // v2.14 buddy invite: …/buddy/<code> opens the buddy page with the code filled in.
+            val b = segs.indexOf("buddy")
+            segs.getOrNull(b + 1)?.filter { it.isLetterOrDigit() }?.uppercase()?.takeIf { b >= 0 && it.length == 6 }?.let {
+                com.sohum.bandlog.ui.coach.CoachNav.buddyCode = it
+                com.sohum.bandlog.ui.coach.CoachNav.open(com.sohum.bandlog.ui.coach.CoachPage.BUDDY)
+            }
             i.data = null
         }
         com.sohum.bandlog.ui.platform.PlatformNav.handleIntent(this, i) // v2.13 platform
