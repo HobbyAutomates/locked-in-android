@@ -265,7 +265,27 @@ data class Profile(
     val waistCm: Double? = null,
     /** v2.12 read-only: profiles.created_at (the "Joined Aug 2026" line); null when not returned. Never written. */
     val createdAt: String? = null,
+    // ---- v2.14 (schema_v37; null while the columns aren't there) ----
+    /** calm | balanced | no_excuses; null = column missing. */
+    val coachStyle: String? = null,
+    /** True once the new onboarding (or "Tune your plan") was saved; null = column missing ("unknown"). */
+    val onboardedV2: Boolean? = null,
+    val heardFrom: String? = null,
+    val obstacles: List<String>? = null,
+    val trainingDays: Int? = null,
+    val sports: List<String>? = null,
+    val firstChallenge: String? = null,
+    /** "HH:mm". */
+    val coachNoteTime: String? = null,
+    val coachQuietFrom: String? = null,
+    val coachQuietTo: String? = null,
+    val coachWeeklyRoast: Boolean? = null,
+    val coachRemember: Boolean? = null,
+    /** Milestone keys already celebrated (streak_7, goal_reached, pr:<exercise>:<date>…). */
+    val milestonesSeen: List<String>? = null,
 ) {
+    /** True when the v37 profile columns exist. */
+    val v37: Boolean get() = coachStyle != null
     /** The lens a report opens on: `goal` follows the weight goal (lose → cutting, gain → bulking, else protein). */
     val initialLens: String
         get() = when (lensDefault) {
@@ -323,7 +343,23 @@ data class Profile(
             hideNumbers = if (!o.has("hide_numbers")) null else o.optBoolean("hide_numbers", false),
             waistCm = if (!o.has("waist_cm")) null else o.dbl("waist_cm"),
             createdAt = if (!o.has("created_at")) null else o.str("created_at"),
+            coachStyle = if (!o.has("coach_style")) null else o.str("coach_style") ?: "balanced",
+            onboardedV2 = if (!o.has("onboarded_v2")) null else o.optBoolean("onboarded_v2", false),
+            heardFrom = if (!o.has("heard_from")) null else o.str("heard_from"),
+            obstacles = o.strList("obstacles"),
+            trainingDays = if (!o.has("training_days") || o.isNull("training_days")) null else o.optInt("training_days"),
+            sports = o.strList("sports"),
+            firstChallenge = if (!o.has("first_challenge")) null else o.str("first_challenge"),
+            coachNoteTime = if (!o.has("coach_note_time")) null else o.str("coach_note_time")?.take(5),
+            coachQuietFrom = if (!o.has("coach_quiet_from")) null else o.str("coach_quiet_from")?.take(5),
+            coachQuietTo = if (!o.has("coach_quiet_to")) null else o.str("coach_quiet_to")?.take(5),
+            coachWeeklyRoast = if (!o.has("coach_weekly_roast")) null else o.optBoolean("coach_weekly_roast", false),
+            coachRemember = if (!o.has("coach_remember")) null else o.optBoolean("coach_remember", true),
+            milestonesSeen = if (!o.has("milestones_seen")) null else o.strList("milestones_seen") ?: emptyList(),
         )
+
+        private fun JSONObject.strList(k: String): List<String>? =
+            if (!has(k) || isNull(k)) null else optJSONArray(k)?.let { a -> (0 until a.length()).map { a.optString(it) }.filter { it.isNotBlank() } }
     }
 }
 
