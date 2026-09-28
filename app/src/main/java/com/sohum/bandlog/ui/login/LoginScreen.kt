@@ -384,6 +384,7 @@ private fun SignInForm(
                 password = true, shown = show, onToggleShown = { show = !show },
             )
         }
+        com.sohum.bandlog.ui.social.ForgotPasswordLink(email) // v2.18 E5
         Spacer(Modifier.height(12.dp))
         ErrorNote(error)
         if (info != null) Text(info, color = p.ink, fontSize = 13.sp, fontWeight = FontWeight(600))

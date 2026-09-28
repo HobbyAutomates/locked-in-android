@@ -514,7 +514,7 @@ object Api {
 
     /** Trigram search over bandlog.foods (the same RPC the parser uses). Hinglish and Devanagari both match. */
     suspend fun searchFoods(q: String, n: Int = 14): List<FoodHit> = withContext(Dispatchers.IO) {
-        val key = q.trim().lowercase().replace(Regex("\\s+"), " ")
+        val key = com.sohum.bandlog.util.RegionalFoods.regionalQuery(q).trim().lowercase() // v2.18 E2: Marathi / Tamil / Bengali names.replace(Regex("\\s+"), " ")
         if (key.length < 2) return@withContext emptyList()
         val payload = JSONObject().put("q", key).put("n", n).toString()
         val body = run(rest("rpc/search_foods").post(json(payload)).build(), "Search foods")

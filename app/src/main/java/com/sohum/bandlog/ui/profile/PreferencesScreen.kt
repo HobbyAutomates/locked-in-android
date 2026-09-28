@@ -92,6 +92,11 @@ fun PreferencesScreen(vm: AppViewModel, themeMode: ThemeMode, onBack: () -> Unit
                     Hair()
                     SettingRow(Icons.Outlined.Person, p.ink, "Account", subtitle = Session.email ?: "Email, name, sign out", onClick = { onOpen(ProfilePage.ACCOUNT) }) { Chevron() }
                     Hair()
+                    // v2.18 E2: English / Hinglish / हिन्दी.
+                    SettingRow(com.sohum.bandlog.ui.components.LineIcons.Message, p.ink, com.sohum.bandlog.data.SocialStore.t("lang.title"), subtitle = "English, Hinglish, हिन्दी", onClick = { com.sohum.bandlog.ui.social.SocialNav.open(com.sohum.bandlog.ui.social.SocialPage.LANGUAGE) }) {
+                        PrefValue(com.sohum.bandlog.util.I18n.LANGS.first { it.key == com.sohum.bandlog.data.SocialStore.lang }.native)
+                    }
+                    Hair()
                     // v2.16: the first-launch tour, again (closes this page and plays it over Home).
                     SettingRow(com.sohum.bandlog.ui.components.LineIcons.Star, p.ink, "Replay the tour", subtitle = "The five-stop walkthrough of Home", onClick = { com.sohum.bandlog.ui.tour.TourState.replay() }) { Chevron() }
                 }
@@ -331,17 +336,10 @@ fun AccountScreen(vm: AppViewModel, onBack: () -> Unit) {
                 Column(Modifier.padding(horizontal = 16.dp)) {
                     SettingRow(Icons.Outlined.Logout, p.ink, "Sign out", onClick = { vm.signOut() }) { Chevron() }
                     Hair()
-                    SettingRow(Icons.Outlined.DeleteOutline, p.red, "Delete my data", subtitle = "Emails Sohum to erase your account and logs", onClick = {
-                        runCatching {
-                            ctx.startActivity(
-                                android.content.Intent(android.content.Intent.ACTION_SENDTO).apply {
-                                    data = android.net.Uri.parse("mailto:sohumai.team@gmail.com")
-                                    putExtra(android.content.Intent.EXTRA_SUBJECT, "Locked In — delete my data")
-                                    putExtra(android.content.Intent.EXTRA_TEXT, "Please delete my Locked In account and all my logs.\n\nAccount: ${Session.email.orEmpty()}")
-                                },
-                            )
-                        }
-                    }) { Chevron() }
+                    // v2.18 E5: export (CSV / PDF) and in-app account deletion (type DELETE; email fallback inside).
+                    SettingRow(com.sohum.bandlog.ui.components.LineIcons.Share, p.ink, com.sohum.bandlog.data.SocialStore.t("export.title"), subtitle = com.sohum.bandlog.data.SocialStore.t("export.sub"), onClick = { com.sohum.bandlog.ui.social.SocialNav.open(com.sohum.bandlog.ui.social.SocialPage.EXPORT) }) { Chevron() }
+                    Hair()
+                    SettingRow(Icons.Outlined.DeleteOutline, p.red, com.sohum.bandlog.data.SocialStore.t("delete.title"), subtitle = com.sohum.bandlog.data.SocialStore.t("delete.sub"), onClick = { com.sohum.bandlog.ui.social.SocialNav.open(com.sohum.bandlog.ui.social.SocialPage.DELETE) }) { Chevron() }
                 }
             }
         }

@@ -109,6 +109,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         Session.init(this)
         com.sohum.bandlog.util.OnbStore.init(this) // v2.14 onboarding kept on the device until the account exists
+        com.sohum.bandlog.data.SocialStore.init(this); com.sohum.bandlog.data.OfflineQueue.init(this) // v2.18 social + offline queue
         // v2.10: the WHO 2007 BMI-for-age table (res/raw) for the teen BMI card and safety flags.
         com.sohum.bandlog.util.Bmi.load(this)
         handleIntent(intent)
@@ -168,6 +169,7 @@ class MainActivity : ComponentActivity() {
             // v2.13 nutrition: "fast goal reached" opens the fasting timer.
             com.sohum.bandlog.alarm.FastingAlarm.OPEN_FASTING -> com.sohum.bandlog.ui.nutrition.NutritionNav.openFastingTick++
         }
+        com.sohum.bandlog.ui.social.handleReferralLink(i) // v2.18 D2 invite links …/r/<CODE> (before the data is consumed)
         // v2.6 invite link: https://web-production-ff1cf.up.railway.app/join/<code>
         i?.data?.takeIf { i.action == android.content.Intent.ACTION_VIEW }?.let { uri ->
             val segs = uri.pathSegments
@@ -463,7 +465,7 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
                             val tourMod = when (i) { 1 -> Modifier.tourTarget(com.sohum.bandlog.ui.tour.TourStop.SQUAD); 2 -> Modifier.tourTarget(com.sohum.bandlog.ui.tour.TourStop.SCAN); else -> Modifier }
                             Column(Modifier.then(tourMod).clickable { tab = i }.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                                 Icon(t.icon, t.label, tint = if (sel) p.ink else p.muted, modifier = Modifier.size(24.dp))
-                                Text(t.label, fontSize = 11.sp, fontWeight = FontWeight(600), color = if (sel) p.ink else p.muted)
+                                Text(com.sohum.bandlog.data.SocialStore.navLabel(t.label), fontSize = 11.sp, fontWeight = FontWeight(600), color = if (sel) p.ink else p.muted) // v2.18 E2
                             }
                         }
                     }
@@ -557,6 +559,7 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
         com.sohum.bandlog.ui.squad.SquadOverlays(vm)
         com.sohum.bandlog.ui.platform.PlatformOverlays(vm) // v2.13 platform
         com.sohum.bandlog.ui.coach.CoachOverlays(vm) // v2.14 coach, buddies, Tune your plan
+        com.sohum.bandlog.ui.social.SocialOverlays(vm) // v2.18 social + platform
         // v2.13 nutrition: fasting, recipes, micros, what-to-eat pages over everything above.
         com.sohum.bandlog.ui.nutrition.NutritionOverlays(vm)
 
@@ -678,7 +681,7 @@ private fun SpeedDial(modifier: Modifier, onOpenWater: () -> Unit, onPick: (Dial
                         Modifier.height(if (scan) 44.dp else 36.dp).shadow(8.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow).background(pillBg, CircleShape).padding(horizontal = if (scan) 18.dp else 14.dp),
                         verticalArrangement = Arrangement.Center,
                     ) {
-                        Text(item.label, fontSize = if (scan) 15.sp else 14.sp, fontWeight = FontWeight(700), color = pillInk, maxLines = 1)
+                        Text(com.sohum.bandlog.data.SocialStore.dialLabel(item.label), fontSize = if (scan) 15.sp else 14.sp, fontWeight = FontWeight(700), color = pillInk, maxLines = 1) // v2.18 E2
                         item.sub?.let { Text(it, fontSize = 11.sp, fontWeight = FontWeight(500), color = pillInk.copy(alpha = 0.6f), maxLines = 1) }
                     }
                     Spacer(Modifier.width(10.dp))
