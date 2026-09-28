@@ -128,8 +128,13 @@ fun badgeRemaining(b: Badges.Badge, progress: Badges.Progress): String {
 
 /** "Next up: X · k more days" and an accent bar that grows from the left. */
 @Composable
-fun NextUpRow(b: Badges.Badge, progress: Badges.Progress, modifier: Modifier = Modifier, delayMs: Int = 1050) {
-    val p = palette
+fun NextUpRow(
+    b: Badges.Badge, progress: Badges.Progress, modifier: Modifier = Modifier, delayMs: Int = 1050,
+    /** v2.17: colours for the dark Trophy wall (defaults: the theme's ink / muted / track). */
+    ink: androidx.compose.ui.graphics.Color? = null, muted: androidx.compose.ui.graphics.Color? = null, track: androidx.compose.ui.graphics.Color? = null,
+) {
+    val p0 = palette
+    val p = p0.copy(ink = ink ?: p0.ink, muted = muted ?: p0.muted, track = track ?: p0.track)
     val accent = com.sohum.bandlog.ui.theme.Brand.Ember
     val grow = rememberMotion("nextup-bar", delayMs, PremiumMotion.GROW_X_MS)
     val frac = (progress.value(b.group).toFloat() / b.need).coerceIn(0f, 1f)

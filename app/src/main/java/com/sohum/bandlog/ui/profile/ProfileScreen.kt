@@ -316,13 +316,11 @@ fun ProfileScreen(
                     }
                 }
 
-                // ---- v2.7: graffiti wall (Squad Food Battle crowns) — hidden until the first win ----
-                graffiti?.takeIf { it.total > 0 }?.let { g -> Entrance(5, key = "graffiti") { GraffitiWallCard(g) } }
                 // v2.10: an under-18 "lose" goal moves to maintain here too, with its one-time card.
                 com.sohum.bandlog.ui.components.TeenGoalMigration(vm)
 
-                // ---- badges shelf ----
-                Entrance(5, key = "badges") { BadgesShelf(vm) { onOpen(ProfilePage.BADGES) } }
+                // ---- v2.17 Trophy wall: badges on lit plinths + the Food Battle crowns shelf (was the badge shelf and the graffiti wall) ----
+                Entrance(5, key = "badges") { TrophyWall(vm, graffiti) { onOpen(ProfilePage.BADGES) } }
 
                 // ---- goal ----
                 Entrance(6, key = "goal") {
@@ -539,56 +537,6 @@ private fun ListRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label
 @Composable
 private fun ListDivider() = Box(Modifier.fillMaxWidth().padding(start = 50.dp).height(1.dp).background(if (isDarkTheme) Color(0xFF2A2A2D) else Color(0xFFE2E2E6)))
 
-/**
- * Medals v2 shelf: up to three earned medals (best tier first) and the next locked one, "N of M ›"
- * to the full grid, then "Next up: X · k more days" with a growing bar.
- */
-@Composable
-private fun BadgesShelf(vm: AppViewModel, onOpen: () -> Unit) {
-    val p = palette
-    val progress = vm.badgeProgress
-    val all = com.sohum.bandlog.util.Badges.ALL
-    val earned = all.filter { progress.earned(it) }.sortedWith(compareBy({ tierOf(it).ordinal }, { -it.need }))
-    // v2.16: every badge as a jewellery shield (earned first, best tier first), four to a row.
-    val locked = all.filter { !progress.earned(it) }.sortedByDescending { progress.value(it.group).toFloat() / it.need }
-    val shelf = earned + locked
-    val next = nextBadge(progress)
-    ProfileCard(padding = 0.dp, radius = 24.dp) {
-        Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(
-                Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(onClickLabel = "Open badges", onClick = onOpen).padding(horizontal = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Badges", fontSize = 19.sp, fontWeight = FontWeight(600), color = p.ink, modifier = Modifier.weight(1f))
-                Text("${earned.size} of ${all.size}  ›", fontSize = 14.sp, color = p.muted)
-            }
-            shelf.chunked(4).forEachIndexed { ri, rowItems -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                rowItems.forEachIndexed { ci, b ->
-                    val i = ri * 4 + ci
-                    val got = progress.earned(b)
-                    Column(
-                        Modifier.width(78.dp).clickable(onClickLabel = "Open badges", onClick = onOpen)
-                            .semantics(mergeDescendants = true) { contentDescription = if (got) "${b.name}, ${tierOf(b).label.lowercase()} medal" else "${b.name}, ${progress.value(b.group).coerceAtMost(b.need)} of ${b.need}" },
-                        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp),
-                    ) {
-                        BadgeMedal(b, progress, 64.dp, "shelf$i", 450 + i * 80)
-                        Text(
-                            if (got) tierOf(b).label else "${progress.value(b.group).coerceAtMost(b.need)} OF ${b.need}",
-                            fontSize = 9.5.sp, fontWeight = FontWeight(600), letterSpacing = 1.4.sp, color = if (got) tierOf(b).mid else com.sohum.bandlog.ui.theme.Brand.EmberLight,
-                        )
-                        Text(b.name, fontSize = 12.sp, fontWeight = FontWeight(500), color = if (got) p.ink else p.muted, textAlign = TextAlign.Center, maxLines = 2, lineHeight = 15.sp)
-                    }
-                }
-                repeat(4 - rowItems.size) { Spacer(Modifier.width(78.dp)) }
-            } }
-            if (next != null) {
-                Box(Modifier.fillMaxWidth().padding(horizontal = 6.dp).height(1.dp).background(if (isDarkTheme) Color(0xFF2A2A2D) else Color(0xFFE2E2E6)))
-                NextUpRow(next, progress, Modifier.padding(horizontal = 6.dp))
-            }
-        }
-    }
-}
-
 internal val LENS_OPTIONS = listOf(
     "protein" to ("Protein" to "How much protein it gives you"),
     "goal" to ("My goal" to "Follows your goal: Lose → Cutting, Gain → Bulking"),
@@ -670,46 +618,3 @@ internal fun RingColoursSheet(onDismiss: () -> Unit) {
     }
 }
 
-/**
- * v2.7 Squad Food Battle: total crowns + last 7 wins (docs/food-battle-spec.md), matching the
- * web's GraffitiWall.tsx — a bold spray-paint styled strip of recent wins, quiet (not shown at
- * all) for anyone who's never won one.
- */
-@Composable
-private fun GraffitiWallCard(g: com.sohum.bandlog.data.BattleRepo.Graffiti) {
-    val p = palette
-    Card(padding = 0.dp) {
-        Row(Modifier.fillMaxWidth().padding(16.dp, 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(40.dp).background(p.card2, CircleShape), contentAlignment = Alignment.Center) {
-                Icon(com.sohum.bandlog.ui.components.CrownIcon, null, tint = p.ink, modifier = Modifier.size(20.dp))
-            }
-            Spacer(Modifier.width(12.dp))
-            Column {
-                Text("Graffiti wall", fontSize = 15.sp, fontWeight = FontWeight(800), color = p.ink)
-                Text(
-                    "${g.total} food battle crown${if (g.total == 1) "" else "s"} won",
-                    fontSize = 12.sp, color = p.muted,
-                )
-            }
-        }
-        if (g.recent.isNotEmpty()) {
-            Row(
-                Modifier.fillMaxWidth().padding(bottom = 14.dp).horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Spacer(Modifier.width(8.dp))
-                g.recent.forEach { w ->
-                    val gradient = Brush.linearGradient(listOf(Color(0xFFFF5C8A), Color(0xFFFFC53D), Color(0xFF7C5CFF)))
-                    Column(
-                        Modifier.width(140.dp).background(gradient, RoundedCornerShape(16.dp)).padding(12.dp),
-                    ) {
-                        Text(w.date, fontSize = 10.sp, fontWeight = FontWeight(800), color = Color(0xFFFFD23C), letterSpacing = 0.6.sp)
-                        Text(w.groupName, fontSize = 15.sp, fontWeight = FontWeight(900), color = Color.White, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
-                        Text("${w.score.toInt()} pts · ${w.goalLabel}", fontSize = 11.sp, fontWeight = FontWeight(700), color = Color.White.copy(alpha = 0.88f), modifier = Modifier.padding(top = 2.dp))
-                    }
-                }
-                Spacer(Modifier.width(8.dp))
-            }
-        }
-    }
-}
