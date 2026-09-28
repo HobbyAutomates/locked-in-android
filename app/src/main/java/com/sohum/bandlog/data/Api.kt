@@ -633,7 +633,11 @@ object Api {
         val sel = "id,kind,lens,product,verdict,created_at,image_path,thumb_path,image_url,report_image_url:report->>image_url," +
             "score:report->infographic->>score_out_of_10,what_it_is:report->>what_it_is," +
             "first_ingredient:report->concerns->0->>ingredient,first_item:report->items->0->>name"
-        val body = run(rest("label_scans?select=$sel&order=created_at.desc&limit=$limit").get().build(), "Load scan history")
+        // v2.17 Recents: per-100 g numbers and the serving size, for one-tap re-adds.
+        val nums = ",kcal100:report->per_100g->>calories,protein100:report->per_100g->>protein_g,carbs100:report->per_100g->>carbs_g," +
+            "fat100:report->per_100g->>fat_g,serving_g:report->>serving_g"
+        val body = runCatching { run(rest("label_scans?select=$sel$nums&order=created_at.desc&limit=$limit").get().build(), "Load scan history") }
+            .getOrElse { run(rest("label_scans?select=$sel&order=created_at.desc&limit=$limit").get().build(), "Load scan history") }
         val arr = JSONArray(body)
         (0 until arr.length()).map { ScanHistoryItem.from(arr.getJSONObject(it)) }
     }

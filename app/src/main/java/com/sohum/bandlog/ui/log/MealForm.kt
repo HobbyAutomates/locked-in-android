@@ -222,6 +222,10 @@ fun MealForm(
     val nvm: com.sohum.bandlog.ui.nutrition.NutritionViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     LaunchedEffect(Unit) { if (!nvm.recipesLoaded) nvm.loadRecipes() }
     val use = remember(vm.meals) { vm.foodUse() }
+    // v2.17 Recent: past logged foods and label / barcode scans, newest first (one-tap "+").
+    var scanHistory by remember { mutableStateOf<List<com.sohum.bandlog.data.ScanHistoryItem>>(emptyList()) }
+    LaunchedEffect(Unit) { if (existing == null) runCatching { Api.scanHistory() }.onSuccess { scanHistory = it } }
+    val recents = remember(vm.meals, scanHistory) { com.sohum.bandlog.util.Recents.build(vm.meals, scanHistory) }
     val fats = remember(vm.presets) { vm.presets.filter { it.category == "fat" } }
 
     fun say(msg: String) { toast = msg; toastTick++ }
@@ -390,6 +394,12 @@ fun MealForm(
                         text = ""
                     }
                 } else {
+                    if (existing == null && swapping == null) com.sohum.bandlog.ui.components.RecentFoodsRow(
+                        recents,
+                        onAdd = { r -> add(r.item, r.name, r.item.quantityLabel) },
+                        onAdjust = { r -> sheet = SheetReq(com.sohum.bandlog.ui.components.recentFood(r.item), Quantity(QUnit.G, r.item.grams), -1, raw = r.name) },
+                        title = "Recent · adds to " + MealTypes.label(type),
+                    )
                     PresetGrid(
                         vm = vm, use = use, selected = cat, onSelect = { cat = it },
                         onPlate = items.mapNotNull { it.foodId }.groupingBy { it }.eachCount(),

@@ -889,6 +889,12 @@ data class ScanHistoryItem(
     val whatItIs: String = "",
     /** Never blank or "<UNKNOWN>": product → first ingredient / first food → "Unnamed label" / "Plate photo". */
     val displayName: String = product,
+    // v2.17 Recents: the label's per-100 g numbers and serving size (null when not in the report).
+    val kcal100: Double? = null,
+    val protein100: Double? = null,
+    val carbs100: Double? = null,
+    val fat100: Double? = null,
+    val servingG: Double? = null,
 ) {
     val isPlate: Boolean get() = kind == "photo" || kind == "plate"
 
@@ -921,6 +927,11 @@ data class ScanHistoryItem(
                 thumbPath = o.s("thumb_path"),
                 whatItIs = o.s("what_it_is").orEmpty(),
                 displayName = name.replaceFirstChar { it.uppercase() },
+                kcal100 = o.s("kcal100")?.toDoubleOrNull()?.takeIf { it >= 0 },
+                protein100 = o.s("protein100")?.toDoubleOrNull(),
+                carbs100 = o.s("carbs100")?.toDoubleOrNull(),
+                fat100 = o.s("fat100")?.toDoubleOrNull(),
+                servingG = o.s("serving_g")?.toDoubleOrNull()?.takeIf { it > 0 },
             )
         }
     }

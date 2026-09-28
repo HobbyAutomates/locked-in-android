@@ -39,6 +39,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -91,6 +92,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
@@ -215,7 +217,9 @@ fun ScanTab(vm: AppViewModel) {
     LaunchedEffect(Unit) { com.sohum.bandlog.data.Overrides.load() }
 
     Box(Modifier.fillMaxSize()) {
-        ScanForm(vm, onScanned = { historyTick++ }, onOpenHistory = { showHistory = true }, onLogServing = { vm.openAddFood(listOf(it)) })
+        // v2.17: past scans and logged foods, newest first, for one-tap re-adds.
+        val recents = remember(vm.meals, history) { com.sohum.bandlog.util.Recents.build(vm.meals, history) }
+        ScanForm(vm, onScanned = { historyTick++ }, onOpenHistory = { showHistory = true }, onLogServing = { vm.openAddFood(listOf(it)) }, recents = recents)
         AnimatedContent(
             targetState = showHistory, label = "scan-history",
             transitionSpec = { (slideInVertically(Motion.spatial()) { it / 3 } + fadeIn(Motion.effects())).togetherWith(slideOutVertically(Motion.spatialFast()) { it / 3 } + fadeOut(Motion.effectsFast())) },
@@ -267,6 +271,7 @@ private fun ScanForm(
     onScanned: () -> Unit,
     onOpenHistory: () -> Unit,
     onLogServing: (com.sohum.bandlog.data.MealItem) -> Unit,
+    recents: List<com.sohum.bandlog.util.Recents.Recent> = emptyList(),
 ) {
     val p = palette
     val ctx = LocalContext.current
@@ -409,6 +414,18 @@ private fun ScanForm(
     /** Back to the camera stage (the note and mode stay). */
     fun reset() { photo = null; ocr = ""; barcode = ""; kind = null; clearResults(); showText = false; digitsOpen = false }
 
+    // v2.17 Recent: "+" logs into the slot for now; a tap opens the amount + slot first.
+    var recentSheet by remember { mutableStateOf<com.sohum.bandlog.util.Recents.Recent?>(null) }
+    var recentSlot by remember { mutableStateOf(MealTypes.default()) }
+    var recentNote by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(recentNote) { if (recentNote != null) { kotlinx.coroutines.delay(2600); recentNote = null } }
+    fun logRecent(item: com.sohum.bandlog.data.MealItem, slot: String) {
+        scope.launch {
+            val ok = vm.saveMeal(Dates.today(), item.name, listOf(item), mealType = slot, method = "recent")
+            recentNote = if (ok) "Added ${item.name} · ${item.calories.roundToInt()} kcal to ${MealTypes.label(slot)}" else vm.error ?: "Couldn't add it. Try again."
+        }
+    }
+
     val inResult = photo != null || reading || busy || report != null || plate != null || notFound || digitsOpen || menu != null || menuUnavailable
     if (!inResult) {
         LaunchedEffect(Unit) {
@@ -428,7 +445,23 @@ private fun ScanForm(
             onTypeCode = { error = null; digitsOpen = true }, onHistory = onOpenHistory,
             live = if (liveOn) live else null, onCameraFailed = { camFailed = true },
             onEnableLive = if (!camAllowed) ({ runCatching { camPermission.launch(android.Manifest.permission.CAMERA) } }) else null,
+            recent = if (recents.isEmpty()) null else ({
+                com.sohum.bandlog.ui.components.RecentFoodsRow(
+                    recents, onAdd = { logRecent(it.item, MealTypes.default()) }, onAdjust = { recentSlot = MealTypes.default(); recentSheet = it },
+                    contentPadding = PaddingValues(horizontal = 16.dp), cardColor = StageGlass, inkColor = StageInk, mutedColor = StageInk.copy(alpha = 0.7f),
+                )
+            }),
+            note = recentNote,
         )
+        recentSheet?.let { r ->
+            QuantitySheet(
+                food = com.sohum.bandlog.ui.components.recentFood(r.item), initial = com.sohum.bandlog.util.Quantity(com.sohum.bandlog.util.QUnit.G, r.item.grams),
+                title = "Add again", cta = "Log to " + MealTypes.label(recentSlot),
+                header = { com.sohum.bandlog.ui.components.MealSlotPicker(recentSlot, { recentSlot = it }) },
+                onDismiss = { recentSheet = null },
+                onDone = { item, _ -> recentSheet = null; logRecent(item.copy(id = null, inputKind = r.item.inputKind), recentSlot) },
+            )
+        }
         return
     }
 
@@ -610,6 +643,8 @@ private fun CameraStage(
     onShutter: () -> Unit, onGallery: () -> Unit, onTypeCode: () -> Unit, onHistory: () -> Unit,
     /** v2.13: the live preview (null = permission denied / no camera → the old camera-app flow). */
     live: LiveCamera? = null, onCameraFailed: (String) -> Unit = {}, onEnableLive: (() -> Unit)? = null,
+    /** v2.17: the Recent row (past scans and foods) and its "Added …" line. */
+    recent: (@Composable () -> Unit)? = null, note: String? = null,
 ) {
     val current = MODES.firstOrNull { it.key == mode } ?: MODES.first()
     Column(Modifier.fillMaxSize().background(Color.Black).navigationBarsPadding().padding(bottom = 100.dp)) {
@@ -642,6 +677,11 @@ private fun CameraStage(
         Text(
             current.hint, Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 18.dp).scanEnter(2, riseDp = 16f),
             textAlign = TextAlign.Center, fontSize = 14.sp, fontWeight = FontWeight(600), color = StageInk,
+        )
+        if (recent != null) Box(Modifier.padding(bottom = 14.dp).scanEnter(3, riseDp = 16f)) { recent() }
+        if (note != null) Text(
+            note, Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 10.dp).semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite },
+            textAlign = TextAlign.Center, fontSize = 13.sp, fontWeight = FontWeight(600), color = Color(0xFFFF8B5E),
         )
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp).selectableGroup().scanEnter(3, riseDp = 16f),
