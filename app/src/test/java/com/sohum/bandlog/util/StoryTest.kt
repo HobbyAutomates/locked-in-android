@@ -21,6 +21,21 @@ class StoryTest {
         assertEquals(1600 + 2 * 1400 + 2200, Story.reelLength(2))
     }
 
+    /** The same values as the web's check-v218-social.ts "story" group. */
+    @Test fun webCheckValues() {
+        val weights = listOf(Story.Weight("2026-06-01", 84.0), Story.Weight("2026-09-25", 79.8))
+        assertEquals(84.0, Story.weightNear("2026-06-04", weights)!!, 0.0)
+        assertNull(Story.weightNear("2026-06-20", weights))
+        val f = Story.frames(listOf(Story.Photo("2026-09-28", "b", null), Story.Photo("2026-06-01", "a", null), Story.Photo("2026-07-01", null, 82.0)), weights)
+        assertEquals(listOf(listOf<Any?>("2026-06-01", 84.0, 0.0, 0), listOf<Any?>("2026-09-28", 79.8, -4.2, 119)), f.map { listOf(it.date, it.kg, it.delta, it.dayIndex) })
+        assertEquals("Day 120" to "−4.2 kg", Story.caption(f[1]))
+        assertEquals("Day 1" to null, Story.caption(f[0]))
+        val many = (0 until 60).map { Story.Photo(Dates.addDays("2026-01-01", it.toLong()), "u$it", null) }
+        val thin = Story.frames(many, emptyList())
+        assertEquals(Story.MAX_FRAMES, thin.size)
+        assertEquals(Dates.addDays("2026-01-01", 59), thin.last().date)
+    }
+
     @Test fun thinsToTwentyFourKeepingEnds() {
         val photos = (0 until 50).map { Story.Photo(Dates.addDays("2026-01-01", it.toLong()), "p$it", null) }
         val f = Story.frames(photos, emptyList())

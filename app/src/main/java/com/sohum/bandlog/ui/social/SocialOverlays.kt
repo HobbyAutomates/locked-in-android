@@ -83,6 +83,14 @@ fun SocialOverlays(vm: AppViewModel) {
             if (o.has("live_share") && !o.isNull("live_share")) SocialStore.setLive(o.optBoolean("live_share", false))
         }
         runCatching { checkEventBadges(vm) }
+        // E4 (opt-in): new Health Connect weigh-ins into weight_log.
+        runCatching { importWeights(ctx, vm) }
+    }
+    // E3: the Glance widget's streak (+ calories left from Home's cache), after Home has published.
+    LaunchedEffect(vm.loadedOnce, vm.dayStreak, SocialStore.freezeTokens, vm.meals.size) {
+        if (!vm.loadedOnce) return@LaunchedEffect
+        delay(1500)
+        com.sohum.bandlog.widget.StreakWidget.publish(ctx.applicationContext, vm.dayStreak, SocialStore.freezeTokens)
     }
     // Logs that just synced: re-read the lists (Home, streaks, squads).
     LaunchedEffect(OfflineQueue.syncedTick) { if (OfflineQueue.syncedTick > 0) vm.refresh() }

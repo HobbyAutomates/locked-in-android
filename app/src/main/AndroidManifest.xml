@@ -150,6 +150,19 @@
                 android:resource="@xml/widget_calories_info" />
         </receiver>
 
+        <!-- v2.18 E3: the Glance widget, calories left + day streak. -->
+        <receiver
+            android:name=".widget.StreakWidgetReceiver"
+            android:exported="false"
+            android:label="Locked In · Streak">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_streak_info" />
+        </receiver>
+
         <activity-alias
             android:name="ViewPermissionUsageActivity"
             android:exported="true"

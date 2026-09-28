@@ -108,6 +108,8 @@ dependencies {
 
     // v2.18 E1 offline logging: the queue of saves made without a network (data/OfflineQueue.kt).
     implementation("androidx.datastore:datastore-preferences:1.1.1")
+    // v2.18 E3: the Glance home-screen widget (calories left + day streak). 1.1.x builds on compileSdk 34.
+    implementation("androidx.glance:glance-appwidget:1.1.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

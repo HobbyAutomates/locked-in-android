@@ -1,6 +1,9 @@
 package com.sohum.bandlog.ui.social
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -162,5 +165,22 @@ internal fun FreezeToken(filled: Boolean, size: Dp) {
                 drawLine(Color.White.copy(alpha = 0.85f), Offset(c.x - dx, c.y - dy), Offset(c.x + dx, c.y + dy), strokeWidth = w * 0.035f)
             }
         } else drawPath(path, p.muted.copy(alpha = 0.5f), style = Stroke(width = w * 0.03f))
+    }
+}
+
+/** Home: a small ice pill beside the day streak while freezes are banked ("2"), opening Streak freezes. */
+@Composable
+fun FreezeChip() {
+    val n = SocialStore.freezeTokens
+    if (n <= 0) return
+    val p = palette
+    Row(
+        Modifier.height(34.dp).background(Ice.copy(alpha = 0.16f), androidx.compose.foundation.shape.CircleShape)
+            .clickable(onClickLabel = Freezes.freezeCountText(n)) { SocialNav.open(SocialPage.FREEZES) }.padding(start = 8.dp, end = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        FreezeToken(filled = true, size = 18.dp)
+        Spacer(Modifier.width(5.dp))
+        Text("$n", fontSize = 13.sp, fontWeight = FontWeight(700), color = p.ink)
     }
 }
