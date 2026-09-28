@@ -1,5 +1,7 @@
 package com.sohum.bandlog.ui.coach
 
+import com.sohum.bandlog.ui.tour.tourTarget
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -187,7 +189,8 @@ fun V214HomeCards(vm: AppViewModel, cvm: CoachViewModel, onLogMeal: (String) -> 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (skippedIncomplete(vm)) TuneCard(onOpen = { OnbStore.skipped = false; vm.onboardingSkipped = false }, onDismiss = null)
         else if (!tuneHidden && tuneVisible(vm)) TuneCard { OnbStore.tuneDismissed = true; tuneHidden = true }
-        TodayNoteCards(cvm, onLogMeal)
+        // v2.16: the coach note is stop 2 of the tour.
+        Box(androidx.compose.ui.Modifier.tourTarget(com.sohum.bandlog.ui.tour.TourStop.COACH)) { TodayNoteCards(cvm, onLogMeal) }
         BuddyCard(cvm)
     }
 }

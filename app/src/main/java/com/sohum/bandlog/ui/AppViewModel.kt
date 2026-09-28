@@ -122,6 +122,18 @@ class AppViewModel : ViewModel() {
 
     fun dismissMilestone() { milestone = null }
 
+    /** v2.16 tour: the profile flag rides on milestones_seen ("tour_v216"), so no new column is needed. */
+    val tourSeenOnProfile: Boolean get() = profile.milestonesSeen?.contains(com.sohum.bandlog.ui.tour.TourPrefs.PROFILE_KEY) == true
+
+    fun markTourSeen(context: android.content.Context) {
+        com.sohum.bandlog.ui.tour.TourPrefs.markSeen(context)
+        val had = profile.milestonesSeen ?: return
+        if (com.sohum.bandlog.ui.tour.TourPrefs.PROFILE_KEY in had) return
+        val next = had + com.sohum.bandlog.ui.tour.TourPrefs.PROFILE_KEY
+        profile = profile.copy(milestonesSeen = next)
+        viewModelScope.launch { runCatching { Api.patchProfile(org.json.JSONObject().put("milestones_seen", org.json.JSONArray(next))) } }
+    }
+
     /** Seen keys go to the device and, when schema_v37 is there, profiles.milestones_seen (appended). */
     private fun markMilestonesSeen(context: android.content.Context, keys: List<String>) {
         if (keys.isEmpty()) return

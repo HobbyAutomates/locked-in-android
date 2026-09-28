@@ -1,5 +1,7 @@
 package com.sohum.bandlog.ui.today
 
+import com.sohum.bandlog.ui.tour.tourTarget
+
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import com.sohum.bandlog.ui.components.PillButton
@@ -193,7 +195,7 @@ fun TodayScreen(
         if (isToday && nvm.checkinVisible(ctx)) item(key = "checkin") { Entrance(1, key = "checkin") { com.sohum.bandlog.ui.nutrition.CheckinCard(vm, nvm) } }
         item { Entrance(1, key = "weekStrip") { WeekStrip(today, selected, trained) { selected = it } } }
         item {
-            Entrance(2, key = "card2") {
+            Entrance(2, Modifier.tourTarget(com.sohum.bandlog.ui.tour.TourStop.CALORIES), key = "card2") {
                 val kcalOver = kotlin.math.round(totals.calories - budget).toInt()
                 val (kcalValue, kcalWord) = when {
                     eatenMode -> kotlin.math.round(totals.calories).toInt() to "eaten"

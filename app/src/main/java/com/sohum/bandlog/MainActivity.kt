@@ -91,6 +91,7 @@ import com.sohum.bandlog.ui.today.TodayScreen
 import com.sohum.bandlog.util.Dates
 import com.sohum.bandlog.util.ThemeMode
 import com.sohum.bandlog.util.ThemePrefs
+import com.sohum.bandlog.ui.tour.tourTarget
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -375,6 +376,22 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
     LaunchedEffect(com.sohum.bandlog.ui.platform.PlatformNav.squadTick) {
         if (com.sohum.bandlog.ui.platform.PlatformNav.squadTick > 0) { page = null; log = null; meal = null; tab = 1 }
     }
+    // v2.16 guided tour: once per device (and per account via milestones_seen), over Home, when
+    // nothing else covers it; Settings → Preferences → "Replay the tour" brings it back.
+    var tourOn by remember { mutableStateOf(false) }
+    val overlayOpen = page != null || log != null || meal != null || dial || vm.milestone != null || sq.openId != null || sq.creating || sq.profileFlow
+    LaunchedEffect(vm.loadedOnce, tab, overlayOpen) {
+        if (!vm.loadedOnce || tourOn) return@LaunchedEffect
+        if (!com.sohum.bandlog.ui.tour.shouldStartTour(com.sohum.bandlog.ui.tour.TourPrefs.seen(ctx), vm.tourSeenOnProfile, tab == 0, overlayOpen)) return@LaunchedEffect
+        kotlinx.coroutines.delay(1400) // let Home's cards rise into place first
+        tourOn = true
+    }
+    LaunchedEffect(com.sohum.bandlog.ui.tour.TourState.replayTick) {
+        if (com.sohum.bandlog.ui.tour.TourState.replayTick == 0) return@LaunchedEffect
+        page = null; log = null; meal = null; dial = false; tab = 0
+        kotlinx.coroutines.delay(900)
+        tourOn = true
+    }
     // A tapped 9 pm wrap lands on Home, where the Wrap card sits on top.
     LaunchedEffect(openWrapTick) {
         if (openWrapTick > 0) { page = null; log = null; tab = 0 }
@@ -443,7 +460,8 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
                     Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 76.dp, top = 10.dp).navigationBarsPadding().padding(bottom = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
                         tabs.forEachIndexed { i, t ->
                             val sel = tab == i
-                            Column(Modifier.clickable { tab = i }.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            val tourMod = when (i) { 1 -> Modifier.tourTarget(com.sohum.bandlog.ui.tour.TourStop.SQUAD); 2 -> Modifier.tourTarget(com.sohum.bandlog.ui.tour.TourStop.SCAN); else -> Modifier }
+                            Column(Modifier.then(tourMod).clickable { tab = i }.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                                 Icon(t.icon, t.label, tint = if (sel) p.ink else p.muted, modifier = Modifier.size(24.dp))
                                 Text(t.label, fontSize = 11.sp, fontWeight = FontWeight(600), color = if (sel) p.ink else p.muted)
                             }
@@ -451,7 +469,7 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
                     }
                 }
                 // Tap opens the dial; long-press goes straight to Log activity.
-                Fab(Modifier.align(Alignment.TopEnd).offset(x = (-20).dp, y = (-30).dp), open = dial, onLongClick = { dial = false; log = LogRequest(null, Dates.today(), false, exercise = true) }) { dial = !dial }
+                Fab(Modifier.align(Alignment.TopEnd).offset(x = (-20).dp, y = (-30).dp).tourTarget(com.sohum.bandlog.ui.tour.TourStop.PLUS), open = dial, onLongClick = { dial = false; log = LogRequest(null, Dates.today(), false, exercise = true) }) { dial = !dial }
             }
         }
 
@@ -546,7 +564,8 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
 
         vm.milestone?.let { m -> com.sohum.bandlog.ui.milestone.MilestoneFlood(m, vm) { vm.dismissMilestone() } }
         // v2.16: "Here's some jewellery." the first time a badge is earned (once per badge per device).
-        com.sohum.bandlog.ui.progress.BadgeUnlockHost(vm, paused = vm.milestone != null)
+        com.sohum.bandlog.ui.progress.BadgeUnlockHost(vm, paused = vm.milestone != null || tourOn)
+        if (tourOn) com.sohum.bandlog.ui.tour.TourOverlay { tourOn = false; vm.markTourSeen(ctx) }
     }
 }
 

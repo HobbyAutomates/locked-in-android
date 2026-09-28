@@ -91,6 +91,9 @@ fun PreferencesScreen(vm: AppViewModel, themeMode: ThemeMode, onBack: () -> Unit
                     }
                     Hair()
                     SettingRow(Icons.Outlined.Person, p.ink, "Account", subtitle = Session.email ?: "Email, name, sign out", onClick = { onOpen(ProfilePage.ACCOUNT) }) { Chevron() }
+                    Hair()
+                    // v2.16: the first-launch tour, again (closes this page and plays it over Home).
+                    SettingRow(com.sohum.bandlog.ui.components.LineIcons.Star, p.ink, "Replay the tour", subtitle = "The five-stop walkthrough of Home", onClick = { com.sohum.bandlog.ui.tour.TourState.replay() }) { Chevron() }
                 }
             }
         }
