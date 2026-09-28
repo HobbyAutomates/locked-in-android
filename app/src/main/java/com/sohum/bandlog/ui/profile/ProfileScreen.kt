@@ -141,6 +141,9 @@ fun ProfileScreen(
     var editSheet by remember { mutableStateOf(false) }
     var avatarBusy by remember { mutableStateOf(false) }
     var avatarError by remember { mutableStateOf<String?>(null) }
+    var coverSheet by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(Unit) { if (vm.coverLocal == null) vm.coverLocal = CoverStore.local(ctx) }
+    val coverId = com.sohum.bandlog.util.Covers.resolve(prof.coverPreset.takeIf { prof.coverSupported }, vm.coverLocal)
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val displayName = Names.display(prof.name, Session.email)
 
@@ -206,6 +209,8 @@ fun ProfileScreen(
     }
     val remindersOn = Reminders.parse(prof.remindersJson).count { it.value.on }
     val joined = prof.createdAt?.take(10)?.let { runCatching { java.time.LocalDate.parse(it).format(java.time.format.DateTimeFormatter.ofPattern("MMM yyyy", java.util.Locale.ENGLISH)) }.getOrNull() }
+    // The existing "Founding member" rule: every account so far is in the launch cohort, so the plate shows for all.
+    val isFoundingMember = true
     val isAdmin = Session.email?.trim()?.lowercase()?.let { e -> BuildConfig.ADMIN_EMAILS.split(",").map { it.trim().lowercase() }.contains(e) } == true
 
     MotionScreen {
@@ -213,10 +218,13 @@ fun ProfileScreen(
             // ---- cover, cover buttons, avatar ----
             Entrance(0, key = "cover") {
                 Box(Modifier.fillMaxWidth().height(364.dp)) {
-                    WeightPlatesCover(
+                    // v2.16: the chosen cover (#01 = today's plates cover, unchanged) and a small "Cover" button.
+                    CoverView(
+                        coverId,
                         Modifier.fillMaxWidth().height(300.dp)
                             .clip(RoundedCornerShape(bottomStart = 40.dp, bottomEnd = 40.dp)),
                     )
+                    CoverPill({ coverSheet = true }, Modifier.align(Alignment.TopEnd).padding(top = 16.dp, end = 16.dp))
                     CoverButton(LineIcons.Settings, "Preferences", { onOpen(ProfilePage.PREFERENCES) }, Modifier.align(Alignment.TopStart).padding(start = 34.dp, top = 274.dp))
                     CoverButton(LineIcons.Share, "Invite friends", invite, Modifier.align(Alignment.TopEnd).padding(end = 34.dp, top = 274.dp))
                     val pop = rememberMotion("avatar", 380, PremiumMotion.POP_MS)
@@ -241,24 +249,20 @@ fun ProfileScreen(
                 // ---- identity ----
                 Entrance(2, key = "identity") {
                     Column(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        // Every current user is a founding member (v2.12 launch cohort).
-                        Row(
-                            Modifier.border(1.dp, accent, CircleShape).padding(horizontal = 14.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            Icon(LineIcons.Star, null, tint = accent, modifier = Modifier.size(14.dp))
-                            Text("Founding member", fontSize = 13.sp, fontWeight = FontWeight(500), letterSpacing = 0.3.sp, color = accent)
-                        }
+                        // v2.16 identity band (board IdentityFinal): name, "@handle · FOUNDER", "City · since Mon YYYY".
                         Text(
-                            displayName.ifBlank { "Your name" }, fontSize = 30.sp, fontWeight = FontWeight(600), letterSpacing = (-0.8).sp, color = p.ink,
+                            displayName.ifBlank { "Your name" }, fontSize = 30.sp, fontWeight = FontWeight(600), letterSpacing = (-1).sp, color = p.ink,
                             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp),
                         )
-                        val handle = when {
-                            prof.username != null -> "@${prof.username}"
-                            else -> null
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            prof.username?.let { Text("@$it", fontSize = 13.sp, color = Color(0xFF8C8C92), maxLines = 1) }
+                            if (isFoundingMember) {
+                                if (prof.username != null) Box(Modifier.size(3.dp).background(Color(0xFF8C8C92), CircleShape))
+                                FounderPlate()
+                            }
                         }
-                        val bits = listOfNotNull(handle, joined?.let { "Joined $it" }, squadName)
-                        if (bits.isNotEmpty()) Text(bits.joinToString("  ·  "), fontSize = 14.sp, color = p.muted, textAlign = TextAlign.Center)
+                        val place = listOfNotNull(squadName, joined?.let { "since $it" })
+                        if (place.isNotEmpty()) Text(place.joinToString(" · "), fontSize = 12.5.sp, color = Color(0xFF8C8C92), textAlign = TextAlign.Center)
                         // v2.6: create the squad handle from here (username + photo flow).
                         if (prof.usernameSupported && prof.username == null) Text(
                             "Create your squad username ›", fontSize = 13.sp, fontWeight = FontWeight(700), color = p.blue,
@@ -271,43 +275,43 @@ fun ProfileScreen(
 
                 // ---- dials ----
                 Entrance(3, key = "dials") {
-                    Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            StreakDial(streak, bestStreak)
-                            DialLabel(LineIcons.Flame, "Streak")
-                        }
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            ProteinWaveDial(proteinToday, prof.proteinTargetG)
-                            DialLabel(LineIcons.Drop, "Protein")
-                        }
-                        Column(
-                            Modifier.semantics(mergeDescendants = true) {
-                                contentDescription = current?.let { "Weight ${fmt(it)} kilograms${goalKg?.let { g -> ", ${(goalFrac * 100).roundToInt()} percent of the way to ${fmt(g)}" } ?: ""}" } ?: "No weight logged"
-                            },
-                            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            WeightArcDial(current?.let { fmt((it * 10).roundToInt() / 10.0) } ?: "—", goalFrac)
-                            DialLabel(LineIcons.Balance, "Weight")
-                        }
+                    // v2.16: three liquid-filled glass spheres (streak ember, protein gold, weight silver).
+                    Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        LiquidSphere(
+                            "$streak", "d", if (bestStreak > 0) streak.toFloat() / bestStreak else 0f, Color(0xFFFF8B5E), Color(0xFFC2410C), "Streak", "sph-streak", 390,
+                            "Streak $streak days, best $bestStreak",
+                        )
+                        LiquidSphere(
+                            "$proteinToday", "g", if (prof.proteinTargetG > 0) proteinToday.toFloat() / prof.proteinTargetG else 0f, Color(0xFFD9B872), Color(0xFF5E4518), "Protein", "sph-protein", 490,
+                            "Protein today $proteinToday of ${prof.proteinTargetG} grams",
+                        )
+                        LiquidSphere(
+                            current?.let { fmt((it * 10).roundToInt() / 10.0) } ?: "—", if (current == null) "" else "kg", if (goalKg != null) goalFrac else 0.6f, Color(0xFFE6E8EC), Color(0xFF5F646B), "Weight", "sph-weight", 590,
+                            current?.let { "Weight ${fmt(it)} kilograms${goalKg?.let { g -> ", ${(goalFrac * 100).roundToInt()} percent of the way to ${fmt(g)}" } ?: ""}" } ?: "No weight logged",
+                        )
                     }
                 }
 
                 // ---- actions ----
                 Entrance(4, key = "actions") {
                     Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        // v2.16: ember "Edit profile" + an outlined "Invite" with an arrow (board IdentityFinal).
+                        val ember = com.sohum.bandlog.ui.theme.Brand.Ember
                         Box(
-                            Modifier.weight(1f).height(52.dp).pressable().background(accent, RoundedCornerShape(16.dp))
+                            Modifier.weight(1f).height(50.dp).pressable().shadow(10.dp, RoundedCornerShape(16.dp), ambientColor = ember, spotColor = ember)
+                                .background(ember, RoundedCornerShape(16.dp))
                                 .clickable(onClickLabel = "Edit profile") { editSheet = true },
                             contentAlignment = Alignment.Center,
-                        ) { Text("Edit profile", fontSize = 16.sp, fontWeight = FontWeight(600), color = Color.White) }
+                        ) { Text("Edit profile", fontSize = 15.5.sp, fontWeight = FontWeight(600), color = Color.White) }
                         Row(
-                            Modifier.weight(1f).height(52.dp).pressable().border(1.5.dp, accent, RoundedCornerShape(16.dp))
+                            Modifier.weight(1f).height(50.dp).pressable().background(p.ink.copy(alpha = 0.04f), RoundedCornerShape(16.dp))
+                                .border(1.dp, p.ink.copy(alpha = 0.12f), RoundedCornerShape(16.dp))
                                 .clickable(onClickLabel = "Invite friends", onClick = invite),
                             horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text("Invite", fontSize = 16.sp, fontWeight = FontWeight(600), color = accent)
+                            Text("Invite", fontSize = 15.5.sp, fontWeight = FontWeight(600), color = p.ink)
                             Spacer(Modifier.width(8.dp))
-                            Icon(LineIcons.Plus, null, tint = accent, modifier = Modifier.size(18.dp))
+                            Text("\u2192", fontSize = 16.sp, fontWeight = FontWeight(600), color = com.sohum.bandlog.ui.theme.Brand.EmberLight)
                         }
                     }
                 }
@@ -422,6 +426,7 @@ fun ProfileScreen(
     }
 
     if (showChangelog) ChangelogSheet { showChangelog = false }
+    if (coverSheet) CoverPickerSheet(coverId, onPick = { vm.setCoverPreset(ctx, it) }, onDismiss = { coverSheet = false })
     if (editSheet) BottomSheet(title = "Edit profile", subtitle = "Your photo, name and squad handle", onDismiss = { editSheet = false }) {
         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable { editSheet = false; avatarSheet = true }, verticalAlignment = Alignment.CenterVertically) {
             Icon(LineIcons.Camera, null, tint = p.ink, modifier = Modifier.size(20.dp))

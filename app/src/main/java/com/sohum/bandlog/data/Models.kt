@@ -316,6 +316,11 @@ data class Profile(
     val coachRemember: Boolean? = null,
     /** Milestone keys already celebrated (streak_7, goal_reached, pr:<exercise>:<date>…). */
     val milestonesSeen: List<String>? = null,
+    // ---- v2.16 (schema_v40, not applied yet) ----
+    /** profiles.cover_preset (util/Covers ids); null = unset or column missing. */
+    val coverPreset: String? = null,
+    /** True when the cover_preset column exists (a save goes to the profile, not only the device). */
+    val coverSupported: Boolean = false,
 ) {
     /** True when the v37 profile columns exist. */
     val v37: Boolean get() = coachStyle != null
@@ -389,6 +394,8 @@ data class Profile(
             coachWeeklyRoast = if (!o.has("coach_weekly_roast")) null else o.optBoolean("coach_weekly_roast", false),
             coachRemember = if (!o.has("coach_remember")) null else o.optBoolean("coach_remember", true),
             milestonesSeen = if (!o.has("milestones_seen")) null else o.strList("milestones_seen") ?: emptyList(),
+            coverPreset = if (!o.has("cover_preset")) null else o.str("cover_preset"),
+            coverSupported = o.has("cover_preset"),
         )
 
         private fun JSONObject.strList(k: String): List<String>? =

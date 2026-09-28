@@ -122,6 +122,21 @@ class AppViewModel : ViewModel() {
 
     fun dismissMilestone() { milestone = null }
 
+    /**
+     * v2.16 cover: always kept on the device; also saved to profiles.cover_preset when schema_v40 is
+     * there (a missing column is tolerated: the PATCH fails quietly and the device copy wins).
+     */
+    fun setCoverPreset(context: android.content.Context, id: String) {
+        com.sohum.bandlog.ui.profile.CoverStore.saveLocal(context, id)
+        coverLocal = id
+        if (!profile.coverSupported) return
+        profile = profile.copy(coverPreset = id)
+        viewModelScope.launch { runCatching { Api.patchProfile(org.json.JSONObject().put("cover_preset", id)) } }
+    }
+
+    /** The device's copy of the cover choice (read once by Profile). */
+    var coverLocal by mutableStateOf<String?>(null)
+
     /** v2.16 tour: the profile flag rides on milestones_seen ("tour_v216"), so no new column is needed. */
     val tourSeenOnProfile: Boolean get() = profile.milestonesSeen?.contains(com.sohum.bandlog.ui.tour.TourPrefs.PROFILE_KEY) == true
 

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -263,4 +264,72 @@ internal fun WeightArcDial(weightText: String, progress: Float, size: Dp = 112.d
         }
         DialValue(weightText, if (weightText == "—") "" else "kg", 28)
     }
+}
+
+/**
+ * v2.16 identity band (board IdentityFinal): a liquid-filled glass sphere in a gunmetal rim, the
+ * liquid's surface a slowly moving wave, filled to [fill] (0..1) and rising in on first view, with
+ * [value] + [unit] over it and a spaced uppercase [label] under it. [top] / [bottom] are the
+ * liquid's gradient (ember, gold or silver).
+ */
+@Composable
+internal fun LiquidSphere(value: String, unit: String, fill: Float, top: Color, bottom: Color, label: String, motionKey: String, delayMs: Int, description: String) {
+    val rise = rememberMotion("$motionKey-fill", delayMs, PremiumMotion.FILL_MS)
+    val drift = rememberLoop(3200)
+    val f = fill.coerceIn(0.08f, 0.94f)
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = description }) {
+        Box(
+            Modifier.size(86.dp).shadow(14.dp, CircleShape, ambientColor = Color.Black.copy(alpha = 0.6f), spotColor = Color.Black.copy(alpha = 0.6f))
+                .background(Brush.linearGradient(0f to Color(0xFF5A5A5F), 0.5f to Color(0xFF1A1A1C), 1f to Color(0xFF3A3A3E)), CircleShape)
+                .padding(4.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Canvas(Modifier.size(78.dp)) {
+                val r = size.minDimension / 2f
+                val circle = Path().apply { addOval(androidx.compose.ui.geometry.Rect(center, r)) }
+                clipPath(circle) {
+                    drawCircle(Brush.radialGradient(listOf(Color(0xFF1D1D20), Color(0xFF08080A)), center = Offset(center.x, size.height * 0.3f), radius = r * 1.4f), r, center)
+                    val level = size.height * (1f - f)
+                    val y0 = level + (1f - PremiumMotion.eased(rise.value)) * (size.height - level + 8f)
+                    val wl = size.width / 4f
+                    val amp = size.height * 0.035f
+                    val shift = -drift.value * wl * 2
+                    val wave = Path().apply {
+                        var x = shift - wl * 2
+                        moveTo(x, y0)
+                        var up = true
+                        while (x < size.width + wl * 2) {
+                            quadraticBezierTo(x + wl / 2f, y0 + if (up) -amp * 2 else amp * 2, x + wl, y0)
+                            x += wl; up = !up
+                        }
+                        lineTo(x, size.height + 4f); lineTo(shift - wl * 2, size.height + 4f); close()
+                    }
+                    drawPath(wave, Brush.verticalGradient(listOf(top.copy(alpha = 0.95f), bottom), startY = y0 - amp * 2, endY = size.height))
+                    // Glass highlight, top left.
+                    rotate(-20f, pivot = Offset(size.width * 0.37f, size.height * 0.19f)) {
+                        drawOval(
+                            Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.35f), Color.White.copy(alpha = 0f)), startY = size.height * 0.1f, endY = size.height * 0.28f),
+                            Offset(size.width * 0.15f, size.height * 0.1f), Size(size.width * 0.44f, size.height * 0.18f),
+                        )
+                    }
+                }
+            }
+            Text(
+                buildAnnotatedString { append(value); withStyle(SpanStyle(fontSize = 10.sp, fontWeight = FontWeight(400), color = Color.White.copy(alpha = 0.8f))) { append(unit) } },
+                fontSize = 20.sp, fontWeight = FontWeight(500), letterSpacing = (-0.6).sp, color = Color.White,
+                style = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.6f), Offset(0f, 1f), 8f)),
+            )
+        }
+        Text(label.uppercase(), fontSize = 9.sp, fontWeight = FontWeight(500), letterSpacing = 2.2.sp, color = Color(0xFF8C8C92), modifier = Modifier.padding(top = 10.dp))
+    }
+}
+
+/** "FOUNDER" gold plate (board IdentityFinal). */
+@Composable
+internal fun FounderPlate() {
+    Box(
+        Modifier.height(22.dp).shadow(8.dp, RoundedCornerShape(6.dp), ambientColor = Color(0xFFA8823A), spotColor = Color(0xFFA8823A))
+            .background(Brush.linearGradient(listOf(Color(0xFFD9B872), Color(0xFF5E4518))), RoundedCornerShape(6.dp)).padding(horizontal = 9.dp),
+        contentAlignment = Alignment.Center,
+    ) { Text("FOUNDER", fontSize = 9.5.sp, fontWeight = FontWeight(700), letterSpacing = 1.3.sp, color = Color(0xFF1A1206)) }
 }
