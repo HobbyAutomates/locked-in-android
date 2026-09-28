@@ -28,6 +28,9 @@
     <uses-permission android:name="android.permission.health.READ_STEPS" />
     <uses-permission android:name="android.permission.health.READ_ACTIVE_CALORIES_BURNED" />
     <uses-permission android:name="android.permission.health.WRITE_EXERCISE" />
+    <!-- v2.18 B8 recovery score: last night's sleep and resting heart rate (asked from the coach card). -->
+    <uses-permission android:name="android.permission.health.READ_SLEEP" />
+    <uses-permission android:name="android.permission.health.READ_RESTING_HEART_RATE" />
 
     <application
         android:allowBackup="true"
@@ -127,6 +130,15 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="com.sohum.bandlog.ACTION_REST_DONE" />
+            </intent-filter>
+        </receiver>
+
+        <!-- v2.18 B7: daily supplement reminders (one exact alarm per supplement, re-armed when it fires). -->
+        <receiver
+            android:name=".alarm.SupplementReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.sohum.bandlog.ACTION_SUPPLEMENT" />
             </intent-filter>
         </receiver>
 

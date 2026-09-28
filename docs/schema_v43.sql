@@ -1,0 +1,19 @@
+-- v2.18 coach stream (schema_v43): pointer only. THE WEB REPO'S COPY WINS.
+--
+-- The migration lives in the web repo: docs/schema_v43.sql (and docs/revert_v43.sql). Apply that file,
+-- not this one. NOT applied by the agent that wrote this pointer.
+--
+-- Android v2.18 never touches these tables directly: everything goes through the web routes
+-- (data/V218Api.kt, bearer token), which read / write them with the service role:
+--   GET/POST /api/coach/daily          bandlog.daily_checkins (+ festival_modes, cycle_settings, supplements)
+--   /api/coach/supplements             bandlog.supplements, bandlog.supplement_logs
+--   GET /api/coach/insights            bandlog.coach_reviews (weekly check-in), weekly_checkins (why it changed)
+--   /api/coach/modes                   bandlog.festival_modes, bandlog.cycle_settings (private, own row only)
+--   POST /api/coach/form-check         bandlog.form_checks (summary only, no video)
+-- Also added by v43: bandlog.fasting_sessions.preset (web tags Indian-preset fasts; Android doesn't yet)
+-- and bandlog.supplement_reminders_sent (web cron de-dupe).
+--
+-- Missing v43 / routes not deployed = NotYetAvailable: the Home check-in card, supplements, festival
+-- and cycle cards hide; form check and fasting presets still work on the phone, unsaved.
+-- Health Connect (util/HealthRecovery.kt) adds READ_SLEEP and READ_RESTING_HEART_RATE, asked from
+-- the check-in card; the minutes / bpm ride along in POST /api/coach/daily (hc_sleep_min, resting_hr).

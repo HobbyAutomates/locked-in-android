@@ -53,7 +53,8 @@ class AppViewModel : ViewModel() {
     val mealDates: List<String> get() = meals.map { it.date }.distinct()
     val weekStreak: Int get() = Streaks.workoutWeekStreak(workoutDates, profile.weeklyWorkoutTarget)
     /** v2.2: consecutive (India) days with ANY log — a workout, an exercise_log row of any source, or a meal. */
-    val dayStreak: Int get() = Streaks.dayStreak(workouts.map { it.date } + exercises.map { it.date } + meals.map { it.date })
+    // v2.18: festival-mode dates (schema_v43) protect the streak.
+    val dayStreak: Int get() = Streaks.dayStreak(workouts.map { it.date } + exercises.map { it.date } + meals.map { it.date } + com.sohum.bandlog.ui.v218.CoachPlusNav.protectedDates)
     val mealStreak: Int get() = Streaks.dayStreak(mealDates)
     val thisWeek: Int get() = Streaks.thisWeekCount(workoutDates)
 

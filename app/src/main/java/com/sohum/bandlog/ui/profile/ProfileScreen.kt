@@ -321,6 +321,7 @@ fun ProfileScreen(
 
                 // ---- v2.17 Trophy wall: badges on lit plinths + the Food Battle crowns shelf (was the badge shelf and the graffiti wall) ----
                 Entrance(5, key = "badges") { TrophyWall(vm, graffiti) { onOpen(ProfilePage.BADGES) } }
+                Entrance(5, key = "consistency") { com.sohum.bandlog.ui.v218.ConsistencyCard() } // v2.18 B11
 
                 // ---- goal ----
                 Entrance(6, key = "goal") {

@@ -181,8 +181,9 @@ object V214Api {
         return ChatState(o.optString("style", "balanced"), o.optBoolean("remember", true), o.optBoolean("teen", false), (0 until arr.length()).map { CoachMessage.from(arr.getJSONObject(it)) })
     }
 
-    suspend fun send(message: String, imageBase64: String? = null): ChatReply {
+    suspend fun send(message: String, imageBase64: String? = null, voice: Boolean = false): ChatReply {
         val body = JSONObject().put("message", message).put("date", com.sohum.bandlog.util.Dates.today())
+        if (voice) body.put("voice", true) // v2.18 B1: short, speakable reply
         if (imageBase64 != null) body.put("image", imageBase64).put("media_type", "image/jpeg")
         val o = obj(web("POST", "coach/chat", body, label = "Coach", timeoutSec = 90))
         val learned = o.optJSONArray("learned")?.let { a -> (0 until a.length()).map { CoachMemory.from(a.getJSONObject(it)) } } ?: emptyList()

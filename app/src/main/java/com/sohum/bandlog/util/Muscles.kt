@@ -148,6 +148,16 @@ object MuscleMap {
         "diamond push-up" to t("triceps", "chest,front_delts"),
         "ab wheel rollout" to t("abs", "lats,obliques"),
         "jumping jacks" to t("calves", "glutes,side_delts"),
+        // v2.18 home & hostel plans (web src/lib/muscles.ts)
+        "band row" to t("lats,upper_back", "biceps,rear_delts"),
+        "band pull-apart" to t("rear_delts", "upper_back,traps"),
+        "band chest press" to t("chest", "front_delts,triceps"),
+        "band overhead press" to t("front_delts", "side_delts,triceps"),
+        "band curl" to t("biceps", "forearms"),
+        "band tricep extension" to t("triceps"),
+        "band squat" to t("quads,glutes", "adductors"),
+        "band lateral walk" to t("glutes", "adductors"),
+        "superman" to t("lower_back", "glutes,upper_back"),
     )
 
     /** The older coarse groups ([Muscles.ALL], the workouts.muscles column) to regions, for band sessions. */

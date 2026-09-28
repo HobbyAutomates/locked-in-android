@@ -199,9 +199,10 @@ class NutritionViewModel : ViewModel() {
         }
     }
 
-    suspend fun startFast(ctx: Context, hours: Double): Boolean {
+    suspend fun startFast(ctx: Context, hours: Double, startedAtMs: Long? = null): Boolean {
         val h = com.sohum.bandlog.util.Fasting.clampHours(hours)
-        val now = System.currentTimeMillis()
+        // v2.18 B10: an Indian preset already inside its window backdates the start.
+        val now = startedAtMs?.coerceAtMost(System.currentTimeMillis()) ?: System.currentTimeMillis()
         return try {
             val row = NutritionApi.startFast(now, h)
             val local = FastingAlarm.Local(row.id, row.startedAtMs, row.targetHours)
