@@ -40,6 +40,10 @@ object Lifts {
         e("Mountain climber", "Core", bw = true), e("Bicycle crunch", "Core", bw = true), e("Cable crunch", "Core"),
         e("Burpee", "Other", bw = true), e("Jumping jack", "Other", bw = true), e("Kettlebell swing", "Glutes", "Hamstrings"),
         e("Farmer's walk", "Forearms", "Core"), e("Clean and press", "Shoulders", "Quads"),
+        // v2.18 home & hostel plans: resistance-band moves (+ superman)
+        e("Band row", "Back", "Biceps"), e("Band pull-apart", "Shoulders", "Back"), e("Band chest press", "Chest", "Triceps"),
+        e("Band overhead press", "Shoulders", "Triceps"), e("Band curl", "Biceps"), e("Band tricep extension", "Triceps"),
+        e("Band squat", "Quads", "Glutes"), e("Band lateral walk", "Glutes"), e("Superman", "Back", "Glutes", bw = true),
     )
 
     private val byName = ALL.associateBy { it.name.lowercase() }

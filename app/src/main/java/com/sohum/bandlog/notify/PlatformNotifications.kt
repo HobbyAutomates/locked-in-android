@@ -67,6 +67,7 @@ object PlatformNotifications {
     /** Where tapping an inbox row goes: nudges (and anything pointing at /squad) open Squad, the rest the inbox. */
     fun targetFor(item: InboxItem): String = when {
         item.kind == "nudge" || item.url?.startsWith("/squad") == true -> PlatformNav.OPEN_SQUAD
+        item.url?.startsWith("/coach/supplements") == true -> com.sohum.bandlog.ui.v218.CoachPlusNav.OPEN_SUPPLEMENTS // v2.18
         item.kind == "coach" || item.url?.startsWith("/coach") == true -> PlatformNav.OPEN_COACH
         item.kind == "buddy" || item.url?.startsWith("/buddy") == true -> PlatformNav.OPEN_BUDDY
         item.kind == "protein" -> PlatformNav.OPEN_MEAL

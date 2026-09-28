@@ -167,6 +167,7 @@ fun FastingScreen(vm: AppViewModel, nvm: NutritionViewModel, onBack: () -> Unit)
                     }
                 }
             }
+            if (a == null) Entrance(1, key = "indian") { com.sohum.bandlog.ui.v218.IndianFastsCard(nvm) } // v2.18 B10
             Entrance(2, key = "stages") {
                 Card {
                     Text("Stages", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink)

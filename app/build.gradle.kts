@@ -102,6 +102,8 @@ dependencies {
     implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.1")
     // On-device EAN/UPC reading for the barcode scanner (same Play-Services delivery as the OCR model).
     implementation("com.google.android.gms:play-services-mlkit-barcode-scanning:18.3.1")
+    // v2.18 C2 AI form check: on-device pose landmarks (bundled base model, streaming mode).
+    implementation("com.google.mlkit:pose-detection:18.0.0-beta5")
 
     // v2.13 platform: inbox polling every 15 min (no FCM project) + on app open.
     implementation("androidx.work:work-runtime-ktx:2.9.1")

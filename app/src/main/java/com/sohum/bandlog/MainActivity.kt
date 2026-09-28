@@ -167,6 +167,8 @@ class MainActivity : ComponentActivity() {
             OPEN_WATER -> openWaterTick.intValue++
             // v2.13 nutrition: "fast goal reached" opens the fasting timer.
             com.sohum.bandlog.alarm.FastingAlarm.OPEN_FASTING -> com.sohum.bandlog.ui.nutrition.NutritionNav.openFastingTick++
+            // v2.18: a supplement reminder opens the tracker.
+            com.sohum.bandlog.ui.v218.CoachPlusNav.OPEN_SUPPLEMENTS -> com.sohum.bandlog.ui.v218.CoachPlusNav.open(com.sohum.bandlog.ui.v218.CoachPlusPage.SUPPLEMENTS)
         }
         // v2.6 invite link: https://web-production-ff1cf.up.railway.app/join/<code>
         i?.data?.takeIf { i.action == android.content.Intent.ACTION_VIEW }?.let { uri ->
@@ -557,6 +559,7 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
         com.sohum.bandlog.ui.squad.SquadOverlays(vm)
         com.sohum.bandlog.ui.platform.PlatformOverlays(vm) // v2.13 platform
         com.sohum.bandlog.ui.coach.CoachOverlays(vm) // v2.14 coach, buddies, Tune your plan
+        com.sohum.bandlog.ui.v218.CoachPlusOverlays(vm) // v2.18 coach hub, supplements, sports, form check
         // v2.13 nutrition: fasting, recipes, micros, what-to-eat pages over everything above.
         com.sohum.bandlog.ui.nutrition.NutritionOverlays(vm)
 

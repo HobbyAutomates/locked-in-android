@@ -131,7 +131,8 @@ fun TodayScreen(
     }
 
     // v2.3: today's budget honours "Add burned calories" and "Rollover calories" (both from Preferences).
-    val budget = if (isToday) vm.budgetToday else prof.calorieTarget.toDouble()
+    // v2.18: plus today's check-in buffer / festival maintenance bump (0 without schema_v43).
+    val budget = if (isToday) vm.budgetToday + com.sohum.bandlog.ui.v218.CoachPlusNav.todayBump else prof.calorieTarget.toDouble()
     val caloriesLeft = (budget - totals.calories).toInt().coerceAtLeast(0)
     if (isToday && vm.loadedOnce) androidx.compose.runtime.LaunchedEffect(caloriesLeft) { com.sohum.bandlog.widget.CaloriesWidget.publish(ctx, caloriesLeft, if (prof.hideNumbers == true) com.sohum.bandlog.util.Goals.calorieWords(totals.calories, budget.toDouble()) else null) }
 
@@ -187,6 +188,8 @@ fun TodayScreen(
         if (isToday && com.sohum.bandlog.ui.coach.v214CardsVisible(vm, cvm)) item(key = "v214") {
             Entrance(1, key = "v214") { com.sohum.bandlog.ui.coach.V214HomeCards(vm, cvm) { t -> onAddMeal(today, t) } }
         }
+        // v2.18: the daily check-in, recovery, supplements and festival mode (hidden without the routes / v43).
+        if (isToday) item(key = "v218") { Entrance(1, key = "v218") { com.sohum.bandlog.ui.v218.CoachDailyCard() } }
         // v2.13: "Moved to Lunch" and friends; the running fast; Monday's check-in.
         if (nvm.message != null && nvm.page == null) item(key = "nmsg") { com.sohum.bandlog.ui.nutrition.NoticeLine(nvm) }
         if (isToday && nvm.active != null && com.sohum.bandlog.ui.nutrition.fastingBlock(vm, ctx) == null) item(key = "fast") {

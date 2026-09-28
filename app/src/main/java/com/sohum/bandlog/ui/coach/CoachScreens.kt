@@ -217,12 +217,17 @@ fun CoachChatScreen(vm: AppViewModel, cvm: CoachViewModel, onBack: () -> Unit) {
         text = ""
     }
     val chips = listOf("Calories left?", "Log 500 ml water", "What should I eat?") + if (cvm.chatStyle == "no_excuses") listOf("Roast my week") else emptyList()
+    // v2.18 B1: hands-free voice coach (header mic, or Home's "Talk to coach").
+    var voiceOpen by remember { mutableStateOf(com.sohum.bandlog.ui.v218.CoachPlusNav.voiceTick > 0) }
+    LaunchedEffect(com.sohum.bandlog.ui.v218.CoachPlusNav.voiceTick) { if (com.sohum.bandlog.ui.v218.CoachPlusNav.voiceTick > 0) voiceOpen = true }
+    if (voiceOpen && cvm.chatAvailable == true) com.sohum.bandlog.ui.v218.VoiceCoachDialog(vm, cvm) { voiceOpen = false; com.sohum.bandlog.ui.v218.CoachPlusNav.voiceTick = 0 }
 
     Column(Modifier.fillMaxSize().background(p.bg).statusBarsPadding().imePadding()) {
         CoachTopBar(
             "Your coach", onBack, avatar = true,
             sub = if (cvm.remember) "● remembers what you tell it" else "memory is off", subColor = if (cvm.remember) p.iris else p.muted,
         ) {
+            if (cvm.chatAvailable == true) RoundAction(OnbIcons.Mic, "Talk to your coach") { voiceOpen = true }
             RoundAction(OnbIcons.Brain, "What your coach knows") { CoachNav.open(CoachPage.MEMORY) }
             RoundAction(OnbIcons.Scale, "Coach style") { CoachNav.open(CoachPage.STYLE) }
         }

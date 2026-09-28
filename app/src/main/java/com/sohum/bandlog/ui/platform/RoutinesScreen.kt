@@ -104,6 +104,10 @@ fun RoutinesScreen(vm: AppViewModel, pvm: PlatformViewModel, onBack: () -> Unit)
                 }
                 Text("Templates", fontSize = 13.sp, fontWeight = FontWeight(700), color = p.muted, modifier = Modifier.padding(start = 4.dp, top = 6.dp))
                 Routines.TEMPLATES.forEach { t -> TemplateCard(vm, pvm, t) }
+                // v2.18 C1: home / hostel / band plans, plus the sports presets and the form check.
+                Text("Home & hostel · no gym needed", fontSize = 13.sp, fontWeight = FontWeight(700), color = p.muted, modifier = Modifier.padding(start = 4.dp, top = 6.dp))
+                com.sohum.bandlog.util.HomeWorkouts.TEMPLATES.forEach { t -> TemplateCard(vm, pvm, com.sohum.bandlog.util.HomeWorkouts.routine(t).copy(active = false)) }
+                com.sohum.bandlog.ui.v218.TrainingPlusLinks()
                 ErrorNote(pvm.error)
             }
         }
