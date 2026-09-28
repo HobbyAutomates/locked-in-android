@@ -55,8 +55,9 @@ fun BadgesScreen(vm: AppViewModel, onBack: () -> Unit) {
             Entrance(0) {
                 Card(padding = 20.dp) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        val best = Badges.ALL.filter { progress.earned(it) }.maxWithOrNull(compareBy({ tierOf(it).ordinal * -1 }, { it.need }))
-                        if (best != null) BadgeMedal(best, progress, 64.dp, "hero", 300) else LockedMedal(LineIcons.Trophy, 0f, 64.dp)
+                        val best = com.sohum.bandlog.util.Jewels.top(progress)?.badge
+                        if (best != null) BadgeMedal(best, progress, 64.dp, "hero", 300)
+                        else Jewel(com.sohum.bandlog.util.Jewels.Category.STREAK, com.sohum.bandlog.util.Jewels.Tier.BRONZE, 64.dp, locked = true)
                         Spacer(Modifier.size(16.dp))
                         Column {
                             Text(
@@ -69,7 +70,6 @@ fun BadgesScreen(vm: AppViewModel, onBack: () -> Unit) {
                             )
                         }
                     }
-                    if (next != null) NextUpRow(next, progress, Modifier.padding(top = 14.dp))
                 }
             }
 
@@ -106,14 +106,15 @@ fun BadgesScreen(vm: AppViewModel, onBack: () -> Unit) {
                     }
                 }
             }
+            // v2.16: "Next up" sits under the grid.
+            if (next != null) Entrance(Badges.Group.entries.size + 1) { Card(padding = 18.dp) { NextUpRow(next, progress) } }
             Spacer(Modifier.height(4.dp))
         }
     }
 }
 
 /** The unearned badge closest to done (by fraction), or null when every badge is earned. */
-fun nextBadge(progress: Badges.Progress): Badges.Badge? =
-    Badges.ALL.filter { !progress.earned(it) }.maxByOrNull { progress.value(it.group).toFloat() / it.need }
+fun nextBadge(progress: Badges.Progress): Badges.Badge? = com.sohum.bandlog.util.Jewels.next(progress)?.badge
 
 /** "k more days / meals" for a badge still to earn. */
 fun badgeRemaining(b: Badges.Badge, progress: Badges.Progress): String {
@@ -129,7 +130,7 @@ fun badgeRemaining(b: Badges.Badge, progress: Badges.Progress): String {
 @Composable
 fun NextUpRow(b: Badges.Badge, progress: Badges.Progress, modifier: Modifier = Modifier, delayMs: Int = 1050) {
     val p = palette
-    val accent = accentColor
+    val accent = com.sohum.bandlog.ui.theme.Brand.Ember
     val grow = rememberMotion("nextup-bar", delayMs, PremiumMotion.GROW_X_MS)
     val frac = (progress.value(b.group).toFloat() / b.need).coerceIn(0f, 1f)
     Column(modifier.fillMaxWidth().semantics { contentDescription = "Next up: ${b.name}, ${badgeRemaining(b, progress)}" }) {
@@ -150,7 +151,7 @@ private fun BadgeTile(modifier: Modifier, b: Badges.Badge, progress: Badges.Prog
     val p = palette
     val got = progress.earned(b)
     val tier = tierOf(b)
-    val accent = accentColor
+    val accent = com.sohum.bandlog.ui.theme.Brand.EmberLight
     Card(modifier, padding = 12.dp) {
         Box(Modifier.fillMaxWidth()) {
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -180,6 +181,7 @@ private fun BadgeTile(modifier: Modifier, b: Badges.Badge, progress: Badges.Prog
 /** Compact summary medal used by the Progress "More stats" badges card. */
 @Composable
 fun BadgeSummaryMedal(progress: Badges.Progress, size: Dp) {
-    val best = Badges.ALL.filter { progress.earned(it) }.maxWithOrNull(compareBy({ tierOf(it).ordinal * -1 }, { it.need }))
-    if (best != null) MetalMedal(tierOf(best), medalIcon(best.group), size) else LockedMedal(LineIcons.Trophy, 0f, size)
+    val best = com.sohum.bandlog.util.Jewels.top(progress)
+    if (best != null) Jewel(best.category, best.tier, size)
+    else Jewel(com.sohum.bandlog.util.Jewels.Category.STREAK, com.sohum.bandlog.util.Jewels.Tier.BRONZE, size, locked = true)
 }

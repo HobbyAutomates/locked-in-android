@@ -36,24 +36,23 @@ import kotlin.math.sin
  * a dark disc with an accent progress ring. Pure Canvas, so it scales to any size.
  */
 
+/** v2.16: four metals (best first, so `ordinal` sorts best → worst), coloured like the jewellery frames. */
 enum class MedalTier(val label: String, val light: Color, val mid: Color, val dark: Color, val enamel: Color) {
-    GOLD("GOLD", Color(0xFFFFF1C4), Color(0xFFE2B04A), Color(0xFF8A5A12), Color(0xFF3B2606)),
-    SILVER("SILVER", Color(0xFFFFFFFF), Color(0xFFC9C9D1), Color(0xFF6C6C75), Color(0xFF26262A)),
-    BRONZE("BRONZE", Color(0xFFFFD9B8), Color(0xFFC97A42), Color(0xFF7A3D17), Color(0xFF2E1407)),
+    PLATINUM("PLATINUM", Color(0xFFFFFFFF), Color(0xFFCFD8E2), Color(0xFF66717E), Color(0xFF22262B)),
+    GOLD("GOLD", Color(0xFFFBE7A8), Color(0xFFD9B872), Color(0xFF5E4518), Color(0xFF3B2606)),
+    SILVER("SILVER", Color(0xFFF4F5F7), Color(0xFFA9ADB4), Color(0xFF4F535A), Color(0xFF26262A)),
+    BRONZE("BRONZE", Color(0xFFF0B48A), Color(0xFFB0643A), Color(0xFF5A2C12), Color(0xFF2E1407)),
 }
 
 /** The warm accent used sparingly on Profile (dark #FF8A3D, light #E8701F). */
 val accentColor: Color @Composable get() = if (palette.bg.luminance() < 0.5f) Color(0xFFFF8A3D) else Color(0xFFE8701F)
 
-/**
- * Tier for a badge: its place within its group, split in thirds — the easiest third bronze, the
- * middle silver, the hardest gold (streak: Rookie/Getting Serious bronze … No Days Off/Immortal
- * gold; meals and calorie goals: one of each).
- */
-fun tierOf(b: Badges.Badge): MedalTier {
-    val group = Badges.ALL.filter { it.group == b.group }.sortedBy { it.need }
-    val i = group.indexOf(b).coerceAtLeast(0)
-    return when ((i * 3) / group.size.coerceAtLeast(1)) { 0 -> MedalTier.BRONZE; 1 -> MedalTier.SILVER; else -> MedalTier.GOLD }
+/** Tier for a badge: v2.16 fixed per badge (util/Jewels, shared with the web). */
+fun tierOf(b: Badges.Badge): MedalTier = when (com.sohum.bandlog.util.Jewels.tierOf(b)) {
+    com.sohum.bandlog.util.Jewels.Tier.PLATINUM -> MedalTier.PLATINUM
+    com.sohum.bandlog.util.Jewels.Tier.GOLD -> MedalTier.GOLD
+    com.sohum.bandlog.util.Jewels.Tier.SILVER -> MedalTier.SILVER
+    com.sohum.bandlog.util.Jewels.Tier.BRONZE -> MedalTier.BRONZE
 }
 
 /** The engraving for a badge's group. */
@@ -138,11 +137,14 @@ internal fun penEased(t: Float) = PremiumMotion.eased(t, PremiumMotion.EasePen)
 @Composable
 fun BadgeMedal(b: Badges.Badge, progress: Badges.Progress, size: Dp, motionKey: String, delayMs: Int, modifier: Modifier = Modifier) {
     val pop = com.sohum.bandlog.ui.motion.rememberMotion("$motionKey-pop", delayMs, PremiumMotion.POP_MS)
+    val cat = com.sohum.bandlog.util.Jewels.categoryOf(b)
+    val tier = com.sohum.bandlog.util.Jewels.tierOf(b)
+    // v2.16: jewellery shields (util/Jewels + Jewel.kt) instead of the v2.12 struck medals.
     if (progress.earned(b)) {
-        MetalMedal(tierOf(b), medalIcon(b.group), size, modifier.then(Modifier.popIn(pop)))
+        Jewel(cat, tier, size, modifier.then(Modifier.popIn(pop)))
     } else {
         val ring = com.sohum.bandlog.ui.motion.rememberMotion("$motionKey-ring", delayMs + 300, PremiumMotion.DRAW_MS - 600)
         val frac = (progress.value(b.group).toFloat() / b.need).coerceIn(0f, 1f)
-        LockedMedal(LineIcons.Trophy, frac, size, modifier.then(Modifier.popIn(pop)), drawFraction = penEased(ring.value))
+        Jewel(cat, tier, size, modifier.then(Modifier.popIn(pop)), locked = true, progress = frac, drawFraction = penEased(ring.value))
     }
 }

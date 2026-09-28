@@ -45,6 +45,8 @@ class AppViewModel : ViewModel() {
     var totalMeals by mutableStateOf(0); private set
     var allWorkoutDates by mutableStateOf<List<String>>(emptyList()); private set
     var badgesLoading by mutableStateOf(false); private set
+    /** v2.16: true once the all-time badge totals are in, so the unlock moment never fires on partial numbers. */
+    var badgeTotalsLoaded by mutableStateOf(false); private set
 
     val today: String get() = Dates.today()
     val workoutDates: List<String> get() = workouts.map { it.date }.distinct()
@@ -910,7 +912,7 @@ class AppViewModel : ViewModel() {
                     val c = async { Api.countRows("meals") }
                     allWorkoutDates = d.await(); totalMeals = c.await()
                 }
-            }
+            }.onSuccess { badgeTotalsLoaded = true }
             badgesLoading = false
         }
     }
@@ -932,7 +934,7 @@ class AppViewModel : ViewModel() {
         viewModelScope.launch {
             SupabaseAuth.signOut()
             signedIn = false; workouts = emptyList(); meals = emptyList(); weights = emptyList(); exercises = emptyList(); water = emptyList(); progressPhotos = emptyList()
-            profile = Profile(); loadedOnce = false; totalMeals = 0; allWorkoutDates = emptyList()
+            profile = Profile(); loadedOnce = false; totalMeals = 0; allWorkoutDates = emptyList(); badgeTotalsLoaded = false
             onboardingSkipped = false; com.sohum.bandlog.util.OnbStore.skipped = false; nudges = emptyList(); rolledYesterday = false
         }
     }

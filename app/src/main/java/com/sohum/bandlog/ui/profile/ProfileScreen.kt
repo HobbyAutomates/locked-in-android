@@ -3,6 +3,7 @@ package com.sohum.bandlog.ui.profile
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import com.sohum.bandlog.ui.components.BottomSheet
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -388,8 +389,9 @@ fun ProfileScreen(
                             LineIcons.Refresh, "Check for updates",
                             when {
                                 updateVm.checking -> "Checking…"
-                                updateVm.upToDate -> "v${BuildConfig.VERSION_NAME} · up to date"
-                                else -> "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
+                                // v2.16: short values so the label never truncates to "Check for".
+                                updateVm.upToDate -> "Up to date"
+                                else -> "v${BuildConfig.VERSION_NAME}"
                             },
                             valueColor = if (updateVm.upToDate) p.green else null, chevron = false,
                         ) { updateVm.check() }
@@ -522,8 +524,9 @@ private fun ListRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Icon(icon, null, tint = p.ink, modifier = Modifier.size(20.dp))
-        Text(label, fontSize = 15.5.sp, color = p.ink, modifier = Modifier.weight(1f), maxLines = 1)
-        if (value.isNotEmpty()) Text(value, fontSize = 13.5.sp, color = valueColor ?: p.muted, maxLines = 1)
+        // v2.16: the label wraps instead of truncating; the value keeps to one line.
+        Text(label, fontSize = 15.5.sp, color = p.ink, modifier = Modifier.weight(1f), maxLines = 2, lineHeight = 19.sp)
+        if (value.isNotEmpty()) Text(value, fontSize = 13.5.sp, color = valueColor ?: p.muted, maxLines = 1, softWrap = false, textAlign = TextAlign.End, modifier = Modifier.widthIn(max = 150.dp), overflow = TextOverflow.Ellipsis)
         if (chevron) Icon(LineIcons.ChevronRight, null, tint = p.muted, modifier = Modifier.size(16.dp))
     }
 }
@@ -541,8 +544,9 @@ private fun BadgesShelf(vm: AppViewModel, onOpen: () -> Unit) {
     val progress = vm.badgeProgress
     val all = com.sohum.bandlog.util.Badges.ALL
     val earned = all.filter { progress.earned(it) }.sortedWith(compareBy({ tierOf(it).ordinal }, { -it.need }))
+    // v2.16: every badge as a jewellery shield (earned first, best tier first), four to a row.
     val locked = all.filter { !progress.earned(it) }.sortedByDescending { progress.value(it.group).toFloat() / it.need }
-    val shelf = (earned.take(3) + locked).take(4)
+    val shelf = earned + locked
     val next = nextBadge(progress)
     ProfileCard(padding = 0.dp, radius = 24.dp) {
         Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -553,23 +557,25 @@ private fun BadgesShelf(vm: AppViewModel, onOpen: () -> Unit) {
                 Text("Badges", fontSize = 19.sp, fontWeight = FontWeight(600), color = p.ink, modifier = Modifier.weight(1f))
                 Text("${earned.size} of ${all.size}  ›", fontSize = 14.sp, color = p.muted)
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                shelf.forEachIndexed { i, b ->
+            shelf.chunked(4).forEachIndexed { ri, rowItems -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                rowItems.forEachIndexed { ci, b ->
+                    val i = ri * 4 + ci
                     val got = progress.earned(b)
                     Column(
-                        Modifier.width(80.dp).clickable(onClickLabel = "Open badges", onClick = onOpen)
+                        Modifier.width(78.dp).clickable(onClickLabel = "Open badges", onClick = onOpen)
                             .semantics(mergeDescendants = true) { contentDescription = if (got) "${b.name}, ${tierOf(b).label.lowercase()} medal" else "${b.name}, ${progress.value(b.group).coerceAtMost(b.need)} of ${b.need}" },
                         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp),
                     ) {
-                        BadgeMedal(b, progress, 76.dp, "shelf$i", 450 + i * 120)
+                        BadgeMedal(b, progress, 64.dp, "shelf$i", 450 + i * 80)
                         Text(
                             if (got) tierOf(b).label else "${progress.value(b.group).coerceAtMost(b.need)} OF ${b.need}",
-                            fontSize = 9.5.sp, fontWeight = FontWeight(600), letterSpacing = 1.4.sp, color = if (got) tierOf(b).mid else accentColor,
+                            fontSize = 9.5.sp, fontWeight = FontWeight(600), letterSpacing = 1.4.sp, color = if (got) tierOf(b).mid else com.sohum.bandlog.ui.theme.Brand.EmberLight,
                         )
-                        Text(b.name, fontSize = 13.sp, fontWeight = FontWeight(500), color = p.ink, textAlign = TextAlign.Center, maxLines = 2, lineHeight = 16.sp)
+                        Text(b.name, fontSize = 12.sp, fontWeight = FontWeight(500), color = if (got) p.ink else p.muted, textAlign = TextAlign.Center, maxLines = 2, lineHeight = 15.sp)
                     }
                 }
-            }
+                repeat(4 - rowItems.size) { Spacer(Modifier.width(78.dp)) }
+            } }
             if (next != null) {
                 Box(Modifier.fillMaxWidth().padding(horizontal = 6.dp).height(1.dp).background(if (isDarkTheme) Color(0xFF2A2A2D) else Color(0xFFE2E2E6)))
                 NextUpRow(next, progress, Modifier.padding(horizontal = 6.dp))

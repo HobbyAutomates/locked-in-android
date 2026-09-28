@@ -545,6 +545,8 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
         if (waterParty) com.sohum.bandlog.ui.today.WaterGoalParty { waterParty = false }
 
         vm.milestone?.let { m -> com.sohum.bandlog.ui.milestone.MilestoneFlood(m, vm) { vm.dismissMilestone() } }
+        // v2.16: "Here's some jewellery." the first time a badge is earned (once per badge per device).
+        com.sohum.bandlog.ui.progress.BadgeUnlockHost(vm, paused = vm.milestone != null)
     }
 }
 
