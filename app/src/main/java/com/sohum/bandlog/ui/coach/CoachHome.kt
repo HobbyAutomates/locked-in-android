@@ -144,6 +144,23 @@ fun BuddyCard(cvm: CoachViewModel) {
     val p = palette
     if (cvm.buddyAvailable != true) return
     val list = cvm.buddies.orEmpty()
+    // v2.15: with a squadmate to ask, the empty card offers a one-tap request instead of just the page.
+    val ask = cvm.candidates.orEmpty().firstOrNull()
+    if (list.isEmpty() && ask != null) {
+        val state = cvm.requested[ask.userId]
+        Row(
+            Modifier.fillMaxWidth().pressable().background(p.card, RoundedCornerShape(20.dp)).clickable { CoachNav.open(CoachPage.BUDDY) }.padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            com.sohum.bandlog.ui.components.Avatar(com.sohum.bandlog.data.Api.avatarUrl(ask.avatarPath), com.sohum.bandlog.util.Names.initials(ask.name), 36.dp)
+            Column(Modifier.weight(1f)) {
+                Text("Buddy up with ${com.sohum.bandlog.util.BuddyLinks.firstName(ask.name)}?", fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1)
+                Text(if (state == "Sent") "Request sent. The streak starts when they accept." else "A shared streak makes you 2× more likely to stick", fontSize = 12.sp, color = p.muted, maxLines = 2)
+            }
+            BuddyRequestButton(state) { cvm.request(ask) }
+        }
+        return
+    }
     if (list.isEmpty()) {
         Row(
             Modifier.fillMaxWidth().pressable().background(p.card, RoundedCornerShape(20.dp)).clickable { CoachNav.open(CoachPage.BUDDY) }.padding(horizontal = 16.dp, vertical = 12.dp),

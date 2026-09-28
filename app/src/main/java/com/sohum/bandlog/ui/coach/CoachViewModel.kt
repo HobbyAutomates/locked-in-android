@@ -12,6 +12,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sohum.bandlog.data.AuthException
 import com.sohum.bandlog.data.Buddy
+import com.sohum.bandlog.data.BuddyCandidate
 import com.sohum.bandlog.data.CoachMemory
 import com.sohum.bandlog.data.CoachMessage
 import com.sohum.bandlog.data.NotYetAvailable
@@ -211,6 +212,31 @@ class CoachViewModel : ViewModel() {
             catch (e: NotYetAvailable) { buddyAvailable = false; buddies = null }
             catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (e: Exception) { android.util.Log.i("LockedIn", "Buddies: ${e.message}"); if (buddyAvailable == null) buddyAvailable = false }
+            if (buddyAvailable == true) loadCandidates()
+        }
+    }
+
+    // ---- v2.15 squadmate requests (schema_v39) ----
+    /** Squadmates who aren't buddies yet; null while buddy_candidates() is missing (the list hides). */
+    var candidates by mutableStateOf<List<BuddyCandidate>?>(null); private set
+    /** user_id -> "..." / "Sent" / "Buddies" / "Try later" for the row's button. */
+    val requested = androidx.compose.runtime.mutableStateMapOf<String, String>()
+
+    private suspend fun loadCandidates() {
+        candidates = try { V214Api.buddyCandidates() }
+        catch (e: NotYetAvailable) { null }
+        catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { android.util.Log.i("LockedIn", "Squadmates: ${e.message}"); candidates }
+    }
+
+    fun request(c: BuddyCandidate) {
+        if (requested[c.userId].let { it != null && it != "Try later" }) return
+        requested[c.userId] = "…"
+        viewModelScope.launch {
+            try { requested[c.userId] = if (V214Api.buddyRequest(c.userId) == null) "Buddies" else "Sent" }
+            catch (e: NotYetAvailable) { requested.remove(c.userId); candidates = null }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { requested[c.userId] = "Try later"; buddyNote = e.message ?: "Couldn't send that request" }
         }
     }
 

@@ -74,6 +74,14 @@ data class Buddy(
     }
 }
 
+/** One `buddy_candidates()` row (schema_v39): a squadmate who isn't my buddy yet. */
+data class BuddyCandidate(val userId: String, val name: String, val avatarPath: String?, val squads: String) {
+    companion object {
+        private fun JSONObject.s(k: String) = if (isNull(k)) null else optString(k).ifBlank { null }
+        fun from(o: JSONObject) = BuddyCandidate(o.optString("user_id"), o.s("name") ?: "Squadmate", o.s("avatar_path"), o.s("squads").orEmpty())
+    }
+}
+
 data class FinishResult(val targets: OnboardingV2.Targets?, val goalDate: String?, val v37: Boolean)
 
 /**
@@ -237,6 +245,16 @@ object V214Api {
     /** False when the nudge was already sent (or the buddy already logged). */
     suspend fun buddyNudge(buddyId: String): Boolean =
         rpc("buddy_nudge", JSONObject().put("buddy", buddyId), "Nudge").trim().equals("true", ignoreCase = true)
+
+    /** v2.15 (schema_v39): squadmates who aren't my buddies yet. [NotYetAvailable] until v39 is applied. */
+    suspend fun buddyCandidates(): List<BuddyCandidate> {
+        val arr = JSONArray(rpc("buddy_candidates", JSONObject(), "Load squadmates"))
+        return (0 until arr.length()).map { BuddyCandidate.from(arr.getJSONObject(it)) }.filter { it.userId.isNotBlank() }
+    }
+
+    /** v2.15: send a squadmate a buddy request (a notification with my code). Null when we're already buddies. */
+    suspend fun buddyRequest(other: String): String? =
+        com.sohum.bandlog.util.BuddyLinks.textReply(rpc("buddy_request", JSONObject().put("other", other), "Buddy request"))
 
     fun buddyLink(code: String): String = "${BuildConfig.API_BASE.trimEnd('/').ifBlank { com.sohum.bandlog.ui.squad.WEB_URL }}/buddy/${code.uppercase()}"
 }

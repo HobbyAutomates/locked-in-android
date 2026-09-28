@@ -54,10 +54,11 @@ object PlatformNotifications {
         (Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(context, "android.permission.POST_NOTIFICATIONS") == PackageManager.PERMISSION_GRANTED) &&
             NotificationManagerCompat.from(context).areNotificationsEnabled()
 
-    private fun openIntent(context: Context, code: Int, open: String, notificationId: String? = null): PendingIntent {
+    private fun openIntent(context: Context, code: Int, open: String, notificationId: String? = null, buddyCode: String? = null): PendingIntent {
         val i = Intent(context, MainActivity::class.java).apply {
             putExtra(MainActivity.EXTRA_OPEN, open)
             if (notificationId != null) putExtra(PlatformNav.EXTRA_NOTIFICATION_ID, notificationId)
+            if (buddyCode != null) putExtra(PlatformNav.EXTRA_BUDDY_CODE, buddyCode)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         return PendingIntent.getActivity(context, code, i, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
@@ -83,7 +84,7 @@ object PlatformNotifications {
             .setStyle(NotificationCompat.BigTextStyle().bigText(item.body))
             .setCategory(if (item.kind == "nudge" || item.kind == "buddy") NotificationCompat.CATEGORY_SOCIAL else NotificationCompat.CATEGORY_REMINDER)
             .setAutoCancel(true)
-            .setContentIntent(openIntent(context, code, targetFor(item), item.id))
+            .setContentIntent(openIntent(context, code, targetFor(item), item.id, com.sohum.bandlog.util.BuddyLinks.codeFromUrl(item.url)))
             .build()
         runCatching { NotificationManagerCompat.from(context).notify(code, n) }
     }

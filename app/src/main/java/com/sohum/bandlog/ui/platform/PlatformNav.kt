@@ -34,6 +34,8 @@ object PlatformNav {
     const val OPEN_COACH = "coach"
     const val OPEN_BUDDY = "buddy"
     const val EXTRA_NOTIFICATION_ID = "notificationId"
+    /** v2.15: the invite code from a buddy request's /buddy/<CODE> url, filled into the accept box. */
+    const val EXTRA_BUDDY_CODE = "buddyCode"
 
     val stack = mutableStateListOf<PlatformPage>()
     val page: PlatformPage? get() = stack.lastOrNull()
@@ -78,8 +80,13 @@ object PlatformNav {
             OPEN_INBOX -> open(PlatformPage.INBOX)
             OPEN_WORKOUT -> open(PlatformPage.WORKOUT)
             OPEN_COACH -> { closeAll(); com.sohum.bandlog.ui.coach.CoachNav.open(com.sohum.bandlog.ui.coach.CoachPage.CHAT) }
-            OPEN_BUDDY -> { closeAll(); com.sohum.bandlog.ui.coach.CoachNav.open(com.sohum.bandlog.ui.coach.CoachPage.BUDDY) }
+            OPEN_BUDDY -> {
+                closeAll()
+                i.getStringExtra(EXTRA_BUDDY_CODE)?.let { com.sohum.bandlog.ui.coach.CoachNav.buddyCode = it }
+                com.sohum.bandlog.ui.coach.CoachNav.open(com.sohum.bandlog.ui.coach.CoachPage.BUDDY)
+            }
         }
+        i.removeExtra(EXTRA_BUDDY_CODE)
     }
 
     /** Every app open: check the inbox now, keep the 15-minute check scheduled, re-arm the protein alarm. */

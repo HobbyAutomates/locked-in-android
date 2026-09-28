@@ -87,7 +87,11 @@ fun InboxScreen(pvm: PlatformViewModel, onBack: () -> Unit) {
                                 PlatformNav.OPEN_SQUAD -> { PlatformNav.closeAll(); PlatformNav.squadTick++ }
                                 // v2.14: the coach's note opens the chat, a buddy notice the buddy page.
                                 PlatformNav.OPEN_COACH -> { PlatformNav.closeAll(); com.sohum.bandlog.ui.coach.CoachNav.open(com.sohum.bandlog.ui.coach.CoachPage.CHAT) }
-                                PlatformNav.OPEN_BUDDY -> { PlatformNav.closeAll(); com.sohum.bandlog.ui.coach.CoachNav.open(com.sohum.bandlog.ui.coach.CoachPage.BUDDY) }
+                                PlatformNav.OPEN_BUDDY -> {
+                                    PlatformNav.closeAll()
+                                    com.sohum.bandlog.util.BuddyLinks.codeFromUrl(item.url)?.let { com.sohum.bandlog.ui.coach.CoachNav.buddyCode = it }
+                                    com.sohum.bandlog.ui.coach.CoachNav.open(com.sohum.bandlog.ui.coach.CoachPage.BUDDY)
+                                }
                                 else -> Unit
                             }
                         }

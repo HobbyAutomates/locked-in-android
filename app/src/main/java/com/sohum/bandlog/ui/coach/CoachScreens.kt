@@ -680,13 +680,22 @@ fun BuddyPage(cvm: CoachViewModel, onBack: () -> Unit) {
     val p = palette
     val ctx = LocalContext.current
     var code by remember { mutableStateOf(CoachNav.buddyCode.orEmpty()) }
-    LaunchedEffect(Unit) { CoachNav.buddyCode = null; cvm.loadBuddies() }
+    LaunchedEffect(Unit) { cvm.loadBuddies() }
+    // A code from a link or a buddy-request notification fills the box (also while the page is already open).
+    LaunchedEffect(CoachNav.buddyCode) { CoachNav.buddyCode?.let { code = it; CoachNav.buddyCode = null } }
     Column(Modifier.fillMaxSize().background(p.bg).statusBarsPadding().imePadding()) {
         CoachTopBar("Buddy streaks", onBack)
         if (cvm.buddyAvailable == false) { ComingSoonCard("Buddy streaks need a quick server update."); return@Column }
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // v2.15: squadmates first (buddy_candidates(), schema_v39; hidden until it's there).
+            val mates = cvm.candidates.orEmpty()
+            if (mates.isNotEmpty()) {
+                Text("YOUR SQUADMATES", style = EyebrowStyle, color = p.muted)
+                mates.forEach { c -> SquadmateRow(c, cvm) }
+            }
             Text("Both log = streak grows. One skips = the other gets to nudge. Break it and you both start over.", fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight(600), color = p.ember, modifier = Modifier.fillMaxWidth().background(p.emberBg, RoundedCornerShape(18.dp)).padding(horizontal = 16.dp, vertical = 14.dp))
             cvm.buddies.orEmpty().forEach { b -> BuddyRow(b, cvm) }
+            Text("Not in a squad yet? Send them a link.", fontSize = 13.sp, color = p.muted, modifier = Modifier.padding(top = 4.dp))
             Box(Modifier.fillMaxWidth().height(52.dp).background(p.btn, CircleShape).clickable(enabled = !cvm.buddyBusy) { cvm.invite(ctx) }, contentAlignment = Alignment.Center) {
                 Text("Invite a buddy", fontSize = 16.sp, fontWeight = FontWeight(700), color = p.btnInk)
             }
@@ -707,6 +716,35 @@ fun BuddyPage(cvm: CoachViewModel, onBack: () -> Unit) {
             }
             cvm.buddyNote?.let { Text(it, fontSize = 13.sp, color = p.muted) }
         }
+    }
+}
+
+/** v2.15: a squadmate who isn't a buddy yet: avatar, name, the squads we share, "Send buddy request". */
+@Composable
+fun SquadmateRow(c: com.sohum.bandlog.data.BuddyCandidate, cvm: CoachViewModel) {
+    val p = palette
+    Row(
+        Modifier.fillMaxWidth().background(p.card, RoundedCornerShape(20.dp)).padding(start = 14.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        com.sohum.bandlog.ui.components.Avatar(com.sohum.bandlog.data.Api.avatarUrl(c.avatarPath), com.sohum.bandlog.util.Names.initials(c.name), 40.dp)
+        Column(Modifier.weight(1f)) {
+            Text(c.name, fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1)
+            if (c.squads.isNotBlank()) Text(c.squads, fontSize = 12.sp, color = p.muted, maxLines = 1)
+        }
+        BuddyRequestButton(cvm.requested[c.userId], long = true) { cvm.request(c) }
+    }
+}
+
+/** "Send buddy request" (or "Ask" on Home), then "Sent" / "Buddies"; "Try later" can be tapped again. */
+@Composable
+fun BuddyRequestButton(state: String?, long: Boolean = false, onClick: () -> Unit) {
+    val p = palette
+    val idle = state == null || state == "Try later"
+    Box(
+        Modifier.background(if (idle) p.ember else p.card2, CircleShape).clickable(enabled = idle, onClick = onClick).padding(horizontal = 14.dp, vertical = 8.dp),
+    ) {
+        Text(state ?: if (long) "Send buddy request" else "Ask", fontSize = 13.sp, fontWeight = FontWeight(700), color = if (idle) p.onEmber else p.muted, maxLines = 1)
     }
 }
 
