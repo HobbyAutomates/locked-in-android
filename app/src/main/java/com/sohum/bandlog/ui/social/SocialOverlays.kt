@@ -81,7 +81,9 @@ fun SocialOverlays(vm: AppViewModel) {
         runCatching { SocialApi.myBlocks() }.onSuccess { SocialStore.updateBlocked(SocialStore.blocked + it) }
         runCatching { SocialApi.profileRaw() }.onSuccess { o ->
             if (o.has("live_share") && !o.isNull("live_share")) SocialStore.setLive(o.optBoolean("live_share", false))
+            if (o.has("badge_skin") && !o.isNull("badge_skin")) SocialStore.setSkin(o.optString("badge_skin"))
         }
+        runCatching { SocialApi.myUnlocks() }.onSuccess { SocialStore.updateUnlocked(SocialStore.unlocked + it) }
         runCatching { checkEventBadges(vm) }
         // E4 (opt-in): new Health Connect weigh-ins into weight_log.
         runCatching { importWeights(ctx, vm) }

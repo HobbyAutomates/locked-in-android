@@ -225,7 +225,7 @@ fun ReportBlockSheet(post: GroupPost, onDismiss: () -> Unit) {
             val r = reason ?: return@PillButton
             scope.launch {
                 done = try {
-                    SocialApi.report(r, noteText.trim(), post.userId, post.groupId, post.id, Safety.reportSnapshot(post.kind, post.body, post.authorName, post.createdAt))
+                    SocialApi.report(r, noteText.trim(), post.userId, post.groupId.ifBlank { null }, post.id.ifBlank { null }, Safety.reportSnapshot(post.kind, post.body, post.authorName, post.createdAt))
                     "Thanks. We'll take a look."
                 } catch (e: NotYetAvailable) { "Reporting is ${tr("common.soon").lowercase()}. You can still block them below." }
                 catch (e: Exception) { e.message ?: "Couldn't send the report" }
@@ -288,4 +288,15 @@ fun VerifySquadScreen(onBack: () -> Unit) {
             }, bg = Gold, fg = InkBrand)
         }
     }
+}
+
+/** The "⋯" on a squad member row: report or block them (the same sheet as a post, without a post). */
+@Composable
+fun MemberMenu(m: com.sohum.bandlog.data.MemberDetail, groupId: String) {
+    val p = palette
+    var open by remember { mutableStateOf(false) }
+    Box(Modifier.size(40.dp).clickable(onClickLabel = "${tr("squad.report")} / ${tr("squad.block")}") { open = true }, contentAlignment = Alignment.Center) {
+        Text("⋯", fontSize = 20.sp, fontWeight = FontWeight(700), color = p.muted)
+    }
+    if (open) ReportBlockSheet(GroupPost("", groupId, m.userId, "member", "", null, null, "", m.name, m.username, m.avatarPath)) { open = false }
 }

@@ -698,6 +698,7 @@ fun SquadInfoPage(sq: SquadViewModel, squad: Squad, onBack: () -> Unit) {
                         Spacer(Modifier.width(10.dp))
                     }
                     Flame(if (m.flames > 0) p.flame else p.muted, 20.dp)
+                    if (m.userId != me) com.sohum.bandlog.ui.social.MemberMenu(m, squad.id) // v2.18 E5: report / block a member
                     Text(" ${m.flames}", fontSize = 17.sp, fontWeight = FontWeight(700), color = p.ink)
                 }
             }
