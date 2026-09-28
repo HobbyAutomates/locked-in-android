@@ -15,3 +15,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "BandLog"
 include(":app")
+// v2.18 E3: Wear OS tile (calories left + day streak).
+include(":wear")

@@ -91,6 +91,7 @@ fun SocialOverlays(vm: AppViewModel) {
         if (!vm.loadedOnce) return@LaunchedEffect
         delay(1500)
         com.sohum.bandlog.widget.StreakWidget.publish(ctx.applicationContext, vm.dayStreak, SocialStore.freezeTokens)
+        com.sohum.bandlog.widget.WearSync.publish(ctx.applicationContext, vm.dayStreak, SocialStore.freezeTokens)
     }
     // Logs that just synced: re-read the lists (Home, streaks, squads).
     LaunchedEffect(OfflineQueue.syncedTick) { if (OfflineQueue.syncedTick > 0) vm.refresh() }

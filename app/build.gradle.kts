@@ -110,6 +110,8 @@ dependencies {
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     // v2.18 E3: the Glance home-screen widget (calories left + day streak). 1.1.x builds on compileSdk 34.
     implementation("androidx.glance:glance-appwidget:1.1.0")
+    // v2.18 E3: hands today's numbers to the Wear OS tile (the :wear module) over the Data Layer.
+    implementation("com.google.android.gms:play-services-wearable:18.2.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 
