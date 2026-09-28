@@ -252,7 +252,7 @@ private fun parentOf(page: Page, fromPrefs: Boolean): Page? = when (page) {
 }
 
 /** v2.8: the + button's speed-dial entries. Water adds a glass in one tap (long-press or › for the page). */
-private enum class DialItem(val label: String) { FOOD("Food"), ACTIVITY("Activity"), WATER("Water +1 glass"), WEIGHT("Weight") }
+private enum class DialItem(val label: String, val sub: String? = null) { SCAN("Scan", "photo · label · barcode"), FOOD("Food"), ACTIVITY("Activity"), WATER("Water +1 glass"), WEIGHT("Weight") }
 
 @Composable
 private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: ThemeMode, openMealTick: Int, openWrapTick: Int, openWaterTick: Int, joinCode: String?, onJoinHandled: () -> Unit, onThemeMode: (ThemeMode) -> Unit) {
@@ -425,6 +425,8 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
                 dial = false
                 val today = Dates.today()
                 when (item) {
+                    // v2.16: Scan opens the existing scan screen (the Scan tab).
+                    DialItem.SCAN -> { page = null; log = null; meal = null; tab = 2 }
                     DialItem.FOOD -> log = LogRequest(null, today, true)
                     DialItem.ACTIVITY -> log = LogRequest(null, today, false, exercise = true)
                     DialItem.WATER -> addGlass()
@@ -625,6 +627,7 @@ private fun SpeedDial(modifier: Modifier, onOpenWater: () -> Unit, onPick: (Dial
     Column(modifier, horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         DialItem.entries.forEach { item ->
             val icon = when (item) {
+                DialItem.SCAN -> com.sohum.bandlog.ui.components.ScanFilledIcon
                 DialItem.FOOD -> com.sohum.bandlog.ui.components.BowlIcon
                 DialItem.ACTIVITY -> com.sohum.bandlog.ui.components.RunIcon
                 DialItem.WATER -> com.sohum.bandlog.ui.components.GlassIcon
@@ -646,12 +649,20 @@ private fun SpeedDial(modifier: Modifier, onOpenWater: () -> Unit, onPick: (Dial
                     ) { onPick(item) },
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Box(Modifier.height(36.dp).background(p.card, CircleShape).padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
-                        Text(item.label, fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1)
+                    // v2.16 (FabMenuScan board): Scan is a white pill with a sub-line beside an ember circle.
+                    val scan = item == DialItem.SCAN
+                    val pillBg = if (scan) androidx.compose.ui.graphics.Color.White else p.card
+                    val pillInk = if (scan) androidx.compose.ui.graphics.Color.Black else p.ink
+                    Column(
+                        Modifier.height(if (scan) 44.dp else 36.dp).shadow(8.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow).background(pillBg, CircleShape).padding(horizontal = if (scan) 18.dp else 14.dp),
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        Text(item.label, fontSize = if (scan) 15.sp else 14.sp, fontWeight = FontWeight(700), color = pillInk, maxLines = 1)
+                        item.sub?.let { Text(it, fontSize = 11.sp, fontWeight = FontWeight(500), color = pillInk.copy(alpha = 0.6f), maxLines = 1) }
                     }
                     Spacer(Modifier.width(10.dp))
-                    Box(Modifier.size(48.dp).shadow(8.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow).background(p.card, CircleShape), contentAlignment = Alignment.Center) {
-                        Icon(icon, null, tint = p.ink, modifier = Modifier.size(22.dp))
+                    Box(Modifier.size(if (scan) 52.dp else 48.dp).shadow(8.dp, CircleShape, ambientColor = p.shadow, spotColor = p.shadow).background(if (scan) p.ember else p.card, CircleShape), contentAlignment = Alignment.Center) {
+                        Icon(icon, null, tint = if (scan) androidx.compose.ui.graphics.Color.White else p.ink, modifier = Modifier.size(22.dp))
                     }
                 }
             }
