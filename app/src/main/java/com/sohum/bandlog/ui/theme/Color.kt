@@ -68,6 +68,8 @@ object Brand {
     val Bone = Color(0xFFF4F1EA)
     val Ember = Color(0xFFFF5B1F)
     val EmberLight = Color(0xFFFF8B5E)
+    /** v2.15: a macro ring past its target (full, deeper than the in-progress ember). */
+    val EmberDeep = Color(0xFFC2410C)
     val Mute = Color(0xFF8F8A82)
 }
 

@@ -163,9 +163,9 @@ fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit, mod
     }
 }
 
-/** Progress ring; draws from zero with a spring. */
+/** Progress ring; draws from zero with a spring. [brush] (when set) paints the arc instead of [color]. */
 @Composable
-fun Ring(fraction: Float, color: Color, size: Dp, stroke: Dp, modifier: Modifier = Modifier, center: (@Composable () -> Unit)? = null) {
+fun Ring(fraction: Float, color: Color, size: Dp, stroke: Dp, modifier: Modifier = Modifier, brush: androidx.compose.ui.graphics.Brush? = null, center: (@Composable () -> Unit)? = null) {
     val p = palette
     var go by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(120); go = true }
@@ -177,7 +177,10 @@ fun Ring(fraction: Float, color: Color, size: Dp, stroke: Dp, modifier: Modifier
             val inset = sw / 2
             val arc = Size(this.size.width - sw, this.size.height - sw)
             drawArc(track, -90f, 360f, false, Offset(inset, inset), arc, style = Stroke(sw, cap = StrokeCap.Round))
-            if (animated > 0f) drawArc(color, -90f, 360f * animated, false, Offset(inset, inset), arc, style = Stroke(sw, cap = StrokeCap.Round))
+            if (animated > 0f) {
+                if (brush != null) drawArc(brush, -90f, 360f * animated, false, Offset(inset, inset), arc, style = Stroke(sw, cap = StrokeCap.Round))
+                else drawArc(color, -90f, 360f * animated, false, Offset(inset, inset), arc, style = Stroke(sw, cap = StrokeCap.Round))
+            }
         }
         center?.invoke()
     }

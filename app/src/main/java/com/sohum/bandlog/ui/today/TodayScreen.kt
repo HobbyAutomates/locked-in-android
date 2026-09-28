@@ -218,7 +218,11 @@ fun TodayScreen(
                                 if (vm.rolloverKcal > 0) Box(Modifier.background(p.card2, CircleShape).padding(8.dp, 3.dp)) { Text("+${vm.rolloverKcal.toInt()} rollover", fontSize = 11.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1) }
                             }
                         }
-                        Ring((totals.calories / budget.coerceAtLeast(1.0)).toFloat(), p.ink, 96.dp, 9.dp) { Icon(FlameIcon, null, tint = p.ink, modifier = Modifier.size(26.dp)) }
+                        // v2.15: the calorie ring and its flame are ember (a subtle ember → light ember gradient).
+                        Ring(
+                            (totals.calories / budget.coerceAtLeast(1.0)).toFloat(), p.ember, 96.dp, 9.dp,
+                            brush = androidx.compose.ui.graphics.Brush.linearGradient(listOf(p.ember, com.sohum.bandlog.ui.theme.Brand.EmberLight)),
+                        ) { Icon(FlameIcon, null, tint = p.ember, modifier = Modifier.size(26.dp)) }
                     }
                 }
             }
@@ -251,7 +255,7 @@ fun TodayScreen(
                         Row(Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically) {
                             if (vm.healthConnected) {
                                 Row(Modifier.weight(1f).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Ring(((h?.steps ?: 0L) / prof.stepGoal.toFloat()).coerceIn(0f, 1f), p.green, 44.dp, 5.dp) { Icon(com.sohum.bandlog.ui.components.StepsIcon, null, tint = p.green, modifier = Modifier.size(16.dp)) }
+                                    Ring(((h?.steps ?: 0L) / prof.stepGoal.toFloat()).coerceIn(0f, 1f), p.ember, 44.dp, 5.dp) { Icon(com.sohum.bandlog.ui.components.StepsIcon, null, tint = p.ember, modifier = Modifier.size(16.dp)) }
                                     Spacer(Modifier.width(10.dp))
                                     Column {
                                         Text(String.format(Locale.US, "%,d", h?.steps ?: 0L), fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink, maxLines = 1)
@@ -262,7 +266,7 @@ fun TodayScreen(
                             }
                             // Health Connect active kcal (when connected) + logged exercise, deduplicated in the view model.
                             Row(Modifier.weight(1f).clickable(onClick = onLogExercise).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Ring((burned / 400.0).toFloat().coerceIn(0f, 1f), p.orange, 44.dp, 5.dp) { Icon(FlameIcon, null, tint = p.orange, modifier = Modifier.size(16.dp)) }
+                                Ring((burned / 400.0).toFloat().coerceIn(0f, 1f), p.ember, 44.dp, 5.dp) { Icon(FlameIcon, null, tint = p.ember, modifier = Modifier.size(16.dp)) }
                                 Spacer(Modifier.width(10.dp))
                                 Column(Modifier.weight(1f)) {
                                     Text("${burned.toInt()}", fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink)
@@ -486,8 +490,10 @@ private fun MacroCard(modifier: Modifier, macro: String, consumed: Double, targe
             }
         }
         Spacer(Modifier.height(10.dp))
-        Ring((consumed / safeTarget).toFloat(), color, 56.dp, 6.dp, Modifier.align(Alignment.CenterHorizontally)) {
-            Box(Modifier.size(8.dp).background(color, CircleShape))
+        // v2.15: macro rings draw in ember; past the target (in either mode) the ring is full in a deeper ember.
+        val ringColor = if (target > 0 && consumed > target) com.sohum.bandlog.ui.theme.Brand.EmberDeep else p.ember
+        Ring((consumed / safeTarget).toFloat(), ringColor, 56.dp, 6.dp, Modifier.align(Alignment.CenterHorizontally)) {
+            Box(Modifier.size(8.dp).background(ringColor, CircleShape))
         }
     }
 }
