@@ -376,13 +376,13 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
     LaunchedEffect(com.sohum.bandlog.ui.platform.PlatformNav.squadTick) {
         if (com.sohum.bandlog.ui.platform.PlatformNav.squadTick > 0) { page = null; log = null; meal = null; tab = 1 }
     }
-    // v2.16 guided tour: once per device (and per account via milestones_seen), over Home, when
-    // nothing else covers it; Settings → Preferences → "Replay the tour" brings it back.
+    // v2.16 guided tour: over Home when nothing else covers it. v2.17: new accounts only (created after
+    // the v2.16 release, profiles.tour_seen_at null); Settings → Preferences → "Replay the tour" works for anyone.
     var tourOn by remember { mutableStateOf(false) }
     val overlayOpen = page != null || log != null || meal != null || dial || vm.milestone != null || sq.openId != null || sq.creating || sq.profileFlow
     LaunchedEffect(vm.loadedOnce, tab, overlayOpen) {
         if (!vm.loadedOnce || tourOn) return@LaunchedEffect
-        if (!com.sohum.bandlog.ui.tour.shouldStartTour(com.sohum.bandlog.ui.tour.TourPrefs.seen(ctx), vm.tourSeenOnProfile, tab == 0, overlayOpen)) return@LaunchedEffect
+        if (!com.sohum.bandlog.ui.tour.shouldStartTour(com.sohum.bandlog.ui.tour.TourPrefs.seen(ctx), vm.tourEligible, tab == 0, overlayOpen)) return@LaunchedEffect
         kotlinx.coroutines.delay(1400) // let Home's cards rise into place first
         tourOn = true
     }

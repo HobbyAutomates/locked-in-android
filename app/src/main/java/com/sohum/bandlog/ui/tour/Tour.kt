@@ -89,7 +89,10 @@ object TourState {
     fun replay() { replayTick++ }
 }
 
-/** Device-side "seen" (the profile flag is the "tour_v216" key in profiles.milestones_seen). */
+/**
+ * Device-side "seen", a cache of profiles.tour_seen_at (v2.17). The v2.16 "tour_v216" key in
+ * profiles.milestones_seen still counts as seen when it's there, but is no longer written.
+ */
 object TourPrefs {
     const val PROFILE_KEY = "tour_v216"
     private const val PREFS = "tour_v216"
@@ -97,9 +100,31 @@ object TourPrefs {
     fun markSeen(ctx: Context) { ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("seen", true).apply() }
 }
 
-/** Should the tour start now? Pure, so it's unit-tested. */
-fun shouldStartTour(seenOnDevice: Boolean, seenOnProfile: Boolean, onHome: Boolean, overlayOpen: Boolean): Boolean =
-    !seenOnDevice && !seenOnProfile && onHome && !overlayOpen
+/** v2.17: the tour is for accounts created after the v2.16 release only. */
+const val TOUR_NEW_ACCOUNTS_AFTER = "2026-09-28T21:00:00Z"
+
+/** Parses a Supabase timestamptz ("2026-09-29T10:00:00.123456+00:00", "…Z"); null when unreadable. */
+fun parseInstant(s: String?): java.time.Instant? {
+    val t = s?.trim()?.takeIf { it.isNotEmpty() }?.replace(' ', 'T') ?: return null
+    return runCatching { java.time.OffsetDateTime.parse(t).toInstant() }.getOrNull()
+        ?: runCatching { java.time.Instant.parse(t) }.getOrNull()
+        ?: runCatching { java.time.OffsetDateTime.parse(t.replace(Regex("""([+-]\d{2})$"""), "$1:00")).toInstant() }.getOrNull()
+}
+
+/**
+ * The account guard (pure, unit-tested): never seen on the profile (tour_seen_at null, no v2.16 flag)
+ * AND the account was created after [TOUR_NEW_ACCOUNTS_AFTER]. An unknown created_at counts as old,
+ * so existing users never see it.
+ */
+fun isTourEligible(createdAt: String?, tourSeenAt: String?, seenFlagV216: Boolean = false): Boolean {
+    if (!tourSeenAt.isNullOrBlank() || seenFlagV216) return false
+    val created = parseInstant(createdAt) ?: return false
+    return created.isAfter(java.time.Instant.parse(TOUR_NEW_ACCOUNTS_AFTER))
+}
+
+/** Should the tour start now? Pure, so it's unit-tested. ("Replay the tour" bypasses this.) */
+fun shouldStartTour(seenOnDevice: Boolean, eligible: Boolean, onHome: Boolean, overlayOpen: Boolean): Boolean =
+    !seenOnDevice && eligible && onHome && !overlayOpen
 
 /** Registers this element as a tour target. */
 fun Modifier.tourTarget(stop: TourStop): Modifier = onGloballyPositioned { c -> TourState.targets[stop.key] = c }

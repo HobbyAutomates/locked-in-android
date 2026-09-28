@@ -137,16 +137,22 @@ class AppViewModel : ViewModel() {
     /** The device's copy of the cover choice (read once by Profile). */
     var coverLocal by mutableStateOf<String?>(null)
 
-    /** v2.16 tour: the profile flag rides on milestones_seen ("tour_v216"), so no new column is needed. */
-    val tourSeenOnProfile: Boolean get() = profile.milestonesSeen?.contains(com.sohum.bandlog.ui.tour.TourPrefs.PROFILE_KEY) == true
+    /**
+     * v2.17 tour: new accounts only. profiles.tour_seen_at (schema_v40) is the account copy; the old
+     * v2.16 "tour_v216" milestones_seen key still counts as seen. See ui/tour/isTourEligible.
+     */
+    val tourEligible: Boolean
+        get() = com.sohum.bandlog.ui.tour.isTourEligible(
+            profile.createdAt, profile.tourSeenAt, profile.milestonesSeen?.contains(com.sohum.bandlog.ui.tour.TourPrefs.PROFILE_KEY) == true,
+        )
 
+    /** Finish or skip: the device cache always; profiles.tour_seen_at when the column is there. */
     fun markTourSeen(context: android.content.Context) {
         com.sohum.bandlog.ui.tour.TourPrefs.markSeen(context)
-        val had = profile.milestonesSeen ?: return
-        if (com.sohum.bandlog.ui.tour.TourPrefs.PROFILE_KEY in had) return
-        val next = had + com.sohum.bandlog.ui.tour.TourPrefs.PROFILE_KEY
-        profile = profile.copy(milestonesSeen = next)
-        viewModelScope.launch { runCatching { Api.patchProfile(org.json.JSONObject().put("milestones_seen", org.json.JSONArray(next))) } }
+        if (!profile.tourSeenSupported || !profile.tourSeenAt.isNullOrBlank()) return
+        val now = java.time.Instant.now().toString()
+        profile = profile.copy(tourSeenAt = now)
+        viewModelScope.launch { runCatching { Api.patchProfile(org.json.JSONObject().put("tour_seen_at", now)) } }
     }
 
     /** Seen keys go to the device and, when schema_v37 is there, profiles.milestones_seen (appended). */
