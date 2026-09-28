@@ -53,7 +53,7 @@ class AppViewModel : ViewModel() {
     val mealDates: List<String> get() = meals.map { it.date }.distinct()
     val weekStreak: Int get() = Streaks.workoutWeekStreak(workoutDates, profile.weeklyWorkoutTarget)
     /** v2.2: consecutive (India) days with ANY log — a workout, an exercise_log row of any source, or a meal. */
-    val dayStreak: Int get() = Streaks.dayStreak(workouts.map { it.date } + exercises.map { it.date } + meals.map { it.date })
+    val dayStreak: Int get() = Streaks.dayStreak(workouts.map { it.date } + exercises.map { it.date } + meals.map { it.date } + com.sohum.bandlog.data.SocialStore.frozenDays) // v2.18 D5: frozen days count
     val mealStreak: Int get() = Streaks.dayStreak(mealDates)
     val thisWeek: Int get() = Streaks.thisWeekCount(workoutDates)
 
@@ -262,7 +262,11 @@ class AppViewModel : ViewModel() {
         val temp = com.sohum.bandlog.data.WaterEntry("local-${System.nanoTime()}", date, ml, java.time.OffsetDateTime.now().toString(), vessel)
         water = listOf(temp) + water
         return try {
-            Api.logWater(date, ml, vessel)
+            // v2.18 E1: offline (or a network failure) keeps the glass on the phone until it syncs.
+            if (com.sohum.bandlog.data.OfflineQueue.orQueue("water", { com.sohum.bandlog.data.OfflineQueue.waterPayload(date, ml, vessel) }) { Api.logWater(date, ml, vessel) } == null) {
+                if (!quiet) notice = com.sohum.bandlog.data.OfflineQueue.queuedText()
+                return true
+            }
             Analytics.track("water_added", "ml" to ml, "vessel" to vessel)
             runCatching { water = Api.water(Dates.addDays(today, -30), today) }
             if (!quiet) notice = "Logged $ml mL water"
@@ -571,7 +575,8 @@ class AppViewModel : ViewModel() {
                 val all = items + batches.flatMap { it.items }
                 if (all.isNotEmpty()) {
                     val photo = photoPath ?: batches.firstNotNullOfOrNull { it.photoPath }
-                    val mid = Api.saveMeal(date, label, all, photo, mealType)
+                    val mid = com.sohum.bandlog.data.OfflineQueue.orQueue("meal", { com.sohum.bandlog.data.OfflineQueue.mealPayload(date, label, all, photo, mealType) }) { Api.saveMeal(date, label, all, photo, mealType) }
+                        ?: run { queuedOffline(date, label, all, photo, mealType); return@launch } // v2.18 E1
                     Analytics.track("meal_logged", "method" to method, "items" to all.size, "pending" to true)
                     logMealEvent(mid, method, label, all)
                     shareMeal(date, label, all, photo, mid)
@@ -661,12 +666,19 @@ class AppViewModel : ViewModel() {
             } catch (e: AuthException) {
                 onAuthLost(e.message)
             } catch (e: Exception) {
-                error = e.message ?: "Couldn't load"
+                // v2.18 E1: offline after the first load isn't an error (the sync chip says so).
+                error = if (loadedOnce && com.sohum.bandlog.util.OfflineRules.isNetworkError(e)) null else e.message ?: "Couldn't load"
             } finally { loading = false }
         }
     }
 
     fun clearError() { error = null }
+
+    /** v2.18 E1: a meal saved offline shows on Home straight away (the row syncs later). */
+    private fun queuedOffline(date: String, raw: String, items: List<MealItem>, photoPath: String?, mealType: String?) {
+        meals = listOf(Meal("offline-${System.nanoTime()}", date, raw, java.time.OffsetDateTime.now().toString(), items, photoPath, mealType)) + meals
+        notice = com.sohum.bandlog.data.OfflineQueue.queuedText()
+    }
 
     /**
      * Runs [block] then refreshes; surfaces failures in [error]. Returns true on success. An auth
@@ -693,8 +705,15 @@ class AppViewModel : ViewModel() {
         val history = workouts
         var burnError: String? = null
         var newId: String? = null
+        var workoutQueued = false
         val ok = mutate("Your session expired — sign in again. This workout wasn't saved.") {
-            val wid = Api.saveWorkout(id, date, muscles, band, kg, minutes, exercises, notes, kind, lifts)
+            // v2.18 E1: a new workout made offline (or on a network failure) waits on the phone.
+            val wid = com.sohum.bandlog.data.OfflineQueue.orQueue(
+                "workout",
+                { com.sohum.bandlog.data.OfflineQueue.workoutPayload(date, muscles, band, kg, minutes, exercises, notes, kind, lifts, burn?.code, burn?.name, burn?.intensity, burn?.kcal, profile.weightKg) },
+                queueable = id == null,
+            ) { Api.saveWorkout(id, date, muscles, band, kg, minutes, exercises, notes, kind, lifts) }
+                ?: run { workoutQueued = true; workouts = listOf(Workout("offline-${System.nanoTime()}", date, muscles, band, kg, minutes, exercises, notes, kind, lifts.orEmpty())) + workouts; return@mutate }
             newId = wid
             // Auto-burn: one exercise_log row per workout, tagged with the workout id in `note`.
             // An edit replaces the row so minutes / band changes flow through to the burn.
@@ -719,6 +738,7 @@ class AppViewModel : ViewModel() {
         }
         if (ok && id == null) Analytics.track("activity_logged", "kind" to kind, "minutes" to minutes)
         if (ok) notice = burnError?.let { "Workout saved, but its calories burned didn't log ($it)." } ?: if (id == null) "Workout saved" else "Workout updated"
+        if (ok && workoutQueued) { notice = com.sohum.bandlog.data.OfflineQueue.queuedText(); return true }
         // v2.6: a new session goes on the squads' feed (plus a PR post for any lift beating its best).
         if (ok && id == null) newId?.let { wid -> shareWorkout(Workout(wid, date, muscles, band, kg, minutes, exercises, notes, kind, lifts.orEmpty()), history) }
         // v2.9: an edit updates the posts it already has.
@@ -752,8 +772,12 @@ class AppViewModel : ViewModel() {
         date: String, activityCode: String?, name: String, minutes: Int, intensity: String, kcal: Double, source: String,
         note: String = "", extras: Api.ExerciseExtras = Api.ExerciseExtras(),
     ) = mutate {
-        Api.saveExercise(date, activityCode, name, minutes, intensity, kcal, source, note, extras)
-        Analytics.track("activity_logged", "kind" to "exercise", "source" to source, "activity" to activityCode, "minutes" to minutes)
+        // v2.18 E1: offline (or a network failure) keeps the activity on the phone until it syncs.
+        val saved = com.sohum.bandlog.data.OfflineQueue.orQueue("exercise", { com.sohum.bandlog.data.OfflineQueue.exercisePayload(date, activityCode, name, minutes, intensity, kcal, source, note, extras) }) {
+            Api.saveExercise(date, activityCode, name, minutes, intensity, kcal, source, note, extras)
+        }
+        if (saved == null) notice = com.sohum.bandlog.data.OfflineQueue.queuedText()
+        else Analytics.track("activity_logged", "kind" to "exercise", "source" to source, "activity" to activityCode, "minutes" to minutes)
     }
     suspend fun deleteExercise(id: String): Boolean {
         exercises.firstOrNull { it.id == id }?.date?.let { rollupExtra = rollupExtra + it }
@@ -809,7 +833,13 @@ class AppViewModel : ViewModel() {
     }
     suspend fun saveMeal(date: String, raw: String, items: List<MealItem>, photoPath: String? = null, mealType: String? = null, method: String = "search"): Boolean {
         var mid: String? = null
-        val ok = mutate { mid = Api.saveMeal(date, raw, items, photoPath, mealType) }
+        var queued = false
+        val ok = mutate {
+            // v2.18 E1: offline (or a network failure) keeps the meal on the phone until it syncs.
+            mid = com.sohum.bandlog.data.OfflineQueue.orQueue("meal", { com.sohum.bandlog.data.OfflineQueue.mealPayload(date, raw, items, photoPath, mealType) }) { Api.saveMeal(date, raw, items, photoPath, mealType) }
+            if (mid == null) { queued = true; queuedOffline(date, raw, items, photoPath, mealType) }
+        }
+        if (ok && queued) return true
         if (ok) Analytics.track("meal_logged", "method" to method, "items" to items.size)
         if (ok) logMealEvent(mid, method, raw, items)
         if (ok) shareMeal(date, raw, items, photoPath, mid)

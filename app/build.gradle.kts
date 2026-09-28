@@ -106,6 +106,9 @@ dependencies {
     // v2.13 platform: inbox polling every 15 min (no FCM project) + on app open.
     implementation("androidx.work:work-runtime-ktx:2.9.1")
 
+    // v2.18 E1 offline logging: the queue of saves made without a network (data/OfflineQueue.kt).
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     // v2.13 platform: plain JVM unit tests (Pro, Epley, muscle map, routines, protein nudge).
