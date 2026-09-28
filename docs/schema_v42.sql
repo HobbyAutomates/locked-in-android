@@ -1,0 +1,27 @@
+-- v2.18 (schema_v42): pointer only. THE WEB REPO'S COPY WINS.
+--
+-- The migration lives in the web repo: docs/schema_v42.sql (and docs/revert_v42.sql). Apply that file,
+-- not this one. NOT applied by the agent that wrote this pointer.
+--
+-- What Android v2.18 (food, spec Area A) reads and writes from it. Every piece is tolerated missing:
+-- data/FoodApi.kt turns "table / column missing" into NotYetAvailable and the card or page hides
+-- (or shows "Coming with the next update"); meal_items inserts / selects retry without the range.
+--
+--   bandlog.meal_items.kcal_low / kcal_high  int   A3 honest range per item (data/Api.kt insertItems + meals(),
+--                                                  flag itemRange). Written for photo items (gram range) and
+--                                                  pre-logged orders. Null → util/FoodHonesty derives it.
+--   bandlog.profiles.water_from_food         bool  A10 "Count water in food" (Water page), default false.
+--   bandlog.leftovers                              A6 "Ate part of it": the rest, suggested on Home for 3 days.
+--   bandlog.meal_splits                            A7 a dish split with squadmates; pending until they Accept.
+--                                                  Insert needs bandlog.shares_squad(from, to) (RLS).
+--   bandlog.shared_recipes                         A2 a recipe snapshot shared into a squad (members can copy).
+--   bandlog.pantry_items                           A11 pantry; the grocery list skips items in stock.
+--
+-- Web routes Android calls (bearer token), all tolerant of a 404 before the web deploy:
+--   POST /api/photo-meal   { image, media_type, note, voice? }         A1 voice merged into the plate
+--   POST /api/scan-voice   { items, voice, plate_note }                A1 details added after the photo
+--   POST /api/order-helper { text? | image?, remaining? }             A4 delivery order → dishes + plan
+--   POST /api/label-check  { product, per_100g }                       A8 label vs the web (> 20 % apart)
+--
+-- Shared pure rules (web src/lib/food/*.ts ↔ util/VoicePlate, FoodHonesty, OrderHelper, FoodBits, Grocery,
+-- HomeRecipes; the recipe library is assets/home_recipes.json = web src/lib/food/home_recipes.json).
