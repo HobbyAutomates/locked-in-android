@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- v2.18 E1: know when the network is back to replay logs saved offline. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- One-tap in-app updater: download a newer build and hand it to the system installer. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -30,6 +32,8 @@
     <uses-permission android:name="android.permission.health.WRITE_EXERCISE" />
     <!-- v2.18 B8 recovery score: last night's sleep and resting heart rate (asked from the coach card). -->
     <uses-permission android:name="android.permission.health.READ_SLEEP" />
+    <!-- v2.18 E4: smart scales and watches (Mi / Amazfit via their apps): weight and resting heart rate. -->
+    <uses-permission android:name="android.permission.health.READ_WEIGHT" />
     <uses-permission android:name="android.permission.health.READ_RESTING_HEART_RATE" />
 
     <application
@@ -76,6 +80,8 @@
                 <data android:scheme="https" android:host="web-production-ff1cf.up.railway.app" android:pathPrefix="/join/" />
                 <!-- v2.14 buddy invites: …/buddy/<code> -->
                 <data android:scheme="https" android:host="web-production-ff1cf.up.railway.app" android:pathPrefix="/buddy/" />
+                <!-- v2.18 D2 referral invites: …/r/<CODE> (claimed once after sign-in) -->
+                <data android:scheme="https" android:host="web-production-ff1cf.up.railway.app" android:pathPrefix="/r/" />
             </intent-filter>
         </activity>
         <!-- v2.6 water reminders (fire inside the window until the goal is hit) + the "+1 glass" action. -->
@@ -153,6 +159,19 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_calories_info" />
+        </receiver>
+
+        <!-- v2.18 E3: the Glance widget, calories left + day streak. -->
+        <receiver
+            android:name=".widget.StreakWidgetReceiver"
+            android:exported="false"
+            android:label="Locked In · Streak">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_streak_info" />
         </receiver>
 
         <activity-alias

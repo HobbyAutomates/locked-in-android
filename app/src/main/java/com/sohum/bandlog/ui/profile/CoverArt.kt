@@ -130,6 +130,9 @@ internal fun parseSvg(src: String): SvgDoc {
 
 private val docs = HashMap<Int, SvgDoc>()
 private fun docFor(index: Int): SvgDoc = docs.getOrPut(index) { parseSvg(COVER_SVGS[index]) }
+/** v2.18 D11: the gold edition = the dark cover with every colour mapped onto the gold ramp. */
+private val goldDocs = HashMap<Int, SvgDoc>()
+private fun goldDocFor(index: Int): SvgDoc = goldDocs.getOrPut(index) { parseSvg(com.sohum.bandlog.util.Packs.goldifySvg(COVER_SVGS[index])) }
 
 // ---------------------------------------------------------------- rendering
 
@@ -254,8 +257,9 @@ private fun DrawScope.drawShape(doc: SvgDoc, n: SvgNode.Shape) {
 }
 
 /** Draws board cover #[n] (1-based) filling this scope, "xMidYMid slice". */
-private fun DrawScope.drawSvgCover(n: Int) {
-    val doc = docFor((n - 1).coerceIn(0, COVER_SVGS.lastIndex))
+private fun DrawScope.drawSvgCover(n: Int, gold: Boolean = false) {
+    val i = (n - 1).coerceIn(0, COVER_SVGS.lastIndex)
+    val doc = if (gold) goldDocFor(i) else docFor(i)
     val s = maxOf(size.width / 390f, size.height / 250f)
     val dx = (size.width - 390f * s) / 2f
     val dy = (size.height - 250f * s) / 2f
@@ -267,6 +271,7 @@ private fun DrawScope.drawSvgCover(n: Int) {
 /** The profile cover for [id]: #01 is the existing plates cover (unchanged), the rest the board's vectors. */
 @Composable
 fun CoverView(id: String, modifier: Modifier = Modifier) {
+    com.sohum.bandlog.util.Packs.goldCover(id)?.let { g -> Canvas(modifier.semantics { contentDescription = "Cover: ${g.name} · gold" }) { drawSvgCover(g.darkIndex + 1, gold = true) }; return }
     val preset = Covers.of(id)
     if (preset.id == Covers.DEFAULT) { WeightPlatesCover(modifier); return }
     Canvas(modifier.semantics { contentDescription = "Cover: ${preset.label}" }) { drawSvgCover(preset.n) }
@@ -342,6 +347,7 @@ fun CoverPickerSheet(current: String, onPick: (String) -> Unit, onDismiss: () ->
                 repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
+        com.sohum.bandlog.ui.social.GoldCoverRow(current, onPick) // v2.18 D11 (once the pack is unlocked)
     }
 }
 

@@ -1,0 +1,25 @@
+-- v2.18 social (schema_v44, Area D): pointer only. THE WEB REPO'S COPY WINS.
+--
+-- The migration lives in the web repo: docs/schema_v44.sql (and docs/revert_v44.sql); the contract
+-- (ids, numbers, strings, RPC names) is docs/v218-social-shared.md there. Apply that file, not this
+-- one. NOT applied by the agent that wrote this pointer.
+--
+-- What Android v2.18 calls (data/SocialApi.kt). Every call tolerates the schema being missing
+-- (42P01 / 42703 / 42883 / PGRST202 / PGRST204 / PGRST205 / "does not exist" / "could not find" /
+-- 404 → NotYetAvailable → the screen shows "Coming with the next update" or hides):
+--   D5  rpc freeze_sync() once a day (device key li-freeze-sync), rpc freeze_gift(p_to),
+--       streak_freezes (own tokens), freeze_events (own; 'use' days are added to the day streak)
+--   D2  rpc my_referral_code(), rpc referral_claim(p_code) once after sign-in (code from …/r/<CODE>,
+--       device key li-ref), rpc my_referrals(), profiles.referral_pro_days
+--   D3  groups.verified / org_name / org_kind (own read), squad_verifications (own status),
+--       rpc request_squad_verification(g, p_org, p_kind, p_proof)
+--   D4  rpc coach_grant(p_username), coach_revoke(p_other), my_coaches(), my_clients(),
+--       client_overview(p_client, p_days); coach_comments (read, insert as coach)
+--   D6  post_stamps (upsert / delete own), rpc post_stamp_counts(p_posts); post_reactions accepts the
+--       13 emojis (util/Reactions.kt)
+--   D7  profiles.live_share (opt-in, device key li-live-share), live_sessions (own row upserted every
+--       4 min during a live workout, deleted after), rpc squad_live(g), rpc live_cheer(p_user)
+--   D8  pledges (own CRUD, group_id for squad-visible), rpc squad_pledges(g)
+--   D9  event_badges (own insert when an event goal is met)
+--   D11 pack_unlocks (own insert, via = 'beta_free'), profiles.badge_skin, cover_preset "<motif>-gold"
+--   D12 rpc league_table(g) — unreachable (util/Leagues.LEAGUES_ENABLED = false)

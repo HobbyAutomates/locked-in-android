@@ -334,6 +334,7 @@ private fun DayStreakRow(days: Int, notice: String?, onDismissNotice: () -> Unit
                 fontSize = 13.sp, fontWeight = FontWeight(700), color = if (days > 0) p.ink else p.muted, maxLines = 1,
             )
         }
+        if (notice == null) com.sohum.bandlog.ui.social.FreezeChip() // v2.18 D5: banked streak freezes (hidden at 0)
         if (notice != null) Row(
             Modifier.weight(1f, fill = false).height(34.dp).background(p.btn, CircleShape).clickable(onClick = onDismissNotice).padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically,

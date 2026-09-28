@@ -374,6 +374,9 @@ fun ProfileScreen(
                         ListDivider()
                         ListRow(com.sohum.bandlog.ui.onboarding.OnbIcons.Flame, "Buddy streaks", "") { com.sohum.bandlog.ui.coach.CoachNav.open(com.sohum.bandlog.ui.coach.CoachPage.BUDDY) }
                         ListDivider()
+                        // v2.18: freezes, invites, wrapped, pledges, events, coach access, packs, export (one hub).
+                        ListRow(LineIcons.Award, com.sohum.bandlog.data.SocialStore.t("social.title"), com.sohum.bandlog.util.Freezes.freezeCountText(com.sohum.bandlog.data.SocialStore.freezeTokens)) { com.sohum.bandlog.ui.social.SocialNav.open(com.sohum.bandlog.ui.social.SocialPage.HUB) }
+                        ListDivider()
                         ListRow(LineIcons.User, "Personal details", listOfNotNull(prof.age?.toString(), prof.heightCm?.let { "${it.roundToInt()} cm" }).joinToString(" · ")) { onOpen(ProfilePage.PERSONAL) }
                         ListDivider()
                         ListRow(LineIcons.Target, "Nutrition goals", if (prof.hideNumbers == true) "Set" else "${prof.calorieTarget} kcal") { onOpen(ProfilePage.GOALS) }

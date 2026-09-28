@@ -169,7 +169,7 @@ class SquadViewModel : ViewModel() {
 
     fun loadUnread() { viewModelScope.launch { runCatching { Api.myUnreadCounts() }.onSuccess { unread = it } } }
 
-    val visiblePosts: List<GroupPost> get() = if (pendingDeletes.isEmpty()) posts else posts.filter { it.id !in pendingDeletes }
+    val visiblePosts: List<GroupPost> get() = com.sohum.bandlog.util.Safety.withoutBlocked(if (pendingDeletes.isEmpty()) posts else posts.filter { it.id !in pendingDeletes }, com.sohum.bandlog.data.SocialStore.blocked) { it.userId } // v2.18 E5: blocked people hidden
 
     // ---- v2.7: Squad Food Battle (docs/food-battle-spec.md) ----
     /** groups.battle_enabled for the open squad; false until [loadBattle] reads it. */

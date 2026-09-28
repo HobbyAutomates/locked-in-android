@@ -68,12 +68,15 @@ private val Ember = Color(0xFFFF5B1F)
 fun Jewel(
     category: Jewels.Category, tier: Jewels.Tier, size: Dp, modifier: Modifier = Modifier,
     locked: Boolean = false, progress: Float = 0f, drawFraction: Float = 1f, glow: Float = 0f, label: String? = null,
+    // v2.18: seasonal jewels bring their own shape / metal / gem; badge skins (D11) swap the frame metal.
+    shape: Jewels.Shape? = null, metal: LongArray? = null, gem: LongArray? = null,
 ) {
+    val skinMetal = metal ?: com.sohum.bandlog.util.Packs.SKIN_METAL[com.sohum.bandlog.data.SocialStore.badgeSkin]
     val small = size < 44.dp
     val grain = remember { grainDots() }
     Canvas(modifier.then(if (label != null) Modifier.semantics { contentDescription = label } else Modifier).then(Modifier.size(size))) {
         val s = this.size.minDimension / 100f
-        scale(s, s, pivot = Offset.Zero) { drawJewel(category, tier, locked, progress * drawFraction, small, glow, grain) }
+        scale(s, s, pivot = Offset.Zero) { drawJewel(category, tier, locked, progress * drawFraction, small, glow, grain, shape, skinMetal, gem) }
     }
 }
 
@@ -85,11 +88,12 @@ private fun grainDots(): List<Triple<Float, Float, Float>> {
 private fun DrawScope.drawJewel(
     category: Jewels.Category, tier: Jewels.Tier, locked: Boolean, progress: Float, small: Boolean, glow: Float,
     grain: List<Triple<Float, Float, Float>>,
+    shapeOverride: Jewels.Shape? = null, metalOverride: LongArray? = null, gemOverride: LongArray? = null,
 ) {
-    val shape = Jewels.shapeOf(category)
+    val shape = shapeOverride ?: Jewels.shapeOf(category)
     val frame = frameOf(shape)
-    val m = (if (locked) Jewels.LOCKED_METAL else Jewels.metal(tier)).map { Color(it) }
-    val g = (if (locked) Jewels.LOCKED_GEM else Jewels.gem(category)).map { Color(it) }
+    val m = (if (locked) Jewels.LOCKED_METAL else metalOverride ?: Jewels.metal(tier)).map { Color(it) }
+    val g = (if (locked) Jewels.LOCKED_GEM else gemOverride ?: Jewels.gem(category)).map { Color(it) }
     val (mHi, mMid, mLo) = Triple(m[0], m[1], m[2])
     val (gHi, gMid, gLo) = Triple(g[0], g[1], g[2])
     val cy = if (shape == Jewels.Shape.SHIELD) 47f else 50f

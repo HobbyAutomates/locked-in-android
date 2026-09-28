@@ -1,0 +1,12 @@
+-- v2.18 platform (schema_v45, Area E): pointer only. THE WEB REPO'S COPY WINS.
+--
+-- The migration lives in the web repo: docs/schema_v45.sql (and docs/revert_v45.sql). Apply that
+-- file, not this one. NOT applied by the agent that wrote this pointer.
+--
+-- What Android v2.18 uses (data/SocialApi.kt; all tolerated missing):
+--   E2  profiles.ui_lang ('en' | 'hinglish' | 'hi'), mirrored from Preferences → Language (the
+--       device copy, key li-lang, wins; a missing column is ignored)
+--   E5  user_blocks (own insert / delete / read; device fallback list li-blocked hides posts first),
+--       content_reports (own insert: reason spam | abuse | nudity | self_harm | other)
+--   E5  account deletion is the web route POST <API_BASE>/api/account/delete (bearer token,
+--       body {"confirm": "DELETE"}), which runs wipe_user() with the service role

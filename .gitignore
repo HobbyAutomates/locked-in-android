@@ -9,3 +9,4 @@
 # Secrets + machine-local paths
 local.properties
 .kotlin/
+/wear/build

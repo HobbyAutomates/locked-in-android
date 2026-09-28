@@ -82,7 +82,7 @@ private class AboveAnchor(private val alignEnd: Boolean, private val gapPx: Int)
  * below them — the v2.9 long-press Delete now lives here.
  */
 @Composable
-internal fun ReactionPopup(mine: String?, alignEnd: Boolean, onPick: (String) -> Unit, onDelete: (() -> Unit)?, onDismiss: () -> Unit) {
+internal fun ReactionPopup(mine: String?, alignEnd: Boolean, onPick: (String) -> Unit, onDelete: (() -> Unit)?, onDismiss: () -> Unit, onReport: (() -> Unit)? = null) {
     val p = palette
     val gap = with(LocalDensity.current) { 6.dp.roundToPx() }
     Popup(popupPositionProvider = remember(alignEnd, gap) { AboveAnchor(alignEnd, gap) }, onDismissRequest = onDismiss, properties = PopupProperties(focusable = true)) {
@@ -90,8 +90,9 @@ internal fun ReactionPopup(mine: String?, alignEnd: Boolean, onPick: (String) ->
             Modifier.padding(4.dp).shadow(12.dp, RoundedCornerShape(24.dp), ambientColor = p.shadow, spotColor = p.shadow)
                 .background(p.card, RoundedCornerShape(24.dp)).padding(4.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Reactions.ALL.forEach { e ->
+            // v2.18: 13 reactions don't fit one row: the v2.11 six, then the seven new ones.
+            Reactions.ALL.chunked(7).forEach { rowEmojis -> Row(verticalAlignment = Alignment.CenterVertically) {
+                rowEmojis.forEach { e ->
                     val sel = e == mine
                     Box(
                         Modifier.size(46.dp).background(if (sel) p.card2 else Color.Transparent, CircleShape)
@@ -100,6 +101,13 @@ internal fun ReactionPopup(mine: String?, alignEnd: Boolean, onPick: (String) ->
                         contentAlignment = Alignment.Center,
                     ) { Text(e, fontSize = 26.sp) }
                 }
+            } }
+            if (onReport != null) {
+                Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp).height(1.dp).background(p.hair))
+                Text(
+                    "${com.sohum.bandlog.data.SocialStore.t("squad.report")} / ${com.sohum.bandlog.data.SocialStore.t("squad.block")}", fontSize = 15.sp, fontWeight = FontWeight(600), color = p.ink,
+                    modifier = Modifier.fillMaxWidth().clickable { onDismiss(); onReport() }.padding(horizontal = 14.dp, vertical = 13.dp),
+                )
             }
             if (onDelete != null) {
                 Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp).height(1.dp).background(p.hair))

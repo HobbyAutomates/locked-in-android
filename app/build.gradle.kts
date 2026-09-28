@@ -108,6 +108,13 @@ dependencies {
     // v2.13 platform: inbox polling every 15 min (no FCM project) + on app open.
     implementation("androidx.work:work-runtime-ktx:2.9.1")
 
+    // v2.18 E1 offline logging: the queue of saves made without a network (data/OfflineQueue.kt).
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
+    // v2.18 E3: the Glance home-screen widget (calories left + day streak). 1.1.x builds on compileSdk 34.
+    implementation("androidx.glance:glance-appwidget:1.1.0")
+    // v2.18 E3: hands today's numbers to the Wear OS tile (the :wear module) over the Data Layer.
+    implementation("com.google.android.gms:play-services-wearable:18.2.0")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     // v2.13 platform: plain JVM unit tests (Pro, Epley, muscle map, routines, protein nudge).
