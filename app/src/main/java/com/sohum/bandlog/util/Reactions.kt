@@ -8,8 +8,14 @@ package com.sohum.bandlog.util
  * `my_reaction` (no reactions), and the read-status RPC is missing (no ticks, no unread badges).
  */
 object Reactions {
-    /** The six, in bar order. ❤️ is U+2764 U+FE0F, exactly as the database check stores it. */
-    val ALL = listOf("❤️", "🔥", "👍", "😂", "😮", "💪")
+    /**
+     * The reactions, in bar order. ❤️ is U+2764 U+FE0F and 🏋️ is U+1F3CB U+FE0F, exactly as the
+     * database check stores them. v2.18 (schema_v44) appended the last seven; before v44 the server
+     * rejects them (the save fails quietly and the chip rolls back).
+     */
+    val ALL = listOf("❤️", "🔥", "👍", "😂", "😮", "💪", "🥗", "🍗", "🏋️", "🙌", "💯", "😤", "🫡")
+    /** The v2.11 six (the first row of the picker). */
+    val CORE = ALL.take(6)
     const val HEART = "❤️"
 
     /** Messages from one person less than this apart form one run (one name, one avatar). */
@@ -20,7 +26,7 @@ object Reactions {
     /** [save] null = delete my row. */
     data class Change(val state: State, val save: String?)
 
-    /** "❤" (no variation selector) maps onto "❤️"; anything outside the six is null. */
+    /** "❤" / "🏋" (no variation selector) map onto "❤️" / "🏋️"; anything outside the set is null. */
     fun normalize(e: String?): String? {
         val t = e?.trim() ?: return null
         if (t in ALL) return t
