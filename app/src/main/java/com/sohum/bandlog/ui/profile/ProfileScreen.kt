@@ -209,8 +209,8 @@ fun ProfileScreen(
     }
     val remindersOn = Reminders.parse(prof.remindersJson).count { it.value.on }
     val joined = prof.createdAt?.take(10)?.let { runCatching { java.time.LocalDate.parse(it).format(java.time.format.DateTimeFormatter.ofPattern("MMM yyyy", java.util.Locale.ENGLISH)) }.getOrNull() }
-    // The existing "Founding member" rule: every account so far is in the launch cohort, so the plate shows for all.
-    val isFoundingMember = true
+    // v2.17: FOUNDER for the owner, "OG #nn" for the first 50 accounts, else none (util/MemberPlate).
+    val plate = prof.plate
     val isAdmin = Session.email?.trim()?.lowercase()?.let { e -> BuildConfig.ADMIN_EMAILS.split(",").map { it.trim().lowercase() }.contains(e) } == true
 
     MotionScreen {
@@ -249,16 +249,16 @@ fun ProfileScreen(
                 // ---- identity ----
                 Entrance(2, key = "identity") {
                     Column(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        // v2.16 identity band (board IdentityFinal): name, "@handle · FOUNDER", "City · since Mon YYYY".
+                        // v2.16 identity band (board IdentityFinal): name, "@handle · FOUNDER / OG #nn", "City · since Mon YYYY".
                         Text(
                             displayName.ifBlank { "Your name" }, fontSize = 30.sp, fontWeight = FontWeight(600), letterSpacing = (-1).sp, color = p.ink,
                             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp),
                         )
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             prof.username?.let { Text("@$it", fontSize = 13.sp, color = Color(0xFF8C8C92), maxLines = 1) }
-                            if (isFoundingMember) {
+                            if (plate != null) {
                                 if (prof.username != null) Box(Modifier.size(3.dp).background(Color(0xFF8C8C92), CircleShape))
-                                FounderPlate()
+                                MemberPlateChip(plate)
                             }
                         }
                         val place = listOfNotNull(squadName, joined?.let { "since $it" })

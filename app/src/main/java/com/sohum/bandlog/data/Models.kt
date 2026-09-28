@@ -321,7 +321,19 @@ data class Profile(
     val coverPreset: String? = null,
     /** True when the cover_preset column exists (a save goes to the profile, not only the device). */
     val coverSupported: Boolean = false,
+    // ---- v2.17 (schema_v41 member plate; tour_seen_at is schema_v40). Null / false while missing. ----
+    /** profiles.member_no (1 = first account); null = column missing or not set. */
+    val memberNo: Int? = null,
+    /** profiles.is_founder; null = column missing. */
+    val isFounder: Boolean? = null,
+    /** profiles.tour_seen_at (ISO timestamptz); null = not seen or column missing. */
+    val tourSeenAt: String? = null,
+    /** True when the tour_seen_at column exists (finishing the tour writes it). */
+    val tourSeenSupported: Boolean = false,
 ) {
+    /** v2.17 FOUNDER / "OG #nn" / none (util/MemberPlate). */
+    val plate: com.sohum.bandlog.util.MemberPlate? get() = com.sohum.bandlog.util.MemberPlate.of(isFounder, memberNo)
+
     /** True when the v37 profile columns exist. */
     val v37: Boolean get() = coachStyle != null
     /** The lens a report opens on: `goal` follows the weight goal (lose → cutting, gain → bulking, else protein). */
@@ -396,6 +408,10 @@ data class Profile(
             milestonesSeen = if (!o.has("milestones_seen")) null else o.strList("milestones_seen") ?: emptyList(),
             coverPreset = if (!o.has("cover_preset")) null else o.str("cover_preset"),
             coverSupported = o.has("cover_preset"),
+            memberNo = if (!o.has("member_no") || o.isNull("member_no")) null else o.optInt("member_no").takeIf { it > 0 },
+            isFounder = if (!o.has("is_founder") || o.isNull("is_founder")) null else o.optBoolean("is_founder", false),
+            tourSeenAt = if (!o.has("tour_seen_at")) null else o.str("tour_seen_at"),
+            tourSeenSupported = o.has("tour_seen_at"),
         )
 
         private fun JSONObject.strList(k: String): List<String>? =

@@ -1,0 +1,16 @@
+-- v2.17 (schema_v41): pointer only. THE WEB REPO'S COPY WINS.
+--
+-- The migration lives in the web repo: docs/schema_v41.sql (and docs/revert_v41.sql). Apply that file,
+-- not this one. NOT applied by the agent that wrote this pointer.
+--
+-- What Android v2.17 reads from it (all tolerated missing; select=* on bandlog.profiles):
+--   bandlog.profiles.member_no   int       1 = first account (row_number over created_at, then a
+--                                          BEFORE INSERT trigger). Nullable here if missing.
+--   bandlog.profiles.is_founder  boolean   true only for the owner's accounts.
+--   bandlog.profiles.tour_seen_at timestamptz (added in schema_v40; v41 backfills now() for every
+--                                          existing profile where it is null).
+--
+-- Plate rule (util/MemberPlate.kt): is_founder → "FOUNDER" (gold); member_no <= 50 → "OG #07"
+-- (gunmetal); otherwise none. Columns missing → no plate.
+-- Tour rule (ui/tour/Tour.kt isTourEligible): tour_seen_at null AND created_at > 2026-09-28T21:00:00Z.
+-- Android writes tour_seen_at = now() on finish or skip (only when the column came back).

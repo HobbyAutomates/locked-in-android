@@ -324,12 +324,22 @@ internal fun LiquidSphere(value: String, unit: String, fill: Float, top: Color, 
     }
 }
 
-/** "FOUNDER" gold plate (board IdentityFinal). */
+/**
+ * v2.17 member plate: the gold "FOUNDER" plate (board IdentityFinal) for the owner, and the same plate
+ * in a gunmetal / silver finish for "OG #07" (the first 50 accounts), so FOUNDER stays special.
+ */
 @Composable
-internal fun FounderPlate() {
+internal fun MemberPlateChip(plate: com.sohum.bandlog.util.MemberPlate) {
+    val founder = plate is com.sohum.bandlog.util.MemberPlate.Founder
+    val glow = if (founder) Color(0xFFA8823A) else Color(0xFF6B7078)
+    val face = if (founder) listOf(Color(0xFFD9B872), Color(0xFF5E4518)) else listOf(Color(0xFFD5D8DD), Color(0xFF4A4E55))
+    val ink = if (founder) Color(0xFF1A1206) else Color(0xFF14161A)
     Box(
-        Modifier.height(22.dp).shadow(8.dp, RoundedCornerShape(6.dp), ambientColor = Color(0xFFA8823A), spotColor = Color(0xFFA8823A))
-            .background(Brush.linearGradient(listOf(Color(0xFFD9B872), Color(0xFF5E4518))), RoundedCornerShape(6.dp)).padding(horizontal = 9.dp),
+        Modifier.height(22.dp).shadow(8.dp, RoundedCornerShape(6.dp), ambientColor = glow, spotColor = glow)
+            .background(Brush.linearGradient(face), RoundedCornerShape(6.dp))
+            .border(0.6.dp, Color.White.copy(alpha = if (founder) 0.18f else 0.28f), RoundedCornerShape(6.dp))
+            .padding(horizontal = 9.dp)
+            .semantics { contentDescription = if (founder) "Founder" else "Original member number ${(plate as com.sohum.bandlog.util.MemberPlate.Og).memberNo}" },
         contentAlignment = Alignment.Center,
-    ) { Text("FOUNDER", fontSize = 9.5.sp, fontWeight = FontWeight(700), letterSpacing = 1.3.sp, color = Color(0xFF1A1206)) }
+    ) { Text(plate.label, fontSize = 9.5.sp, fontWeight = FontWeight(700), letterSpacing = 1.3.sp, color = ink) }
 }
