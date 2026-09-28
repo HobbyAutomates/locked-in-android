@@ -23,6 +23,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sohum.bandlog.data.Workout
@@ -53,22 +55,49 @@ internal fun heatFills(sets: Map<MuscleMap.Region, Double>): Map<MuscleMap.Regio
     return sets.filterValues { it > 0 }.mapValues { (_, v) -> a.copy(alpha = MuscleMap.heat(v)) }
 }
 
-/** The compact "muscles trained this week" card for Progress. */
+/** Strength sessions (gym, bodyweight, bands) in a list of workouts. */
+internal fun strengthSessions(list: List<Workout>): Int =
+    list.count { it.isBands || it.lifts.isNotEmpty() || it.kind == "gym" || it.kind == "bodyweight" }
+
+/** Ember fills for the glanceable mini map: any trained region lights up, deeper with more sets. */
+internal fun emberFills(sets: Map<MuscleMap.Region, Double>): Map<MuscleMap.Region, Color> =
+    sets.filterValues { it > 0 }.mapValues { (_, v) -> com.sohum.bandlog.ui.progress.ProgressColors.Ember.copy(alpha = MuscleMap.heat(v).coerceAtLeast(0.45f)) }
+
+/**
+ * v2.17 compact "Muscles this week" card, placed right after the weight card on Progress: a small
+ * front and back body with the trained muscles in ember and a one-line summary ("Chest, back, legs ·
+ * 4 sessions"). Tapping opens the full muscle map (still Pro-gated there).
+ */
 @Composable
 fun MusclesWeekCard(vm: AppViewModel) {
     val p = palette
     val pvm: PlatformViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
-    val sets = MuscleMap.setsPerRegion(weekWorkouts(vm.workouts, 0).second)
-    Card(onClick = { PlatformNav.open(PlatformPage.MUSCLE_MAP) }) {
+    val week = weekWorkouts(vm.workouts, 0).second
+    val sets = MuscleMap.setsPerRegion(week)
+    val sessions = strengthSessions(week)
+    val line = MuscleMap.weekLine(sets, sessions)
+    Card(onClick = { PlatformNav.open(PlatformPage.MUSCLE_MAP) }, padding = 14.dp) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TitleWithChip("Muscles this week", pro = true)
-            Spacer(Modifier.weight(1f))
-            Text("${sets.count { it.value >= MuscleMap.WEEKLY_MIN }} in range", fontSize = 12.sp, color = p.muted)
+            val fills = if (pvm.hasPro) emberFills(sets) else emptyMap()
+            Row(Modifier.width(84.dp).height(76.dp).semantics { contentDescription = "Muscles trained this week" }) {
+                MuscleFigure(fills, true, Modifier.weight(1f))
+                MuscleFigure(fills, false, Modifier.weight(1f))
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                TitleWithChip("Muscles this week", pro = true, size = 16)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    when {
+                        !pvm.hasPro -> "See which muscles you trained, set by set. Part of Pro."
+                        line == null -> "Log a gym or bodyweight session and your muscles light up here."
+                        else -> line
+                    },
+                    fontSize = 13.sp, lineHeight = 18.sp, color = if (pvm.hasPro && line != null) p.ink else p.muted, maxLines = 2,
+                )
+            }
+            Text("›", fontSize = 22.sp, color = p.muted, modifier = Modifier.padding(start = 8.dp))
         }
-        Spacer(Modifier.height(10.dp))
-        if (!pvm.hasPro) Text("See which muscles you trained, set by set. Part of Pro.", fontSize = 13.sp, color = p.muted)
-        else if (sets.isEmpty()) Text("Log a gym or bodyweight session and your muscles light up here.", fontSize = 13.sp, color = p.muted)
-        else MuscleFigures(heatFills(sets), Modifier.height(170.dp), description = "Muscles trained this week")
     }
 }
 

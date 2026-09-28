@@ -145,13 +145,14 @@ fun ProgressScreen(vm: AppViewModel, onOpenBadges: () -> Unit, onLogWeight: () -
             item(key = "teenGoal") { TeenGoalMigration(vm) }
             if (flags.isNotEmpty() && !safetyClosed) item(key = "safety") { Entrance(2, key = "safety") { SafetyNote(vm, flags, onClose = { safetyClosed = true }) } }
             item(key = "weight") { Entrance(2, key = "weight") { WeightCardV2(vm, range, onLogWeight) } }
+            // v2.17: the glanceable muscle map sits right after the weight card (it used to be near the bottom).
+            item(key = "musclesWeek") { Entrance(3, key = "musclesWeek") { com.sohum.bandlog.ui.platform.MusclesWeekCard(vm) } }
             item(key = "streak") { Entrance(3, key = "streak") { StreakCardV2(vm) } }
             item(key = "energy") { Entrance(4, key = "energy") { EnergyCardV2(vm, range) } }
             item(key = "macros") { Entrance(5, key = "macros") { MacrosCardV2(vm, range) } }
             item(key = "bmi") { Entrance(6, key = "bmi") { BmiCardV2(vm, bodyKg) } }
             item(key = "mealTimes") { Entrance(7, key = "mealTimes") { MealTimesCard(vm) } }
-            // v2.13 platform: muscles trained this week, and body / training / recaps / share cards.
-            item(key = "musclesWeek") { Entrance(7, key = "musclesWeek") { com.sohum.bandlog.ui.platform.MusclesWeekCard(vm) } }
+            // v2.13 platform: body / training / recaps / share cards.
             item(key = "bodyTraining") { Entrance(8, key = "bodyTraining") { com.sohum.bandlog.ui.platform.BodyTrainingCard(vm) } }
             item(key = "moreToggle") {
                 Entrance(8, key = "moreToggle") {

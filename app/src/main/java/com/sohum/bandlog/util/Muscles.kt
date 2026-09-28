@@ -226,4 +226,31 @@ object MuscleMap {
         sets <= WEEKLY_MAX -> "In range"
         else -> "Over $WEEKLY_MAX"
     }
+
+    /** v2.17 coarse groups for the one-line "Muscles this week" summary, in reading order. */
+    enum class Group(val label: String, val regions: Set<Region>) {
+        CHEST("chest", setOf(Region.CHEST)),
+        BACK("back", setOf(Region.LATS, Region.UPPER_BACK, Region.LOWER_BACK, Region.TRAPS)),
+        SHOULDERS("shoulders", setOf(Region.FRONT_DELTS, Region.SIDE_DELTS, Region.REAR_DELTS)),
+        ARMS("arms", setOf(Region.BICEPS, Region.TRICEPS, Region.FOREARMS)),
+        CORE("core", setOf(Region.ABS, Region.OBLIQUES)),
+        LEGS("legs", setOf(Region.QUADS, Region.HAMSTRINGS, Region.GLUTES, Region.CALVES, Region.ADDUCTORS)),
+    }
+
+    /**
+     * "Chest, back, legs · 4 sessions": the (up to [maxGroups]) most-trained groups, most sets first
+     * (ties in [Group] order), then the session count. Empty sets → just the session count, or null for none.
+     */
+    fun weekLine(sets: Map<Region, Double>, sessions: Int, maxGroups: Int = 3): String? {
+        val groups = Group.entries
+            .map { g -> g to g.regions.sumOf { sets[it] ?: 0.0 } }
+            .filter { it.second > 0.0 }
+            .sortedWith(compareByDescending<Pair<Group, Double>> { it.second }.thenBy { it.first.ordinal })
+            .take(maxGroups)
+            .map { it.first.label }
+        val count = if (sessions > 0) "$sessions session${if (sessions == 1) "" else "s"}" else null
+        if (groups.isEmpty()) return count
+        val names = groups.joinToString(", ").replaceFirstChar { it.uppercase() }
+        return if (count == null) names else "$names · $count"
+    }
 }
