@@ -332,9 +332,10 @@ fun EnergyCardV2(vm: AppViewModel, range: ProgressRange) {
             }
         }
         Spacer(Modifier.height(14.dp))
-        EnergyBars(
-            slots.map { it.kcal }, target, slots.map { it.label }, "energy-${range.name}", showTarget = !hide,
-            modifier = Modifier.fillMaxWidth().height(130.dp).semantics {
+        // v2.17: the owner prefers the pre-v2.16 line chart (line draws in, dots pop) over bars.
+        EnergyTargetLine(
+            slots.map { it.kcal }, target, slots.map { it.label }, "energy-${range.name}",
+            Modifier.fillMaxWidth().height(120.dp).semantics {
                 contentDescription = "Calories eaten each ${if (range == ProgressRange.QUARTER) "week" else "day"} against a target of ${target.roundToInt()}. $onTarget of $slotsTotal $unit on target."
             },
         )
