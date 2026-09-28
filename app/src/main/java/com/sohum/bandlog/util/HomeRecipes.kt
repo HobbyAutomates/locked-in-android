@@ -135,6 +135,17 @@ object HomeRecipes {
     data class OwnRecipe(val name: String, val servings: Double, val cookedWeightG: Double, val items: List<Recipes.Ingredient>, val perServing: Recipes.Totals, val note: String)
 
     /** A library entry as the person's own recipe (one serving = one unit), ready for bandlog.recipes. */
+    /** A priced meal item (from /api/parse-meal) as a recipe ingredient, with per-100 g so grams edits re-price it (web ingredientFromItem). */
+    fun ingredientFromItem(it: MealItem): Recipes.Ingredient {
+        val g = it.grams
+        fun per(v: Double) = if (g > 0) r1(v * 100 / g) else 0.0
+        return Recipes.Ingredient(
+            name = it.name, grams = g, kcal = jsRound(it.calories), protein = r1(it.proteinG), carbs = r1(it.carbsG), fat = r1(it.fatG),
+            fiber = r1(it.micros["fiber_g"] ?: 0.0), foodId = it.foodId, micros = it.micros,
+            per100 = if (g > 0) Recipes.Per100(per(it.calories), per(it.proteinG), per(it.carbsG), per(it.fatG), it.micros.mapValues { (_, v) -> per(v) }) else null,
+        )
+    }
+
     fun homeRecipeAsOwn(r: HomeRecipe): OwnRecipe {
         val micros = if (r.fiberG != 0.0) mapOf("fiber_g" to r.fiberG) else emptyMap()
         val item = Recipes.Ingredient(

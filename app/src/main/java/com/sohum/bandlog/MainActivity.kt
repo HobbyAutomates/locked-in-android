@@ -559,6 +559,7 @@ private fun MainShell(vm: AppViewModel, updateVm: UpdateViewModel, themeMode: Th
         com.sohum.bandlog.ui.coach.CoachOverlays(vm) // v2.14 coach, buddies, Tune your plan
         // v2.13 nutrition: fasting, recipes, micros, what-to-eat pages over everything above.
         com.sohum.bandlog.ui.nutrition.NutritionOverlays(vm)
+        com.sohum.bandlog.ui.food.FoodOverlays(vm) // v2.18 food
 
         if (waterParty) com.sohum.bandlog.ui.today.WaterGoalParty { waterParty = false }
 

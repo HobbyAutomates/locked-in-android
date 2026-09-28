@@ -42,7 +42,8 @@ object FoodHonesty {
         val kcal = max(0.0, if (it.calories.isFinite()) it.calories else 0.0)
         val lo = it.kcalLow ?: Double.NaN
         val hi = it.kcalHigh ?: Double.NaN
-        if (lo.isFinite() && hi.isFinite() && hi >= lo && lo >= 0 && hi > 0) {
+        // A stored range only counts while it still brackets the calories (an edited amount falls back).
+        if (lo.isFinite() && hi.isFinite() && hi >= lo && lo >= 0 && hi > 0 && kcal >= lo - 1 && kcal <= hi + 1) {
             val pm = jsRound((hi - lo) / 2)
             return Range(jsRound(lo).toInt(), jsRound(hi).toInt(), pm.toInt(), if (kcal > 0) pm / kcal else 0.0)
         }

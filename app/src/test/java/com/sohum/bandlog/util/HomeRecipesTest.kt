@@ -51,4 +51,12 @@ class HomeRecipesTest {
         assertTrue(v.ingredients.startsWith("2 cup rajma"))
         assertEquals("", HomeRecipes.parseVoiceRecipe("1 katori poha").name)
     }
+
+    @Test fun ingredientFromParsedItem() {
+        val it = com.sohum.bandlog.data.MealItem(foodId = null, name = "Toor dal", grams = 150.0, calories = 180.0, proteinG = 9.0, carbsG = 20.0, fatG = 5.0, source = "table", confidence = 1.0, micros = mapOf("fiber_g" to 3.0))
+        val ing = HomeRecipes.ingredientFromItem(it)
+        org.junit.Assert.assertEquals(180.0, ing.kcal, 0.0)
+        org.junit.Assert.assertEquals(3.0, ing.fiber!!, 0.0)
+        org.junit.Assert.assertEquals(Recipes.Per100(120.0, 6.0, 13.3, 3.3, mapOf("fiber_g" to 2.0)), ing.per100)
+    }
 }

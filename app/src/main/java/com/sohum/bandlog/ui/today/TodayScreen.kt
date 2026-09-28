@@ -246,6 +246,8 @@ fun TodayScreen(
         }
         // v2.13 §6 / §7 / §8 / §9: shortcuts, then "What should I eat?" from what's left today.
         if (isToday) item(key = "ntools") { Entrance(3, key = "ntools") { com.sohum.bandlog.ui.nutrition.NutritionShortcuts(vm, nvm) } }
+        // v2.18 food: accuracy chip, leftovers, splits sent to me, one smart swap.
+        if (isToday) item(key = "food218") { Entrance(3, key = "food218") { com.sohum.bandlog.ui.food.FoodHomeExtras(vm, todayMeals, onOpenMeal) } }
         if (isToday && nvm.whatToEatVisible(vm)) item(key = "wte") { Entrance(3, key = "wte") { com.sohum.bandlog.ui.nutrition.WhatToEatCard(vm, nvm) } }
         if (isToday) {
             val h = vm.healthToday

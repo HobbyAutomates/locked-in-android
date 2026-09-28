@@ -309,7 +309,13 @@ private fun ScanForm(
     LaunchedEffect(plate) { plateItems = plate?.items ?: emptyList() }
     // v2.17: the slot a photo scan logs into (re-guessed from the time for each new plate).
     var plateSlot by remember { mutableStateOf(MealTypes.default()) }
-    LaunchedEffect(plate) { if (plate != null) plateSlot = MealTypes.default() }
+    LaunchedEffect(plate?.id) { if (plate != null) plateSlot = MealTypes.default() }
+    // v2.18: what the person says with the photo (A1), "Ate part of it" (A6) and the split sheet (A7).
+    val voice = com.sohum.bandlog.ui.food.rememberVoiceNote()
+    var eaten by remember(plate?.id) { mutableStateOf(1.0) }
+    var splitOpen by remember { mutableStateOf(false) }
+    var splitBusy by remember { mutableStateOf(false) }
+    var splitError by remember { mutableStateOf<String?>(null) }
 
     // v2.15 beta log: a result that goes away without being logged is a "scan_dismiss".
     var accepted by remember { mutableStateOf(false) }
@@ -372,7 +378,9 @@ private fun ScanForm(
                     }
                     else -> {
                         bmp ?: return@launch
-                        plate = Api.photoMeal(withContext(Dispatchers.IO) { toJpegBase64(scaleForUpload(bmp, 1280), 85) }, note)
+                        // v2.18 A1: said while shooting? Wait for the last words, then send them with the photo.
+                        voice.settle()
+                        plate = Api.photoMeal(withContext(Dispatchers.IO) { toJpegBase64(scaleForUpload(bmp, 1280), 85) }, note, voice.text.trim())
                     }
                 }
                 onScanned()
@@ -412,7 +420,7 @@ private fun ScanForm(
     fun openGallery() = gallery.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
 
     /** Back to the camera stage (the note and mode stay). */
-    fun reset() { photo = null; ocr = ""; barcode = ""; kind = null; clearResults(); showText = false; digitsOpen = false }
+    fun reset() { photo = null; ocr = ""; barcode = ""; kind = null; clearResults(); showText = false; digitsOpen = false; voice.text = "" }
 
     // v2.17 Recent: "+" logs into the slot for now; a tap opens the amount + slot first.
     var recentSheet by remember { mutableStateOf<com.sohum.bandlog.util.Recents.Recent?>(null) }
@@ -452,6 +460,7 @@ private fun ScanForm(
                 )
             }),
             note = recentNote,
+            voice = if (mode == "food") ({ com.sohum.bandlog.ui.food.CameraVoiceRow(voice) }) else null,
         )
         recentSheet?.let { r ->
             QuantitySheet(
@@ -555,6 +564,7 @@ private fun ScanForm(
                         rep, lens, onLogged = { accepted = true }, onLogServing = { m -> accepted = true; onLogServing(m) },
                         onLogToSlot = { item, slot -> vm.saveMeal(Dates.today(), "${rep.product.ifBlank { "Scanned product" }} (scan)", listOf(item), mealType = slot, method = if (rep.kind == "barcode") "barcode" else "label") },
                     )
+                    com.sohum.bandlog.ui.food.LabelRealityCard(rep) // v2.18 A8
                 }
                 if (menuUnavailable) com.sohum.bandlog.ui.nutrition.ComingSoonCard(
                     "Restaurant menu scan", "Snap a menu and see each dish's calories and protein, with the best pick for what you have left today.",
@@ -569,16 +579,54 @@ private fun ScanForm(
                         est, photo, readOnly = false, showPhoto = false,
                         // v2.17: log into a chosen slot (defaults to the time of day, as on Home).
                         saveLabel = "Log to " + MealTypes.label(plateSlot),
-                        beforeSave = { com.sohum.bandlog.ui.components.MealSlotPicker(plateSlot, { plateSlot = it }) },
+                        beforeSave = {
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                // v2.18 A1 after the photo, A6 "Ate part of it".
+                                com.sohum.bandlog.ui.food.PlateVoice(plateItems, est.plateNote) { next, changes ->
+                                    plate = est.copy(items = next, voice = null, voiceChanges = emptyList())
+                                    plateItems = next
+                                    com.sohum.bandlog.data.LogEvents.note(changes.joinToString(" · ").take(400), "scan_voice")
+                                }
+                                com.sohum.bandlog.ui.food.EatenChips(eaten, { eaten = it }, (plateItems.sumOf { it.calories } * (1 - eaten)).roundToInt())
+                                com.sohum.bandlog.ui.components.MealSlotPicker(plateSlot, { plateSlot = it })
+                            }
+                        },
+                        afterSave = { PillButton("Split it with family or squad", { splitError = null; splitOpen = true }, height = 46.dp, bg = palette.card2, fg = palette.ink, enabled = plateItems.isNotEmpty() && !busy) },
                         onItemsChanged = { plateItems = it },
                         onPickAnother = { list -> accepted = true; com.sohum.bandlog.data.Analytics.hintMealMethod("photo"); vm.openAddFood(list.map { it.toMealItem() }) },
                     ) { items, path ->
                         scope.launch {
                             busy = true
                             val photoPath = path ?: photo?.let { b -> runCatching { Api.uploadMealPhoto(withContext(Dispatchers.IO) { toJpegBytes(b, 85) }) }.getOrNull() }
-                            val ok = vm.saveMeal(Dates.today(), est.plateNote.ifBlank { items.joinToString(", ") { it.name } }, items.map { it.toMealItem() }, photoPath, mealType = plateSlot, method = "photo")
+                            // v2.18 A6: log what was eaten; the rest waits as leftovers (quietly skipped before schema_v42).
+                            val cut = com.sohum.bandlog.util.FoodBits.splitEaten(items.map { it.toMealItem() }, eaten)
+                            val label = est.plateNote.ifBlank { items.joinToString(", ") { it.name } }
+                            val ok = vm.saveMeal(Dates.today(), label, cut.eaten, photoPath, mealType = plateSlot, method = "photo")
+                            if (ok) com.sohum.bandlog.ui.food.PlateSave.leftovers(label, cut.left, cut.leftFraction)
                             busy = false
                             if (ok) { accepted = true; plate = null; photo = null; kind = null } else error = vm.error
+                        }
+                    }
+                    // v2.18 A7: my share logged now, each squadmate gets theirs to accept.
+                    if (splitOpen) {
+                        val dish = est.plateNote.ifBlank { plateItems.joinToString(", ") { it.name } }
+                        com.sohum.bandlog.ui.food.SplitSheet(dish, plateItems.sumOf { it.calories }.roundToInt(), splitBusy, splitError, { if (!splitBusy) splitOpen = false }) { weights, picked ->
+                            scope.launch {
+                                splitBusy = true; splitError = null
+                                val parts = com.sohum.bandlog.util.FoodBits.splitShares(plateItems.map { it.toMealItem() }, weights)
+                                val ok = vm.saveMeal(Dates.today(), "$dish (my share)", parts[0], est.photoPath, mealType = plateSlot, method = "split")
+                                if (!ok) { splitError = vm.error; splitBusy = false; return@launch }
+                                val total = weights.sum().coerceAtLeast(0.0001)
+                                try {
+                                    com.sohum.bandlog.data.FoodApi.sendSplits(dish, vm.profile.name.ifBlank { null }, Dates.today(), plateSlot, picked.mapIndexed { i, pp -> Triple(pp.id, parts[i + 1], weights[i + 1] / total) })
+                                } catch (e: com.sohum.bandlog.data.NotYetAvailable) {
+                                    recentNote = "Your share is logged. Splitting with squadmates is coming with the next update."
+                                } catch (e: Exception) {
+                                    recentNote = "Your share is logged, but the split couldn't be sent: ${e.message}"
+                                }
+                                splitBusy = false; splitOpen = false
+                                accepted = true; plate = null; photo = null; kind = null
+                            }
                         }
                     }
                 }
@@ -645,6 +693,8 @@ private fun CameraStage(
     live: LiveCamera? = null, onCameraFailed: (String) -> Unit = {}, onEnableLive: (() -> Unit)? = null,
     /** v2.17: the Recent row (past scans and foods) and its "Added …" line. */
     recent: (@Composable () -> Unit)? = null, note: String? = null,
+    /** v2.18 A1: the hold-to-talk row (food mode), above the modes. */
+    voice: (@Composable () -> Unit)? = null,
 ) {
     val current = MODES.firstOrNull { it.key == mode } ?: MODES.first()
     Column(Modifier.fillMaxSize().background(Color.Black).navigationBarsPadding().padding(bottom = 100.dp)) {
@@ -683,6 +733,7 @@ private fun CameraStage(
             note, Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 10.dp).semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite },
             textAlign = TextAlign.Center, fontSize = 13.sp, fontWeight = FontWeight(600), color = Color(0xFFFF8B5E),
         )
+        if (voice != null) voice()
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp).selectableGroup().scanEnter(3, riseDp = 16f),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1418,6 +1469,8 @@ fun PhotoReview(
     onItemsChanged: ((List<PlateItem>) -> Unit)? = null,
     /** v2.17: shown just above the save button (the meal-slot picker). */
     beforeSave: (@Composable () -> Unit)? = null,
+    /** v2.18: shown just below the save button (Split it). */
+    afterSave: (@Composable () -> Unit)? = null,
     onSave: ((List<PlateItem>, String?) -> Unit)? = null,
 ) {
     val p = palette
@@ -1475,6 +1528,7 @@ fun PhotoReview(
                 Text("Restaurant portion · ×1.4 + hidden oil", fontSize = 11.sp, fontWeight = FontWeight(700), color = p.orange)
             }
         }
+        com.sohum.bandlog.ui.food.PlateMeta(est.sizedUsing, est.voice, est.voiceChanges) // v2.18 A5 / A1
     }
 
     // ---- the one follow-up question, e.g. "Homemade or restaurant?" ----
@@ -1535,7 +1589,8 @@ fun PhotoReview(
                     Text(
                         buildAnnotatedString {
                             append("${it.calories.toInt()}")
-                            withStyle(SpanStyle(fontSize = 11.sp, fontWeight = FontWeight(600), color = p.muted)) { append(" kcal") }
+                            // v2.18 A3: each item's honest ± (the photo's gram range, else its source).
+                            withStyle(SpanStyle(fontSize = 11.sp, fontWeight = FontWeight(600), color = p.muted)) { append(" kcal" + com.sohum.bandlog.util.FoodHonesty.plusMinusLabel(it.toMealItem()).let { pm -> if (pm.isEmpty()) "" else " $pm" }) }
                         },
                         fontSize = 15.sp, fontWeight = FontWeight(800), color = p.ink,
                     )
@@ -1653,6 +1708,7 @@ fun PhotoReview(
                 onSave(items, est.photoPath)
             }, enabled = items.isNotEmpty())
         }
+        afterSave?.let { Box(Modifier.scanEnter(4, est)) { it() } }
     }
 }
 

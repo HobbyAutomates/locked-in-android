@@ -197,7 +197,12 @@ private fun MealLine(m: Meal, drag: MealDrag? = null, onMove: ((Meal, String) ->
             )
         }
         Spacer(Modifier.width(8.dp))
-        Text("${m.calories.roundToInt()} kcal", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1)
+        // v2.18 A3: the meal's honest ± under its kcal.
+        val pm = com.sohum.bandlog.util.FoodHonesty.totalPlusMinus(m.items)
+        Column(horizontalAlignment = Alignment.End) {
+            Text("${m.calories.roundToInt()} kcal", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1)
+            if (pm >= 5) Text("±$pm", fontSize = 11.sp, fontWeight = FontWeight(600), color = p.muted, maxLines = 1)
+        }
         if (onMove == null) {
             Spacer(Modifier.width(6.dp))
             Chevron()

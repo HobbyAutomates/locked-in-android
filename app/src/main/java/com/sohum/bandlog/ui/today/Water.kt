@@ -257,6 +257,8 @@ fun WaterScreen(vm: AppViewModel, onBack: () -> Unit) {
 
             Spacer(Modifier.height(26.dp))
             WaterReminderBlock(vm)
+            Spacer(Modifier.height(14.dp))
+            com.sohum.bandlog.ui.food.WaterFromFoodRow() // v2.18 A10
         }
     }
 
@@ -556,7 +558,9 @@ fun WaterCard(vm: AppViewModel, onOpen: () -> Unit) {
     val p = palette
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
-    val total = vm.waterToday
+    // v2.18 A10: water in today's food (dal, chaas, fruit…) when the setting is on.
+    val foodMl = com.sohum.bandlog.ui.food.FoodStore.foodWaterMl(vm.meals.filter { it.date == vm.today })
+    val total = vm.waterToday + foodMl
     val glass = vm.profile.waterGlassMl.coerceAtLeast(50)
     val goal = vm.profile.waterGoalMl.coerceAtLeast(1)
     Card(onClick = onOpen, padding = 14.dp) {
@@ -569,6 +573,7 @@ fun WaterCard(vm: AppViewModel, onOpen: () -> Unit) {
                     Text(WaterPrefs.litres(total), fontSize = 20.sp, fontWeight = FontWeight(800), letterSpacing = (-0.6).sp, color = p.ink, maxLines = 1)
                     Text(" / ${WaterPrefs.litres(goal)}", fontSize = 13.sp, color = p.muted, modifier = Modifier.padding(bottom = 2.dp), maxLines = 1)
                 }
+                if (foodMl > 0) Text("incl. $foodMl mL from food", fontSize = 11.sp, color = p.muted, maxLines = 1)
                 Spacer(Modifier.height(6.dp))
                 Box(Modifier.fillMaxWidth().height(5.dp).background(p.track, CircleShape)) {
                     val f = (total.toFloat() / goal).coerceIn(0f, 1f)

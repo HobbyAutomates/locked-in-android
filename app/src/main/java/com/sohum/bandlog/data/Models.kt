@@ -778,11 +778,16 @@ data class PlateItem(
         )
     }
 
-    fun toMealItem() = MealItem(
-        foodId = foodId, name = name, grams = grams, calories = calories, proteinG = proteinG, carbsG = carbsG, fatG = fatG,
-        source = source, confidence = when (confidence) { "high" -> 0.9; "medium" -> 0.6; else -> 0.3 }, micros = micros, cookedIn = cookedIn,
-        variants = variants, sourceInfo = sourceInfo, sourceUrls = sourceUrls, userVerified = userVerified, perUnitKcal = perUnitKcal, inputKind = "photo",
-    )
+    fun toMealItem(): MealItem {
+        // v2.18 A3: the photo's gram range becomes the item's stored ± kcal range (schema_v42).
+        val range = if (userVerified) null else com.sohum.bandlog.util.FoodHonesty.rangeFromGrams(this)
+        return MealItem(
+            foodId = foodId, name = name, grams = grams, calories = calories, proteinG = proteinG, carbsG = carbsG, fatG = fatG,
+            source = source, confidence = when (confidence) { "high" -> 0.9; "medium" -> 0.6; else -> 0.3 }, micros = micros, cookedIn = cookedIn,
+            variants = variants, sourceInfo = sourceInfo, sourceUrls = sourceUrls, userVerified = userVerified, perUnitKcal = perUnitKcal, inputKind = "photo",
+            kcalLow = range?.kcalLow?.toDouble(), kcalHigh = range?.kcalHigh?.toDouble(),
+        )
+    }
 
     /** Back from the item editor: the edited amount and numbers (confidence and range follow the grams). */
     fun withEdit(m: MealItem): PlateItem {
@@ -858,6 +863,11 @@ data class PlateEstimate(
     val portionHint: String? = null,
     /** v2.8: one optional clarifying question, shown as quick-reply chips. */
     val followUp: FollowUp? = null,
+    /** v2.18 A5: what the portions were sized against ("katori", "hand"…), null when nothing. */
+    val sizedUsing: String? = null,
+    /** v2.18 A1: what the person said with the photo and the changes it made. */
+    val voice: String? = null,
+    val voiceChanges: List<String> = emptyList(),
 ) {
     companion object {
         fun from(o: JSONObject): PlateEstimate {
@@ -872,6 +882,9 @@ data class PlateEstimate(
                 photoUrl = if (o.isNull("photo_url")) null else o.optString("photo_url").ifBlank { null },
                 portionHint = if (o.isNull("portion_hint")) null else o.optString("portion_hint").ifBlank { null },
                 followUp = FollowUp.from(o.optJSONObject("follow_up")),
+                sizedUsing = com.sohum.bandlog.util.FoodBits.cleanScaleRef(if (o.isNull("sized_using")) null else o.optString("sized_using")),
+                voice = if (o.isNull("voice")) null else o.optString("voice").ifBlank { null },
+                voiceChanges = o.optJSONArray("voice_changes")?.let { a -> (0 until a.length()).map { a.optString(it) }.filter { it.isNotBlank() } } ?: emptyList(),
             )
         }
     }

@@ -78,6 +78,8 @@ fun RecipesScreen(vm: AppViewModel, nvm: NutritionViewModel, onBack: () -> Unit)
             Entrance(0, key = "new") {
                 PillButton("New recipe", { nvm.page = NutritionPage.RecipeEdit(null) }, icon = com.sohum.bandlog.ui.components.PlusIcon)
             }
+            // v2.18 A2: Ghar ka khana, "Say a recipe" and recipes your squads shared.
+            Entrance(0, key = "food218") { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) { com.sohum.bandlog.ui.food.RecipeTopLinks(vm, nvm) } }
             if (!nvm.recipesLoaded) LinearProgressIndicator(Modifier.fillMaxWidth(), color = p.ink, trackColor = p.track)
             else if (nvm.recipes.isEmpty()) Entrance(1, key = "empty") {
                 Card {
@@ -251,6 +253,7 @@ fun RecipeEditor(vm: AppViewModel, nvm: NutritionViewModel, recipe: Recipe?, onD
                 }
             },
         )
+        if (recipe?.id != null) com.sohum.bandlog.ui.food.ShareRecipeButton(vm, recipe) // v2.18 A2
         if (recipe?.id != null) Box(Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable { confirmDelete = true }, contentAlignment = Alignment.Center) {
             Text("Delete recipe", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.red)
         }

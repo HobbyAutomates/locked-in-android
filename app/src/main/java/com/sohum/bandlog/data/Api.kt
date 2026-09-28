@@ -425,11 +425,26 @@ object Api {
             (msg.contains("42703") || msg.contains("PGRST204") || msg.contains("column", ignoreCase = true) || msg.contains("schema cache", ignoreCase = true))
     }
 
-    /** Inserts [items] into meal_items, with the v2.15 columns while they exist. */
+    /** v2.18 (schema_v42): whether meal_items has kcal_low / kcal_high (null = not tried; false after "no such column"). */
+    @Volatile private var itemRange: Boolean? = null
+    private fun missingRange(m: String?): Boolean = m != null && (m.contains("kcal_low") || m.contains("kcal_high"))
+
+    /** Inserts [items] into meal_items, with the v2.15 columns while they exist (and the v2.18 kcal range). */
     private suspend fun insertItems(mealId: String, uid: String, items: List<MealItem>, label: String) {
-        suspend fun send(extras: Boolean) {
-            val arr = JSONArray().apply { items.forEach { put(it.toJson(mealId, uid, extras)) } }
+        var range = itemRange != false && items.any { it.kcalLow != null && it.kcalHigh != null }
+        suspend fun sendOnce(extras: Boolean, withRange: Boolean) {
+            val arr = JSONArray().apply {
+                items.forEach { m ->
+                    put(m.toJson(mealId, uid, extras).apply { if (withRange && m.kcalLow != null && m.kcalHigh != null && m.kcalHigh >= m.kcalLow) { put("kcal_low", Math.round(m.kcalLow)); put("kcal_high", Math.round(m.kcalHigh)) } })
+                }
+            }
             run(rest("meal_items").post(json(arr.toString())).build(), label)
+        }
+        suspend fun send(extras: Boolean) {
+            try { sendOnce(extras, range) } catch (e: ApiException) {
+                if (!range || !missingRange(e.message)) throw e
+                itemRange = false; range = false; sendOnce(extras, false)
+            }
         }
         if (itemExtras == false) { send(false); return }
         try { send(true); itemExtras = true } catch (e: ApiException) {
@@ -440,16 +455,21 @@ object Api {
 
     /** v2.8: selects meal_type, and again without it while schema_v30 isn't applied. v2.15: same for the item extras. */
     suspend fun meals(from: String, to: String): List<Meal> = withContext(Dispatchers.IO) {
-        fun sel(withType: Boolean, extras: Boolean) = "id,date,raw_text,created_at,photo_path${if (withType) ",meal_type" else ""},meal_items($MEAL_ITEM_COLS${if (extras) MEAL_ITEM_EXTRAS else ""})"
+        fun sel(withType: Boolean, extras: Boolean) = "id,date,raw_text,created_at,photo_path${if (withType) ",meal_type" else ""},meal_items($MEAL_ITEM_COLS${if (extras) MEAL_ITEM_EXTRAS else ""}${if (itemRange != false) ",kcal_low,kcal_high" else ""})"
         suspend fun load(extras: Boolean): String = try {
             run(rest("meals?select=${sel(true, extras)}&date=gte.$from&date=lte.$to&order=created_at.desc").get().build(), "Load meals")
         } catch (e: ApiException) {
             if (!com.sohum.bandlog.util.MealTypes.missingColumn(e.message)) throw e
             run(rest("meals?select=${sel(false, extras)}&date=gte.$from&date=lte.$to&order=created_at.desc").get().build(), "Load meals")
         }
-        val body = if (itemExtras == false) load(false) else try { load(true).also { itemExtras = true } } catch (e: ApiException) {
+        suspend fun all(): String = if (itemExtras == false) load(false) else try { load(true).also { itemExtras = true } } catch (e: ApiException) {
             if (!missingExtras(e.message)) throw e
             itemExtras = false; load(false)
+        }
+        // v2.18: schema_v42 not applied yet → the same select without kcal_low / kcal_high.
+        val body = try { all() } catch (e: ApiException) {
+            if (itemRange == false || !missingRange(e.message)) throw e
+            itemRange = false; all()
         }
         val arr = JSONArray(body)
         (0 until arr.length()).map { Meal.from(arr.getJSONObject(it)) }
@@ -619,8 +639,10 @@ object Api {
     }
 
     /** A plate photo (JPEG, ≤ 1600 px) → per-item grams, macros and micros. */
-    suspend fun photoMeal(jpegBase64: String, note: String): PlateEstimate = withContext(Dispatchers.IO) {
-        PlateEstimate.from(api("photo-meal", JSONObject().put("image", jpegBase64).put("media_type", "image/jpeg").put("note", note), "Photo", timeoutSec = 120))
+    suspend fun photoMeal(jpegBase64: String, note: String, voice: String = ""): PlateEstimate = withContext(Dispatchers.IO) {
+        // v2.18 A1: what the person said with the photo ("2 roti, less oil") is merged on the server.
+        val payload = JSONObject().put("image", jpegBase64).put("media_type", "image/jpeg").put("note", note).apply { if (voice.isNotBlank()) put("voice", voice.take(400)) }
+        PlateEstimate.from(api("photo-meal", payload, "Photo", timeoutSec = 120))
     }
 
     // ---- scan history ----

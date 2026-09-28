@@ -1121,7 +1121,7 @@ private fun PlateRow(
         }
         Column(Modifier.padding(start = 48.dp).clickable(onClickLabel = "Edit ${item.name}", onClick = onQuantity), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.Center) {
-                Text("${item.calories.roundToInt()} kcal", fontSize = 12.sp, color = p.muted, maxLines = 1)
+                Text("${item.calories.roundToInt()} kcal" + com.sohum.bandlog.util.FoodHonesty.plusMinusLabel(item).let { if (it.isEmpty()) "" else " $it" }, fontSize = 12.sp, color = p.muted, maxLines = 1)
                 if (item.userVerified) com.sohum.bandlog.ui.components.YourNumbersBadge()
                 MacroDot("${fmt(item.proteinG)}g", p.red); MacroDot("${fmt(item.carbsG)}g", p.orange); MacroDot("${fmt(item.fatG)}g", p.blue)
                 AnimatedVisibility(showDelta, enter = scaleIn() + fadeIn(), exit = fadeOut() + scaleOut()) {

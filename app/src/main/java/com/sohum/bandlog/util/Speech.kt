@@ -84,6 +84,15 @@ class DictationState internal constructor(private val ctx: Context, private val 
         }
     }
 
+    /**
+     * v2.18 hold-to-talk: stop listening but keep the recogniser alive, so the words said so far still
+     * arrive in onResults (stop() destroys it and would drop them). listening turns false on the result.
+     */
+    fun finish() {
+        if (recognizer == null) { listening = false; return }
+        runCatching { recognizer?.stopListening() }.onFailure { listening = false }
+    }
+
     fun stop() {
         runCatching { recognizer?.stopListening(); recognizer?.destroy() }
         recognizer = null

@@ -27,6 +27,8 @@ class FoodHonestyTest {
     @Test fun ranges() {
         assertEquals(FoodHonesty.Range(176, 224, 24, 0.12), FoodHonesty.kcalRange(meal("x", 100.0, 200.0, source = "table")))
         assertEquals(FoodHonesty.Range(150, 260, 55, 0.275), FoodHonesty.kcalRange(meal("x", 100.0, 200.0, kcalLow = 150.0, kcalHigh = 260.0)))
+        // an edited amount: the stale stored range is ignored and the source rule applies (table ±12%)
+        assertEquals(48, FoodHonesty.kcalRange(meal("x", 100.0, 400.0, kcalLow = 150.0, kcalHigh = 260.0, source = "table")).plusMinus)
         assertEquals("", FoodHonesty.plusMinusLabel(meal("x", 10.0, 20.0))) // ±2 isn't worth showing
         assertEquals(60, FoodHonesty.totalPlusMinus(listOf(meal("a", 100.0, 300.0), meal("b", 100.0, 400.0)))) // sqrt(36² + 48²)
         assertEquals(FoodHonesty.KcalLowHigh(160, 260), FoodHonesty.rangeFromGrams(200.0, 100.0, 80.0, 130.0))

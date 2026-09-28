@@ -61,6 +61,9 @@ fun NutritionShortcuts(vm: AppViewModel, nvm: NutritionViewModel) {
         if (fastingOk) Shortcut(NutritionIcons.Timer, "Fasting") { nvm.page = NutritionPage.Fasting }
         Shortcut(NutritionIcons.Pill, "Micros") { nvm.page = NutritionPage.Micros }
         Shortcut(NutritionIcons.ChefHat, "Recipes") { nvm.page = NutritionPage.Recipes }
+        // v2.18 food: delivery orders and the weekly grocery list.
+        Shortcut(NutritionIcons.Menu, "Eating out") { com.sohum.bandlog.ui.food.FoodNav.page = com.sohum.bandlog.ui.food.FoodPage.Order }
+        Shortcut(NutritionIcons.Leaf, "Groceries") { com.sohum.bandlog.ui.food.FoodNav.page = com.sohum.bandlog.ui.food.FoodPage.Pantry }
     }
 }
 
