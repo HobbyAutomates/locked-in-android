@@ -134,6 +134,9 @@ data class MealItem(
     val inputKind: String? = null,
     /** v2.15: parse-meal's `serving_unit` ("1 roti" = 40 g) for a counted row — the editor's stepper unit (never saved). */
     val servingUnit: Serving? = null,
+    /** v2.18 (schema_v42): a stored kcal range (photo gram range, menu / order range) — null when there is none. */
+    val kcalLow: Double? = null,
+    val kcalHigh: Double? = null,
 ) {
     /** [extras] = the v2.15 columns (user_verified, per_unit_kcal, source_urls); off while schema_v38 isn't applied. */
     fun toJson(mealId: String, userId: String, extras: Boolean = false): JSONObject = JSONObject()
@@ -193,6 +196,8 @@ data class MealItem(
                 val g = su.optDouble("grams", 0.0); val l = su.optString("label").trim()
                 if (l.isNotEmpty() && !g.isNaN() && g > 0) Serving(l, g) else null
             },
+            kcalLow = if (!o.has("kcal_low") || o.isNull("kcal_low")) null else o.optDouble("kcal_low").takeIf { !it.isNaN() },
+            kcalHigh = if (!o.has("kcal_high") || o.isNull("kcal_high")) null else o.optDouble("kcal_high").takeIf { !it.isNaN() },
         )
 
         /** v2.15 `source_urls` (a list of strings or of {url}) — web lookups' sources. */
@@ -761,6 +766,8 @@ data class PlateItem(
     /** v2.15: the user typed these numbers. */
     val userVerified: Boolean = false,
     val perUnitKcal: Double? = null,
+    /** v2.18: added from what the person said with the photo (util/VoicePlate.kt), not seen in it. */
+    val fromVoice: Boolean = false,
 ) {
     fun withGrams(g: Double): PlateItem {
         if (grams <= 0.0) return copy(grams = g)
@@ -815,6 +822,7 @@ data class PlateItem(
             variants = FoodVariant.list(o.optJSONArray("variants")),
             sourceInfo = SourceInfo.from(o.optJSONObject("source_info")).withUrls(MealItem.urls(o)),
             sourceUrls = MealItem.urls(o),
+            fromVoice = o.optBoolean("from_voice", false),
         )
     }
 }
