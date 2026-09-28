@@ -238,7 +238,10 @@ fun ScanTab(vm: AppViewModel) {
         ) { item ->
             if (item != null) {
                 BackHandler { open = null }
-                ScanDetailPage(item, onLogged = { vm.refresh() }, onLogServing = { open = null; showHistory = false; vm.openAddFood(listOf(it)) }) { open = null }
+                ScanDetailPage(
+                    item, onLogged = {}, onLogServing = { open = null; showHistory = false; vm.openAddFood(listOf(it)) },
+                    onLogToSlot = { m, slot -> vm.saveMeal(Dates.today(), "${item.displayName} (scan)", listOf(m), mealType = slot, method = if (item.kind == "barcode") "barcode" else "label") },
+                ) { open = null }
             }
         }
     }
@@ -299,6 +302,9 @@ private fun ScanForm(
     // The plate as edited in the review, for the floating totals over the photo.
     var plateItems by remember { mutableStateOf<List<PlateItem>>(emptyList()) }
     LaunchedEffect(plate) { plateItems = plate?.items ?: emptyList() }
+    // v2.17: the slot a photo scan logs into (re-guessed from the time for each new plate).
+    var plateSlot by remember { mutableStateOf(MealTypes.default()) }
+    LaunchedEffect(plate) { if (plate != null) plateSlot = MealTypes.default() }
 
     // v2.15 beta log: a result that goes away without being logged is a "scan_dismiss".
     var accepted by remember { mutableStateOf(false) }
@@ -511,7 +517,12 @@ private fun ScanForm(
                     Spacer(Modifier.height(10.dp))
                     PillButton("Scan again", { openCamera() }, height = 48.dp)
                 }
-                report?.let { ReportView(it, lens, onLogged = { accepted = true; vm.refresh() }, onLogServing = { m -> accepted = true; onLogServing(m) }) }
+                report?.let { rep ->
+                    ReportView(
+                        rep, lens, onLogged = { accepted = true }, onLogServing = { m -> accepted = true; onLogServing(m) },
+                        onLogToSlot = { item, slot -> vm.saveMeal(Dates.today(), "${rep.product.ifBlank { "Scanned product" }} (scan)", listOf(item), mealType = slot, method = if (rep.kind == "barcode") "barcode" else "label") },
+                    )
+                }
                 if (menuUnavailable) com.sohum.bandlog.ui.nutrition.ComingSoonCard(
                     "Restaurant menu scan", "Snap a menu and see each dish's calories and protein, with the best pick for what you have left today.",
                 )
@@ -523,14 +534,16 @@ private fun ScanForm(
                 plate?.let { est ->
                     PhotoReview(
                         est, photo, readOnly = false, showPhoto = false,
-                        saveLabel = "Log as " + MealTypes.label(MealTypes.default()).lowercase(),
+                        // v2.17: log into a chosen slot (defaults to the time of day, as on Home).
+                        saveLabel = "Log to " + MealTypes.label(plateSlot),
+                        beforeSave = { com.sohum.bandlog.ui.components.MealSlotPicker(plateSlot, { plateSlot = it }) },
                         onItemsChanged = { plateItems = it },
                         onPickAnother = { list -> accepted = true; com.sohum.bandlog.data.Analytics.hintMealMethod("photo"); vm.openAddFood(list.map { it.toMealItem() }) },
                     ) { items, path ->
                         scope.launch {
                             busy = true
                             val photoPath = path ?: photo?.let { b -> runCatching { Api.uploadMealPhoto(withContext(Dispatchers.IO) { toJpegBytes(b, 85) }) }.getOrNull() }
-                            val ok = vm.saveMeal(Dates.today(), est.plateNote.ifBlank { items.joinToString(", ") { it.name } }, items.map { it.toMealItem() }, photoPath, method = "photo")
+                            val ok = vm.saveMeal(Dates.today(), est.plateNote.ifBlank { items.joinToString(", ") { it.name } }, items.map { it.toMealItem() }, photoPath, mealType = plateSlot, method = "photo")
                             busy = false
                             if (ok) { accepted = true; plate = null; photo = null; kind = null } else error = vm.error
                         }
@@ -787,7 +800,11 @@ private fun scoreWords(score: Int) = when { score >= 7 -> "Good pick"; score >= 
  * fold everything else into one "Details" expander.
  */
 @Composable
-fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Unit = {}, onLogServing: ((com.sohum.bandlog.data.MealItem) -> Unit)? = null) {
+fun ReportView(
+    r: LabelReport, initialLens: String = r.lens, onLogged: () -> Unit = {}, onLogServing: ((com.sohum.bandlog.data.MealItem) -> Unit)? = null,
+    /** v2.17 "Log it": saves the item into the chosen meal slot (vm.saveMeal); false on failure. */
+    onLogToSlot: (suspend (com.sohum.bandlog.data.MealItem, String) -> Boolean)? = null,
+) {
     val p = palette
     if (!r.readable) {
         Card(Modifier.scanEnter(0)) { Text("Couldn't read that as a food label", fontWeight = FontWeight(700), color = p.ink); Text(r.verdictReason, fontSize = 13.sp, color = p.muted) }
@@ -806,6 +823,8 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Uni
     var logFood by remember(r) { mutableStateOf<QuantityFood?>(null) }
     var logged by remember(r) { mutableStateOf<String?>(null) }
     var logError by remember(r) { mutableStateOf<String?>(null) }
+    // v2.17: the meal slot "Log it" saves into, guessed from the time as on Home.
+    var slot by remember(r) { mutableStateOf(MealTypes.default()) }
     val source = r.sourceInfo ?: Sources.forReport(r.nutritionSource, r.barcode)
     val checked = r.nutritionSource == "openfoodfacts" || r.nutritionSource == "label"
     val sourceLine = (if (r.nutritionSource == "openfoodfacts") "Found on ${source.label}" else source.label) + if (checked) " · checked" else ""
@@ -852,8 +871,16 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Uni
         }
         if (food != null) {
             Spacer(Modifier.height(12.dp))
-            // v2.4: opens Add food with one serving already on the plate (the amount stays editable there).
-            PillButton("Log 1 serving" + (r.servingG?.takeIf { it > 0 }?.let { " · ${it.roundToInt()} g" } ?: ""), { logOne() }, height = 48.dp)
+            // v2.17: "Log it" opens the amount sheet with a meal-slot picker and logs straight into that slot.
+            PillButton("Log it" + (r.servingG?.takeIf { it > 0 }?.let { " · 1 serving ${it.roundToInt()} g" } ?: ""), {
+                com.sohum.bandlog.data.Analytics.hintMealMethod(if (r.kind == "barcode") "barcode" else "label")
+                logFood = food
+            }, height = 48.dp)
+            // v2.4: or open Add food with one serving already on the plate (to combine it with other foods).
+            if (onLogServing != null) Text(
+                "Add to a meal with other foods ›", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable(onClickLabel = "Open in Add food") { logOne() }.padding(top = 12.dp, start = 4.dp),
+            )
             logged?.let { Row(Modifier.padding(top = 8.dp, start = 4.dp), verticalAlignment = Alignment.CenterVertically) { Icon(CheckIcon, null, tint = p.green, modifier = Modifier.size(14.dp)); Text("  $it — on Home", fontSize = 12.sp, fontWeight = FontWeight(600), color = p.green) } }
             logError?.let { Text(it, fontSize = 12.sp, color = p.red, modifier = Modifier.padding(top = 8.dp, start = 4.dp)) }
         }
@@ -1049,7 +1076,9 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Uni
 
     logFood?.let { f ->
         QuantitySheet(
-            food = f, title = "Log from this scan", cta = "Log",
+            food = f, title = "Log it", cta = "Log to " + MealTypes.label(slot),
+            initial = if (f.servingGrams != null) com.sohum.bandlog.util.Quantity(com.sohum.bandlog.util.QUnit.SERVING, 1.0) else com.sohum.bandlog.util.Quantity(com.sohum.bandlog.util.QUnit.G, 100.0),
+            header = { com.sohum.bandlog.ui.components.MealSlotPicker(slot, { slot = it }) },
             onDismiss = { logFood = null },
             onCorrected = { before, after, source, note ->
                 com.sohum.bandlog.data.Corrections.record(com.sohum.bandlog.data.Corrections.Ctx(null, if (r.kind == "barcode") "barcode" else "label", scanId = r.id, rawInput = r.product), before, after, source, note)
@@ -1057,11 +1086,20 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Uni
             onDone = { item, _ ->
                 logFood = null
                 com.sohum.bandlog.data.LogEvents.record("scan_accept", null, item.name, org.json.JSONObject().put("kind", r.kind).put("scan_id", r.id ?: org.json.JSONObject.NULL).put("item", com.sohum.bandlog.data.LogEvents.numbers(item)))
+                val into = slot
+                val row = item.copy(sourceInfo = r.sourceInfo ?: Sources.forReport(r.nutritionSource, r.barcode), inputKind = if (r.kind == "barcode") "barcode" else "label")
+                val raw = "${r.product.ifBlank { "Scanned product" }} (scan)"
+                val done = "Logged ${item.quantityLabel} · ${item.calories.roundToInt()} kcal to ${MealTypes.label(into)}"
                 scope.launch {
-                    runCatching { Api.saveMeal(Dates.today(), "${r.product.ifBlank { "Scanned product" }} (scan)", listOf(item)) }
-                        .onSuccess { com.sohum.bandlog.data.Analytics.track("meal_logged", "method" to (if (r.kind == "barcode") "barcode" else "label"), "items" to 1, "from" to "scan") }
-                        .onSuccess { logged = "Logged ${item.quantityLabel} · ${item.calories.roundToInt()} kcal"; logError = null; onLogged() }
-                        .onFailure { logError = it.message }
+                    val save = onLogToSlot
+                    if (save != null) {
+                        if (save(row, into)) { logged = done; logError = null; onLogged() } else logError = "Couldn't log it. Try again."
+                    } else {
+                        runCatching { Api.saveMeal(Dates.today(), raw, listOf(row), null, into) }
+                            .onSuccess { com.sohum.bandlog.data.Analytics.track("meal_logged", "method" to (if (r.kind == "barcode") "barcode" else "label"), "items" to 1, "from" to "scan") }
+                            .onSuccess { logged = done; logError = null; onLogged() }
+                            .onFailure { logError = it.message }
+                    }
                 }
             },
         )
@@ -1338,6 +1376,8 @@ fun PhotoReview(
     showPhoto: Boolean = true,
     saveLabel: String = "Save as meal",
     onItemsChanged: ((List<PlateItem>) -> Unit)? = null,
+    /** v2.17: shown just above the save button (the meal-slot picker). */
+    beforeSave: (@Composable () -> Unit)? = null,
     onSave: ((List<PlateItem>, String?) -> Unit)? = null,
 ) {
     val p = palette
@@ -1560,6 +1600,7 @@ fun PhotoReview(
         )
     }
     if (!readOnly && onSave != null) {
+        beforeSave?.let { Box(Modifier.scanEnter(4, est)) { it() } }
         Box(Modifier.scanEnter(4, est)) {
             PillButton(saveLabel, {
                 // v2.15 beta log: the scan was accepted (what we suggested vs what was kept).
@@ -1653,7 +1694,10 @@ private fun HistoryRow(it: ScanHistoryItem, onOpen: () -> Unit, onDelete: () -> 
 
 /** A stored scan, opened from History: the same views, read-only. */
 @Composable
-private fun ScanDetailPage(item: ScanHistoryItem, onLogged: () -> Unit, onLogServing: (com.sohum.bandlog.data.MealItem) -> Unit, onBack: () -> Unit) {
+private fun ScanDetailPage(
+    item: ScanHistoryItem, onLogged: () -> Unit, onLogServing: (com.sohum.bandlog.data.MealItem) -> Unit,
+    onLogToSlot: (suspend (com.sohum.bandlog.data.MealItem, String) -> Boolean)? = null, onBack: () -> Unit,
+) {
     val p = palette
     var json by remember(item.id) { mutableStateOf<org.json.JSONObject?>(null) }
     var error by remember(item.id) { mutableStateOf<String?>(null) }
@@ -1666,7 +1710,7 @@ private fun ScanDetailPage(item: ScanHistoryItem, onLogged: () -> Unit, onLogSer
             item.isPlate -> PhotoReview(PlateEstimate.from(o), null, readOnly = true)
             // v2.13: a saved restaurant-menu scan; + opens Add food with that dish on the plate.
             item.kind == "menu" -> MenuResultView(com.sohum.bandlog.data.MenuScan.from(o), null) { d -> onLogServing(d.toMealItem()); true }
-            else -> ReportView(LabelReport.from(o), onLogged = onLogged, onLogServing = onLogServing)
+            else -> ReportView(LabelReport.from(o), onLogged = onLogged, onLogServing = onLogServing, onLogToSlot = onLogToSlot)
         }
     }
 }

@@ -91,6 +91,8 @@ fun QuantitySheet(
      * food_corrections row with its context (meal, input kind, raw words).
      */
     onCorrected: ((before: MealItem, after: MealItem, source: String?, note: String?) -> Unit)? = null,
+    /** v2.17: extra content above the amount (the scan "Log it" meal-slot picker). */
+    header: (@Composable () -> Unit)? = null,
     onDone: (MealItem, Quantity) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -194,6 +196,7 @@ fun QuantitySheet(
         primaryEnabled = item.grams > 0,
         onPrimary = { finish() },
     ) {
+        header?.let { it(); Spacer(Modifier.height(12.dp)) }
         if (!byGrams && cu != null) {
             // The one big stepper: [−]  2 roti  [+]
             Row(Modifier.fillMaxWidth().background(p.card2, RoundedCornerShape(20.dp)).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
