@@ -51,8 +51,8 @@ object Covers {
 
     /** Which id to show: the profile's when the column exists and holds a valid id, else the device's, else the default. */
     fun resolve(profileId: String?, localId: String?): String = when {
-        isId(profileId) -> profileId!!
-        isId(localId) -> localId!!
+        isId(profileId) || Packs.isGoldCover(profileId) -> profileId!! // v2.18 D11 gold covers
+        isId(localId) || Packs.isGoldCover(localId) -> localId!!
         else -> DEFAULT
     }
 }

@@ -1,5 +1,6 @@
 package com.sohum.bandlog.ui.squad
 
+import com.sohum.bandlog.ui.social.StampOverlay
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -165,7 +166,8 @@ fun SquadPage(sq: SquadViewModel, squad: Squad, initialTab: Int? = null, protein
                 Row(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).clickable { sq.infoOpen = true }.padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
                     SquadIconView(squad.icon, squad.name, 40.dp, cover = squad.coverUrl)
                     Spacer(Modifier.width(12.dp))
-                    Text(squad.name, fontSize = 20.sp, fontWeight = FontWeight(800), color = p.ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Text(squad.name, fontSize = 20.sp, fontWeight = FontWeight(800), color = p.ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    Spacer(Modifier.width(6.dp)); com.sohum.bandlog.ui.social.VerifiedTick(squad.id); Spacer(Modifier.weight(1f)) // v2.18 D3
                     Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
                         Icon(PeopleIcon, "Members and invite", tint = p.ink, modifier = Modifier.size(22.dp))
                     }
@@ -188,6 +190,7 @@ fun SquadPage(sq: SquadViewModel, squad: Squad, initialTab: Int? = null, protein
             Box(Modifier.fillMaxWidth().height(1.dp).background(p.hair))
         }
         ErrorNote(sq.error, Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+        com.sohum.bandlog.ui.social.SquadSocialStrip(squad.id, squad.name, squad.ownerId == Session.userId) // v2.18 live, pledges, verification
         Box(Modifier.weight(1f)) {
             when (current) {
                 SquadTab.CHAT -> ChatTab(sq, squad)
@@ -309,6 +312,7 @@ private fun ChatBubble(
 ) {
     val p = palette
     var menu by remember(m.id) { mutableStateOf(false) }
+    var report by remember(m.id) { mutableStateOf(false) }
     Row(
         Modifier.fillMaxWidth().padding(top = if (first) 6.dp else 0.dp),
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start, verticalAlignment = Alignment.Bottom,
@@ -333,7 +337,8 @@ private fun ChatBubble(
                     val body = if (m.kind == "photo" && m.body == "shared a photo") "" else m.body
                     if (body.isNotBlank()) Text(body, fontSize = 15.sp, color = if (mine) p.btnInk else p.ink, lineHeight = 20.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp))
                 }
-                if (menu) ReactionPopup(state.mine, alignEnd = mine, onPick = onReact, onDelete = onDelete, onDismiss = { menu = false })
+                if (menu) ReactionPopup(state.mine, alignEnd = mine, onPick = onReact, onDelete = onDelete, onDismiss = { menu = false }, onReport = if (!mine) ({ report = true }) else null)
+                if (report) com.sohum.bandlog.ui.social.ReportBlockSheet(m) { report = false } // v2.18 E5
             }
             ReactionChipsRow(state, alignEnd = mine, onOpen = onOpenReactors, modifier = Modifier.padding(top = 4.dp))
             if (last || receipt != null) {
@@ -363,6 +368,7 @@ private fun FeedTab(sq: SquadViewModel, squad: Squad) {
     val scope = rememberCoroutineScope()
     LaunchedEffect(sq.openId) { sq.refreshFeed() }
     val items = sq.visiblePosts.filter { it.kind in FEED_KINDS }
+    com.sohum.bandlog.ui.social.LoadStamps(items) // v2.18 D6
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) scope.launch {
             val bmp = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { com.sohum.bandlog.ui.scan.decodeScaled(ctx, uri, 1600) }.getOrNull() }
@@ -410,6 +416,7 @@ private fun FeedCard(
 ) {
     val p = palette
     var menu by remember(post.id) { mutableStateOf(false) }
+    var report by remember(post.id) { mutableStateOf(false) }
     var hearts by remember(post.id) { mutableIntStateOf(0) }
     val heartAlpha = remember(post.id) { androidx.compose.animation.core.Animatable(0f) }
     LaunchedEffect(hearts) {
@@ -484,12 +491,15 @@ private fun FeedCard(
             Spacer(Modifier.height(10.dp))
             Box(Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(16.dp)).background(p.card2)) {
                 RemoteImage(privatePath = path, bucket = "group-photos", size = 400.dp, radius = 0.dp, modifier = Modifier.fillMaxSize())
+                StampOverlay(post) // v2.18 D6: the big CLEAN / CHEAT stamp
             }
+            com.sohum.bandlog.ui.social.StampBar(post)
         }
         ReactionChipsRow(state, onOpen = onOpenReactors, modifier = Modifier.padding(top = 10.dp)) { AddReactionChip { menu = true } }
     }
     if (heartAlpha.value > 0f) Text("❤️", fontSize = 72.sp, modifier = Modifier.align(Alignment.Center).alpha(heartAlpha.value))
-    if (menu) ReactionPopup(state.mine, alignEnd = false, onPick = { e -> onReact(e, "bar") }, onDelete = onDelete, onDismiss = { menu = false })
+    if (menu) ReactionPopup(state.mine, alignEnd = false, onPick = { e -> onReact(e, "bar") }, onDelete = onDelete, onDismiss = { menu = false }, onReport = if (post.userId != Session.userId) ({ report = true }) else null)
+    if (report) com.sohum.bandlog.ui.social.ReportBlockSheet(post) { report = false } // v2.18 E5
     }
 }
 
