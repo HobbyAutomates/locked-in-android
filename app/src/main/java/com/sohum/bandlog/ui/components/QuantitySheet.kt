@@ -53,6 +53,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sohum.bandlog.data.MealItem
+import com.sohum.bandlog.data.Overrides
+import com.sohum.bandlog.util.PerUnit
+import androidx.compose.foundation.layout.widthIn
 import com.sohum.bandlog.ui.theme.palette
 import com.sohum.bandlog.ui.today.fmt
 import com.sohum.bandlog.util.Counting
@@ -82,6 +85,12 @@ fun QuantitySheet(
     restaurantDefault: Boolean = false,
     /** v2.5: a parsed row's `default_count` from the server — where the stepper starts when there's no [initial]. */
     startCount: Double? = null,
+    /**
+     * v2.15 §2: shows "Correct the numbers". Called with the app's numbers and the user's (plus the
+     * optional source and note) just before [onDone] gets the corrected row; the caller writes the
+     * food_corrections row with its context (meal, input kind, raw words).
+     */
+    onCorrected: ((before: MealItem, after: MealItem, source: String?, note: String?) -> Unit)? = null,
     onDone: (MealItem, Quantity) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -104,22 +113,86 @@ fun QuantitySheet(
     var more by remember(food) { mutableStateOf(restaurantDefault && allowRestaurant) }
     val oily = com.sohum.bandlog.util.Restaurant.oily(food.name, food.category)
 
+    // v2.15 §1: the user's per-unit number. A remembered one ("95 kcal per roti") applies when a new
+    // food opens; editing "Calories per roti" / "per 100 g" re-prices the food per 100 g, and the
+    // macros follow the calories unless typed too.
+    val remembered = remember(food, cu) {
+        if (initial != null) null
+        else (cu?.let { Overrides.find(food.foodId, food.name, it.noun) }?.let { it to cu.grams })
+            ?: Overrides.find(food.foodId, food.name, PerUnit.PER_100G)?.let { it to 100.0 }
+    }
+    val base0 = remember(food, remembered) {
+        val b = PerUnit.per100Of(food)
+        remembered?.let { (o, g) ->
+            PerUnit.rescale(b, PerUnit.toPer100(o.kcalPerUnit, g), o.proteinPerUnit?.let { PerUnit.toPer100(it, g) }, o.carbsPerUnit?.let { PerUnit.toPer100(it, g) }, o.fatPerUnit?.let { PerUnit.toPer100(it, g) })
+        } ?: b
+    }
+    var kcal100 by remember(food) { mutableStateOf(base0.kcal) }
+    var prot100 by remember(food) { mutableStateOf(if (remembered?.first?.proteinPerUnit != null) base0.proteinG else null as Double?) }
+    var carb100 by remember(food) { mutableStateOf(if (remembered?.first?.carbsPerUnit != null) base0.carbsG else null as Double?) }
+    var fat100 by remember(food) { mutableStateOf(if (remembered?.first?.fatPerUnit != null) base0.fatG else null as Double?) }
+    var perUnitTouched by remember(food) { mutableStateOf(false) }
+    val per100 = PerUnit.rescale(PerUnit.per100Of(food), kcal100, prot100, carb100, fat100)
+    val priced = PerUnit.apply(food, per100)
+    val ownNumbers = perUnitTouched || remembered != null
+
     // Count mode prices through a one-piece serving ("1 roti" = 40 g) so the row stores unit=serving, servings=count.
-    val counted = remember(food, cu) { cu?.let { food.copy(servings = listOf(it.serving()), defaultServing = it.serving().label) } }
+    val counted = remember(priced, cu) { cu?.let { priced.copy(servings = listOf(it.serving()), defaultServing = it.serving().label) } }
     val q = if (!byGrams && counted != null) Quantity(QUnit.SERVING, count) else Quantity(QUnit.G, gramsText.toDoubleOrNull() ?: 0.0)
-    val base = (if (!byGrams && counted != null) counted else food).item(q)
+    val base = (if (!byGrams && counted != null) counted else priced).item(q)
     val item = if (restaurant) com.sohum.bandlog.util.Restaurant.apply(base, oily) else base
+    // What the app itself would have said for this amount (before any number of the user's).
+    val appItem = run {
+        val f = if (!byGrams && cu != null) food.copy(servings = listOf(cu.serving()), defaultServing = cu.serving().label) else food
+        f.item(q).let { if (restaurant) com.sohum.bandlog.util.Restaurant.apply(it, oily) else it }
+    }
+
+    // v2.15 §2 "Correct the numbers".
+    var fixOpen by remember(food) { mutableStateOf(false) }
+    var myKcal by remember(food) { mutableStateOf("") }
+    var myProt by remember(food) { mutableStateOf("") }
+    var myCarb by remember(food) { mutableStateOf("") }
+    var myFat by remember(food) { mutableStateOf("") }
+    var mySource by remember(food) { mutableStateOf("") }
+    var myNote by remember(food) { mutableStateOf("") }
+    val myK = myKcal.toDoubleOrNull()?.takeIf { it >= 0 }
+    // The counted unit rides on the row ("1 roti" = 40 g) so logs and corrections know the noun and count.
+    val unitTag: com.sohum.bandlog.data.Serving? = if (!byGrams && cu != null && cu.label == null) cu.serving() else null
+    val corrected: MealItem? = if (fixOpen && onCorrected != null && myK != null) {
+        PerUnit.applyCorrection(item, myK, myProt.toDoubleOrNull(), myCarb.toDoubleOrNull(), myFat.toDoubleOrNull()).copy(servingUnit = unitTag)
+    } else null
+    val shown = corrected ?: item
 
     fun switchToGrams() { gramsText = fmt((base.grams * 10).roundToInt() / 10.0); byGrams = true }
     fun switchToCount() { if (cu != null) { count = cu.snap((gramsText.toDoubleOrNull() ?: cu.grams) / cu.grams); byGrams = false; focus.clearFocus() } }
+
+    fun finish() {
+        val countMode = !byGrams && cu != null
+        if (corrected != null) {
+            onCorrected?.invoke(appItem.copy(servingUnit = unitTag), corrected, mySource.ifBlank { null }, myNote.ifBlank { null })
+            onDone(corrected, q)
+            return
+        }
+        if (!ownNumbers) { onDone(item.copy(servingUnit = unitTag ?: item.servingUnit), q); return }
+        val unitGrams = if (countMode) cu!!.grams else 100.0
+        val perUnitK = PerUnit.r1(PerUnit.fromPer100(per100.kcal, unitGrams))
+        if (perUnitTouched) Overrides.remember(
+            PerUnit.Override(
+                PerUnit.foodKey(food.foodId, food.name), if (countMode) cu!!.noun else PerUnit.PER_100G, perUnitK,
+                prot100?.let { PerUnit.r1(PerUnit.fromPer100(it, unitGrams)) }, carb100?.let { PerUnit.r1(PerUnit.fromPer100(it, unitGrams)) }, fat100?.let { PerUnit.r1(PerUnit.fromPer100(it, unitGrams)) },
+            )
+        )
+        // Same rounding as the web (scaleToKcal): whole kcal, macros to one decimal.
+        onDone(PerUnit.scaleToKcal(item, item.calories, item.proteinG, item.carbsG, item.fatG).copy(userVerified = true, perUnitKcal = if (countMode) Math.round(perUnitK).toDouble() else null, servingUnit = unitTag), q)
+    }
 
     BottomSheet(
         title = food.name + (food.nameHi?.let { "  $it" } ?: ""),
         subtitle = title + (cu?.let { if (it.label != null) " · ${it.label} = ${fmt(it.grams)} g" else " · 1 ${it.noun} = ${fmt(it.grams)} g" } ?: ""),
         onDismiss = onDismiss,
-        primary = "$cta · ${item.calories.roundToInt()} kcal",
+        primary = (if (corrected != null) "Save my numbers" else cta) + " · ${shown.calories.roundToInt()} kcal",
         primaryEnabled = item.grams > 0,
-        onPrimary = { onDone(item, q) },
+        onPrimary = { finish() },
     ) {
         if (!byGrams && cu != null) {
             // The one big stepper: [−]  2 roti  [+]
@@ -133,6 +206,11 @@ fun QuantitySheet(
                     )
                 }
                 StepButton("+", "One more") { count = cu.snap(count + cu.step) }
+            }
+            // v2.15 §1: quick picks 1 · 2 · 3.
+            Spacer(Modifier.height(6.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(1.0, 2.0, 3.0).forEach { n -> SmallChip(fmt(n), { count = n; focus.clearFocus() }, filled = count == n) }
             }
         } else {
             // Grams: one big field with "g" inside it.
@@ -156,15 +234,33 @@ fun QuantitySheet(
             }
         }
 
+        // v2.15 §1: "Calories per roti" (count) or "Calories per 100 g" (grams), editable.
+        val countMode = !byGrams && cu != null
+        val unitGrams = if (countMode) cu!!.grams else 100.0
+        val unitName = if (!countMode) "100 g" else if (cu!!.label != null) "serving" else cu.noun
+        Spacer(Modifier.height(10.dp))
+        PerUnitRow(
+            label = "Calories per $unitName", unitGrams = unitGrams,
+            kcal100 = per100.kcal, prot100 = per100.proteinG, carb100 = per100.carbsG, fat100 = per100.fatG,
+            onKcal = { kcal100 = it; perUnitTouched = true },
+            onProt = { prot100 = it; perUnitTouched = true }, onCarb = { carb100 = it; perUnitTouched = true }, onFat = { fat100 = it; perUnitTouched = true },
+            note = when {
+                perUnitTouched && Overrides.available == true -> "We'll use this for your next ${if (countMode) unitName else food.name.lowercase()}."
+                perUnitTouched -> null
+                remembered != null -> "Your number from last time."
+                else -> null
+            },
+        )
+
         // Live line: ≈ 80 g · 240 kcal, then the macros; wraps instead of colliding.
         Spacer(Modifier.height(10.dp))
         FlowRow(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
-                "≈ ${fmt((item.grams * 10).roundToInt() / 10.0)} g · ${item.calories.roundToInt()} kcal" + (if (restaurant) " · restaurant" else ""),
+                "≈ ${fmt((shown.grams * 10).roundToInt() / 10.0)} g · ${shown.calories.roundToInt()} kcal" + (if (restaurant) " · restaurant" else ""),
                 fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1,
             )
             Row(Modifier.heightIn(min = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                MacroDot("${fmt(item.proteinG)}g", p.red); MacroDot("${fmt(item.carbsG)}g", p.orange); MacroDot("${fmt(item.fatG)}g", p.blue)
+                MacroDot("${fmt(shown.proteinG)}g", p.red); MacroDot("${fmt(shown.carbsG)}g", p.orange); MacroDot("${fmt(shown.fatG)}g", p.blue)
             }
         }
 
@@ -194,6 +290,111 @@ fun QuantitySheet(
                 )
             }
         }
+
+        // v2.15 §2: "Correct the numbers" — the user's own calories (and optionally macros, a source, a note).
+        if (onCorrected != null) {
+            Spacer(Modifier.height(6.dp))
+            SheetLink(if (fixOpen) "Cancel correction" else "Correct the numbers") { fixOpen = !fixOpen }
+            if (fixOpen) {
+                Column(
+                    Modifier.fillMaxWidth().background(p.card2, RoundedCornerShape(16.dp)).padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        "Checked another source? Put its numbers for this amount (${fmt((item.grams * 10).roundToInt() / 10.0)} g). We had ${item.calories.roundToInt()} kcal.",
+                        fontSize = 12.sp, color = p.muted, lineHeight = 16.sp,
+                    )
+                    CorrectionField("My calories", myKcal, "kcal", decimal = true) { myKcal = it }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        CorrectionField("Protein", myProt, "g", decimal = true, modifier = Modifier.weight(1f), placeholder = fmt(PerUnit.r1(item.proteinG))) { myProt = it }
+                        CorrectionField("Carbs", myCarb, "g", decimal = true, modifier = Modifier.weight(1f), placeholder = fmt(PerUnit.r1(item.carbsG))) { myCarb = it }
+                        CorrectionField("Fat", myFat, "g", decimal = true, modifier = Modifier.weight(1f), placeholder = fmt(PerUnit.r1(item.fatG))) { myFat = it }
+                    }
+                    CorrectionField("Source (optional)", mySource, null, placeholder = "e.g. Pintola pack, HealthifyMe") { mySource = it.take(300) }
+                    CorrectionField("Note (optional)", myNote, null, placeholder = "Anything we should know") { myNote = it.take(500) }
+                    if (myK == null) Text("Enter your calories to save them.", fontSize = 11.sp, color = p.muted)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * v2.15 §1: "Calories per roti [ 95 ]" and, one tap away, protein / carbs / fat per roti. Values are
+ * shown per unit but kept per 100 g; untouched macros follow the calories.
+ */
+@Composable
+private fun PerUnitRow(
+    label: String, unitGrams: Double,
+    kcal100: Double, prot100: Double, carb100: Double, fat100: Double,
+    onKcal: (Double) -> Unit, onProt: (Double) -> Unit, onCarb: (Double) -> Unit, onFat: (Double) -> Unit,
+    note: String?,
+) {
+    val p = palette
+    val focus = LocalFocusManager.current
+    // Typed text while the field is being edited; null shows the live value (it follows the stepper's unit).
+    var kText by remember(unitGrams) { mutableStateOf<String?>(null) }
+    var macrosOpen by remember { mutableStateOf(false) }
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 52.dp).background(p.card2, RoundedCornerShape(16.dp)).padding(start = 14.dp, end = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        BasicTextField(
+            kText ?: fmt(PerUnit.fromPer100(kcal100, unitGrams).roundToInt().toDouble()),
+            { v -> val t = v.filter { c -> c.isDigit() || c == '.' }.take(6); kText = t; t.toDoubleOrNull()?.let { onKcal(PerUnit.toPer100(it, unitGrams)) } },
+            Modifier.widthIn(min = 48.dp, max = 90.dp).semantics { contentDescription = label }, singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { focus.clearFocus(); kText = null }),
+            textStyle = TextStyle(fontSize = 18.sp, fontWeight = FontWeight(800), color = p.ink, textAlign = TextAlign.End), cursorBrush = SolidColor(p.ink),
+        )
+        Text(" kcal", fontSize = 13.sp, fontWeight = FontWeight(600), color = p.muted, maxLines = 1)
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        if (note != null) Text(note, fontSize = 11.sp, color = p.muted, modifier = Modifier.weight(1f).padding(start = 4.dp))
+        else Spacer(Modifier.weight(1f))
+        SheetLink(if (macrosOpen) "Hide macros" else "Macros per ${label.removePrefix("Calories per ")}") { macrosOpen = !macrosOpen }
+    }
+    if (macrosOpen) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        listOf(Triple("Protein", prot100, onProt), Triple("Carbs", carb100, onCarb), Triple("Fat", fat100, onFat)).forEach { (name, v100, on) ->
+            var t by remember(unitGrams, name) { mutableStateOf<String?>(null) }
+            CorrectionField(name, t ?: fmt(PerUnit.r1(PerUnit.fromPer100(v100, unitGrams))), "g", decimal = true, modifier = Modifier.weight(1f)) { s ->
+                t = s; s.toDoubleOrNull()?.let { on(PerUnit.toPer100(it, unitGrams)) }
+            }
+        }
+    }
+}
+
+/** A small labelled number / text field on the card fill, for the sheet's own-numbers rows. */
+@Composable
+private fun CorrectionField(
+    label: String, value: String, suffix: String?, decimal: Boolean = false, modifier: Modifier = Modifier.fillMaxWidth(), placeholder: String? = null,
+    onChange: (String) -> Unit,
+) {
+    val p = palette
+    val focus = LocalFocusManager.current
+    Column(modifier.background(p.card, RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 6.dp)) {
+        Text(label, fontSize = 11.sp, fontWeight = FontWeight(700), color = p.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            BasicTextField(
+                value, { v -> onChange(if (decimal) v.filter { c -> c.isDigit() || c == '.' }.take(7) else v) }, Modifier.weight(1f).heightIn(min = 28.dp).semantics { contentDescription = label },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = if (decimal) KeyboardType.Decimal else KeyboardType.Text, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
+                textStyle = TextStyle(fontSize = 15.sp, fontWeight = FontWeight(700), color = p.ink), cursorBrush = SolidColor(p.ink),
+                decorationBox = { inner -> if (value.isEmpty() && placeholder != null) Text(placeholder, fontSize = 13.sp, color = p.muted, maxLines = 1); inner() },
+            )
+            if (suffix != null) Text(suffix, fontSize = 12.sp, color = p.muted, maxLines = 1)
+        }
+    }
+}
+
+/** v2.15 §2: the small ✓ "Your numbers" badge on an item the user corrected. */
+@Composable
+fun YourNumbersBadge(modifier: Modifier = Modifier) {
+    val p = palette
+    Box(modifier.background(p.greenBg, CircleShape).padding(horizontal = 7.dp, vertical = 1.dp).semantics { contentDescription = "Your numbers" }) {
+        Text("✓ Your numbers", fontSize = 10.sp, fontWeight = FontWeight(700), color = p.green, maxLines = 1)
     }
 }
 

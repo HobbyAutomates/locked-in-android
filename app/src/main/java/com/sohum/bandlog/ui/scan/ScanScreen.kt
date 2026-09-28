@@ -211,6 +211,8 @@ fun ScanTab(vm: AppViewModel) {
     var open by remember { mutableStateOf<ScanHistoryItem?>(null) }
     var showHistory by remember { mutableStateOf(false) }
     LaunchedEffect(historyTick) { history = runCatching { Api.scanHistory() }.getOrDefault(history) }
+    // v2.15: the user's remembered "calories per roti" for the scan's log sheet.
+    LaunchedEffect(Unit) { com.sohum.bandlog.data.Overrides.load() }
 
     Box(Modifier.fillMaxSize()) {
         ScanForm(vm, onScanned = { historyTick++ }, onOpenHistory = { showHistory = true }, onLogServing = { vm.openAddFood(listOf(it)) })
@@ -298,7 +300,19 @@ private fun ScanForm(
     var plateItems by remember { mutableStateOf<List<PlateItem>>(emptyList()) }
     LaunchedEffect(plate) { plateItems = plate?.items ?: emptyList() }
 
-    fun clearResults() { report = null; plate = null; notFound = false; error = null; menu = null; menuUnavailable = false }
+    // v2.15 beta log: a result that goes away without being logged is a "scan_dismiss".
+    var accepted by remember { mutableStateOf(false) }
+    fun clearResults() {
+        val r = report; val pl = plate
+        if (!accepted && (r != null || pl != null)) com.sohum.bandlog.data.LogEvents.record(
+            "scan_dismiss", null, r?.product?.ifBlank { null },
+            org.json.JSONObject().put("kind", if (pl != null) "plate" else r?.kind ?: kind ?: "scan").put("scan_id", (pl?.id ?: r?.id) ?: org.json.JSONObject.NULL)
+                .put("plate_note", pl?.plateNote?.take(500) ?: org.json.JSONObject.NULL)
+                .put("items", org.json.JSONArray().apply { pl?.items?.forEach { put(com.sohum.bandlog.data.LogEvents.numbers(it.toMealItem())) } }),
+        )
+        accepted = false
+        report = null; plate = null; notFound = false; error = null; menu = null; menuUnavailable = false
+    }
 
     suspend fun labelFrom(bmp: Bitmap?) {
         if (ocr.isBlank() && bmp != null) ocr = runCatching { Ocr.read(bmp) }.getOrDefault("")
@@ -318,6 +332,7 @@ private fun ScanForm(
         kind = k
         scope.launch {
             busy = true; clearResults()
+            if (note.isNotBlank()) com.sohum.bandlog.data.LogEvents.note(note.trim(), "scan_$k")
             try {
                 when (k) {
                     "barcode" -> {
@@ -454,12 +469,16 @@ private fun ScanForm(
             ) {
                 Box(Modifier.align(Alignment.CenterHorizontally).size(40.dp, 5.dp).background(p.muted.copy(alpha = 0.35f), CircleShape))
                 if (reading || busy) {
+                    // v2.15: plates now check each item on the web (never the food table) — slower, more accurate.
+                    var secs by remember { mutableIntStateOf(0) }
+                    LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(1000); secs++ } }
                     Column(Modifier.scanEnter(0)) {
                         LinearProgressIndicator(Modifier.fillMaxWidth().clip(CircleShape), color = p.green, trackColor = p.track)
                         Text(
                             when {
                                 reading -> "Working out what it is…"
-                                k == "plate" -> "Identifying each item, then checking the food table. 10–20 s."
+                                k == "plate" && secs < 8 -> "Identifying each item on the plate…"
+                                k == "plate" -> "Searching the web for each item… checking sources. Accurate beats fast: 20–40 s."
                                 k == "menu" -> "Reading the menu and sizing up each dish. 15–30 s."
                                 k == "barcode" -> "Looking it up, then writing your report. About 10 seconds."
                                 ocr.trim().length < OCR_MIN_CHARS -> "Your phone couldn't read enough, so the photo is going up too — 20–45 s."
@@ -492,7 +511,7 @@ private fun ScanForm(
                     Spacer(Modifier.height(10.dp))
                     PillButton("Scan again", { openCamera() }, height = 48.dp)
                 }
-                report?.let { ReportView(it, lens, onLogged = { vm.refresh() }, onLogServing = onLogServing) }
+                report?.let { ReportView(it, lens, onLogged = { accepted = true; vm.refresh() }, onLogServing = { m -> accepted = true; onLogServing(m) }) }
                 if (menuUnavailable) com.sohum.bandlog.ui.nutrition.ComingSoonCard(
                     "Restaurant menu scan", "Snap a menu and see each dish's calories and protein, with the best pick for what you have left today.",
                 )
@@ -506,14 +525,14 @@ private fun ScanForm(
                         est, photo, readOnly = false, showPhoto = false,
                         saveLabel = "Log as " + MealTypes.label(MealTypes.default()).lowercase(),
                         onItemsChanged = { plateItems = it },
-                        onPickAnother = { list -> com.sohum.bandlog.data.Analytics.hintMealMethod("photo"); vm.openAddFood(list.map { it.toMealItem() }) },
+                        onPickAnother = { list -> accepted = true; com.sohum.bandlog.data.Analytics.hintMealMethod("photo"); vm.openAddFood(list.map { it.toMealItem() }) },
                     ) { items, path ->
                         scope.launch {
                             busy = true
                             val photoPath = path ?: photo?.let { b -> runCatching { Api.uploadMealPhoto(withContext(Dispatchers.IO) { toJpegBytes(b, 85) }) }.getOrNull() }
                             val ok = vm.saveMeal(Dates.today(), est.plateNote.ifBlank { items.joinToString(", ") { it.name } }, items.map { it.toMealItem() }, photoPath, method = "photo")
                             busy = false
-                            if (ok) { plate = null; photo = null; kind = null } else error = vm.error
+                            if (ok) { accepted = true; plate = null; photo = null; kind = null } else error = vm.error
                         }
                     }
                 }
@@ -795,10 +814,11 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Uni
         val go = onLogServing
         val f = food ?: return
         com.sohum.bandlog.data.Analytics.hintMealMethod(if (r.kind == "barcode") "barcode" else "label")
+        if (go != null) com.sohum.bandlog.data.LogEvents.record("scan_accept", null, r.product.ifBlank { null }, org.json.JSONObject().put("kind", r.kind).put("scan_id", r.id ?: org.json.JSONObject.NULL))
         if (go == null) logFood = f
         // v2.9: the plate's ⓘ shows where these numbers came from (the label, or Open Food Facts).
         else go(f.item(if (f.servingGrams != null) com.sohum.bandlog.util.Quantity(com.sohum.bandlog.util.QUnit.SERVING, 1.0) else com.sohum.bandlog.util.Quantity(com.sohum.bandlog.util.QUnit.G, 100.0))
-            .copy(sourceInfo = r.sourceInfo ?: Sources.forReport(r.nutritionSource, r.barcode)))
+            .copy(sourceInfo = r.sourceInfo ?: Sources.forReport(r.nutritionSource, r.barcode), inputKind = if (r.kind == "barcode") "barcode" else "label"))
     }
 
     // ---- hero: the product card (barcode) or the score dial (label) ----
@@ -1031,8 +1051,12 @@ fun ReportView(r: LabelReport, initialLens: String = r.lens, onLogged: () -> Uni
         QuantitySheet(
             food = f, title = "Log from this scan", cta = "Log",
             onDismiss = { logFood = null },
+            onCorrected = { before, after, source, note ->
+                com.sohum.bandlog.data.Corrections.record(com.sohum.bandlog.data.Corrections.Ctx(null, if (r.kind == "barcode") "barcode" else "label", scanId = r.id, rawInput = r.product), before, after, source, note)
+            },
             onDone = { item, _ ->
                 logFood = null
+                com.sohum.bandlog.data.LogEvents.record("scan_accept", null, item.name, org.json.JSONObject().put("kind", r.kind).put("scan_id", r.id ?: org.json.JSONObject.NULL).put("item", com.sohum.bandlog.data.LogEvents.numbers(item)))
                 scope.launch {
                     runCatching { Api.saveMeal(Dates.today(), "${r.product.ifBlank { "Scanned product" }} (scan)", listOf(item)) }
                         .onSuccess { com.sohum.bandlog.data.Analytics.track("meal_logged", "method" to (if (r.kind == "barcode") "barcode" else "label"), "items" to 1, "from" to "scan") }
@@ -1328,6 +1352,9 @@ fun PhotoReview(
     var originals by remember(est) { mutableStateOf(est.items) }
     var open by remember(est) { mutableStateOf<Int?>(null) }
     var pickedEffect by remember(est) { mutableStateOf<String?>(null) }
+    // v2.15 §1: the row whose editor (count stepper, calories per unit, "Correct the numbers") is open.
+    var editIdx by remember(est) { mutableStateOf<Int?>(null) }
+    var editTick by remember(est) { mutableIntStateOf(0) }
     LaunchedEffect(items) { onItemsChanged?.invoke(items) }
     if (est.items.isEmpty()) {
         Card(Modifier.scanEnter(0)) { Text("Couldn't find food in that photo", fontWeight = FontWeight(700), color = p.ink); Text(est.plateNote, fontSize = 13.sp, color = p.muted) }
@@ -1416,8 +1443,9 @@ fun PhotoReview(
                     .padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.clickable(enabled = !readOnly, onClickLabel = "Edit ${it.name}") { editIdx = idx }, verticalAlignment = Alignment.CenterVertically) {
                     Text(it.name + if (it.source == "estimated") " ~" else "", fontSize = 14.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    if (it.userVerified) { Spacer(Modifier.width(6.dp)); com.sohum.bandlog.ui.components.YourNumbersBadge() }
                     Spacer(Modifier.width(8.dp))
                     Row(Modifier.semantics(mergeDescendants = true) { contentDescription = "Confidence $cl" }, verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(7.dp).background(cc, CircleShape))
@@ -1445,7 +1473,7 @@ fun PhotoReview(
                         }
                     }
                     if (!readOnly) {
-                        var g by remember(idx, est) { mutableStateOf(fmt(round1(it.grams))) }
+                        var g by remember(idx, est, editTick) { mutableStateOf(fmt(round1(it.grams))) }
                         NumberField(g, { v ->
                             g = v.filter { c -> c.isDigit() || c == '.' }
                             // Always scale from the ORIGINAL estimate, never the already-scaled item — and
@@ -1454,6 +1482,8 @@ fun PhotoReview(
                             if (d != null && d > 0) items = items.toMutableList().also { l -> l[idx] = originals[idx].withGrams(d) }
                         }, "g")
                         IconButton(onClick = {
+                            // v2.15 beta log: an AI item removed before saving — usually it was wrong.
+                            com.sohum.bandlog.data.LogEvents.removed(null, it.toMealItem(), aiSuggested = true)
                             items = items.filterIndexed { i, _ -> i != idx }
                             originals = originals.filterIndexed { i, _ -> i != idx }
                             confirmed = confirmed.filter { i -> i != idx }.map { i -> if (i > idx) i - 1 else i }.toSet()
@@ -1502,8 +1532,46 @@ fun PhotoReview(
             },
         )
     }
+    editIdx?.let { idx ->
+        val row = items.getOrNull(idx)
+        if (row == null || readOnly) { editIdx = null; return@let }
+        val m = row.toMealItem()
+        val piece = com.sohum.bandlog.util.Counting.pieceServing(row.name, row.grams)
+        QuantitySheet(
+            food = QuantityFood.from(m, listOfNotNull(piece)), initial = com.sohum.bandlog.util.Quantity(com.sohum.bandlog.util.QUnit.G, row.grams),
+            title = "Change the amount", cta = "Update",
+            onCorrected = { before, after, source, note ->
+                com.sohum.bandlog.data.Corrections.record(
+                    com.sohum.bandlog.data.Corrections.Ctx(null, "photo", scanId = est.id, rawInput = est.plateNote.ifBlank { null }),
+                    before.copy(name = row.name), after.copy(name = row.name), source, note,
+                )
+                if (!note.isNullOrBlank()) com.sohum.bandlog.data.LogEvents.note(note, "correction")
+            },
+            onDismiss = { editIdx = null },
+            onDone = { item, _ ->
+                editIdx = null
+                val edited = row.withEdit(item)
+                items = items.toMutableList().also { l -> if (idx in l.indices) l[idx] = edited }
+                // The new amount is the baseline the grams field scales from.
+                originals = originals.toMutableList().also { l -> if (idx in l.indices) l[idx] = edited }
+                editTick++
+                com.sohum.bandlog.data.LogEvents.edit(null, m, edited.toMealItem(), if (item.userVerified && !row.userVerified) "own_numbers" else "amount")
+            },
+        )
+    }
     if (!readOnly && onSave != null) {
-        Box(Modifier.scanEnter(4, est)) { PillButton(saveLabel, { onSave(items, est.photoPath) }, enabled = items.isNotEmpty()) }
+        Box(Modifier.scanEnter(4, est)) {
+            PillButton(saveLabel, {
+                // v2.15 beta log: the scan was accepted (what we suggested vs what was kept).
+                com.sohum.bandlog.data.LogEvents.record(
+                    "scan_accept", null, null,
+                    org.json.JSONObject().put("scan_id", est.id ?: org.json.JSONObject.NULL).put("kind", "plate").put("plate_note", est.plateNote.take(500))
+                        .put("suggested", est.items.size).put("kept", items.size)
+                        .put("items", org.json.JSONArray().apply { items.forEach { put(com.sohum.bandlog.data.LogEvents.numbers(it.toMealItem())) } }),
+                )
+                onSave(items, est.photoPath)
+            }, enabled = items.isNotEmpty())
+        }
     }
 }
 

@@ -208,6 +208,7 @@ fun MealForm(
     }
     LaunchedEffect(Unit) {
         vm.loadSavedMeals(); vm.loadPresets()
+        com.sohum.bandlog.data.Overrides.load()
         // A scan's "Log 1 serving" lands here with the item already on the plate.
         vm.takeAddFoodPrefill()?.takeIf { it.isNotEmpty() }?.let { pre ->
             items = items + pre; pre.forEach { rawParts += it.name }
@@ -269,7 +270,8 @@ fun MealForm(
                     // A water-only utterance ("do glass paani piya") is a valid outcome, not an error.
                     if (b.water == null) error = "Couldn't find any food in “${label.take(40)}” — try naming it differently."
                 } else {
-                    items = items + b.items; notes = notes + b.notes
+                    val kind = if (b.photoPath != null) "photo" else "text"
+                    items = items + b.items.map { com.sohum.bandlog.data.Overrides.applyTo(it.copy(inputKind = it.inputKind ?: kind)) }; notes = notes + b.notes
                     b.photoPath?.let { photoPath = it }
                     say("Added ${b.items.size} item${if (b.items.size == 1) "" else "s"} · ${b.items.sumOf { it.calories }.roundToInt()} kcal")
                 }
@@ -286,6 +288,7 @@ fun MealForm(
         parsedText = (parsedText?.let { "$it, " } ?: "") + t
         text = ""
         if (via == null) via = "text"
+        com.sohum.bandlog.data.LogEvents.note(t, "typed_meal", existing?.id)
         track(t, vm.parseAsync(t))
     }
 
@@ -427,18 +430,25 @@ fun MealForm(
                     val preset = vm.presets.firstOrNull { pr -> pr.foodId == it.foodId && pr.category != "fat" } ?: vm.presets.firstOrNull { pr -> pr.foodId == it.foodId }
                     // v2.5: a parsed row with the server's default_count counts in pieces of grams / count.
                     val dc = it.defaultCount?.takeIf { n -> n > 0 && !byServing }
-                    val servings = preset?.servings.orEmpty().ifEmpty {
+                    val servings = preset?.servings.orEmpty().ifEmpty { it.servingUnit?.let { su -> listOf(su) } ?: emptyList() }.ifEmpty {
                         when {
                             // v2.8: a saved row counts in the unit its name suggests ("Roti" → 1 roti), else "1 serving".
                             byServing -> listOf(com.sohum.bandlog.util.Counting.savedUnitOf(it) ?: com.sohum.bandlog.data.Serving("1 serving", it.grams / it.servings!!))
-                            dc != null && it.grams > 0 -> listOf(com.sohum.bandlog.data.Serving("1 serving", it.grams / dc))
-                            else -> emptyList()
+                            dc != null && it.grams > 0 -> listOf(com.sohum.bandlog.data.Serving(com.sohum.bandlog.util.Counting.savedUnitOf(it.copy(unit = "serving", servings = dc))?.label ?: "1 serving", it.grams / dc))
+                            // v2.15: a web-looked-up or photo row with a countable name still gets the 1 · 2 · 3 stepper.
+                            else -> listOfNotNull(com.sohum.bandlog.util.Counting.pieceServing(it.name, it.grams))
                         }
                     }
                     val food = QuantityFood.from(it, servings).copy(defaultServing = preset?.defaultServing, category = preset?.category)
                     sheet = SheetReq(food, Quantity(QUnit.G, it.grams), idx)
                 },
-                onRemove = { idx -> items = items.filterIndexed { i, _ -> i != idx }; if (swapIdx == idx) swapIdx = null },
+                onRemove = { idx ->
+                    items.getOrNull(idx)?.let { gone ->
+                        // v2.15 beta log: an AI suggestion removed before it was saved is a "skip" (usually it was wrong).
+                        com.sohum.bandlog.data.LogEvents.removed(existing?.id, gone, aiSuggested = gone.id == null && (gone.input.isNotBlank() || gone.inputKind == "text" || gone.inputKind == "photo"))
+                    }
+                    items = items.filterIndexed { i, _ -> i != idx }; if (swapIdx == idx) swapIdx = null
+                },
                 onCookedIn = { idx -> cookedFor = idx },
                 onSave = { save() },
                 checkOf = { it.foodId !in confirmedIds && Sources.needsCheck(it) },
@@ -454,11 +464,31 @@ fun MealForm(
             food = req.food, initial = req.initial, title = if (adding) "How much?" else "Change the amount", cta = if (adding) "Add" else "Update",
             restaurantDefault = req.restaurant, startCount = req.startCount,
             onDismiss = { sheet = null },
+            // v2.15 §2: "Correct the numbers" → a food_corrections row with where the item came from.
+            onCorrected = { before, after, source, note ->
+                val old = items.getOrNull(req.replace)
+                val kind = old?.inputKind ?: when { old == null -> "manual"; old.input.isNotBlank() -> "text"; old.source == "scan" -> "label"; else -> "manual" }
+                com.sohum.bandlog.data.Corrections.record(
+                    com.sohum.bandlog.data.Corrections.Ctx(existing?.id, kind, rawInput = old?.input?.ifBlank { null } ?: parsedText ?: existing?.rawText),
+                    before.copy(name = old?.name ?: before.name), after.copy(name = old?.name ?: after.name), source, note,
+                )
+                if (!note.isNullOrBlank()) com.sohum.bandlog.data.LogEvents.note(note, "correction", existing?.id)
+            },
             onDone = { item, _ ->
                 sheet = null
                 if (adding) { add(item, req.raw, amountLabel(item, vm.presets)); return@QuantitySheet }
                 items = items.toMutableList().also { l ->
-                    if (req.replace in l.indices) { val old = l[req.replace]; l[req.replace] = item.copy(cookedIn = item.cookedIn ?: old.cookedIn, source = old.source, foodId = old.foodId) }
+                    if (req.replace in l.indices) {
+                        val old = l[req.replace]
+                        val new = item.copy(
+                            cookedIn = item.cookedIn ?: old.cookedIn, source = old.source, foodId = old.foodId, name = old.name,
+                            id = old.id, input = old.input, inputKind = old.inputKind, imageUrl = item.imageUrl ?: old.imageUrl,
+                            sourceInfo = old.sourceInfo, variants = old.variants, sourceUrls = old.sourceUrls, confidence = old.confidence,
+                            userVerified = item.userVerified || old.userVerified, perUnitKcal = item.perUnitKcal ?: old.perUnitKcal.takeIf { !item.userVerified },
+                        )
+                        l[req.replace] = new
+                        com.sohum.bandlog.data.LogEvents.edit(existing?.id, old, new, if (item.userVerified && !old.userVerified) "own_numbers" else "amount")
+                    }
                 }
             },
         )
@@ -554,6 +584,7 @@ fun MealForm(
             onPrimary = {
                 scope.launch {
                     fixing = true
+                    com.sohum.bandlog.data.LogEvents.note(fix.trim(), "fix", existing?.id)
                     try {
                         val r = Api.parseMeal(parsedText ?: rawParts.joinToString(", "), fix.trim(), items)
                         items = r.items; notes = r.assumptions + r.unparsed.map { "Ignored: $it" }
@@ -931,7 +962,7 @@ private fun Plate(
             if (items.isNotEmpty()) TextLink("Save as repeat", onRepeat)
         }
         Column(Modifier.heightIn(max = 250.dp).verticalScroll(rememberScrollState())) {
-            pending.forEach { PendingPlateRow(it.label) }
+            pending.forEach { PendingPlateRow(it.label, photo = it.label == PHOTO_LABEL) }
             items.forEachIndexed { idx, it ->
                 if (idx > 0 || pending.isNotEmpty()) Hair()
                 val isFat = fats.any { f -> f.id == it.cookedIn || f.foodId == it.foodId }
@@ -1006,19 +1037,34 @@ private fun TextLink(label: String, onClick: () -> Unit) {
     }
 }
 
+/** The pending label a plate photo uses (it checks sources on the web, never the food table). */
+internal const val PHOTO_LABEL = "Your photo"
+
+/**
+ * v2.15: lookups now search the web when the food table has no good match, so they take longer —
+ * the row says what's happening ("Searching the web for …") instead of a bare spinner.
+ */
 @Composable
-private fun PendingPlateRow(label: String) {
+private fun PendingPlateRow(label: String, photo: Boolean = false) {
     val p = palette
+    var secs by remember(label) { mutableIntStateOf(0) }
+    LaunchedEffect(label) { while (true) { delay(1000); secs++ } }
+    val line = when {
+        photo -> if (secs < 6) "Identifying each item…" else "Checking sources on the web… accurate beats fast."
+        secs < 3 -> "Checking the food table…"
+        else -> "Searching the web for “${label.take(28)}”…"
+    }
     Row(Modifier.fillMaxWidth().heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically) {
         CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = p.muted)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(label, fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink, maxLines = 1)
-            Text("Working it out… Save any time, it'll finish on its own.", fontSize = 11.sp, color = p.muted, maxLines = 1)
+            Text("$line Save any time, it'll finish on its own.", fontSize = 11.sp, color = p.muted, maxLines = 2, lineHeight = 14.sp)
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PlateRow(
     item: MealItem, amount: String, cookedInLabel: String?, showCookedIn: Boolean, onCookedIn: () -> Unit, onQuantity: () -> Unit, onRemove: () -> Unit,
@@ -1044,10 +1090,12 @@ private fun PlateRow(
         Row(verticalAlignment = Alignment.CenterVertically) {
             FoodImage(item.name, item.imageUrl, kind = FoodImages.kindFor(item.source), size = 38.dp, foodId = item.foodId)
             Spacer(Modifier.width(10.dp))
+            // v2.15 §1: tapping the item opens its editor (count stepper, calories per unit, "Correct the numbers");
+            // a long press still shows the full name.
             Text(
                 item.name + if (item.source == "estimated") " ~" else "", fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink,
                 maxLines = if (expanded) Int.MAX_VALUE else 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false).clickable(onClickLabel = if (expanded) "Show less" else "Show the full name") { expanded = !expanded },
+                modifier = Modifier.weight(1f, fill = false).combinedClickable(onClickLabel = "Edit ${item.name}", onLongClick = { expanded = !expanded }, onClick = onQuantity),
             )
             InfoButton(item.name, check, onInfo)
             Spacer(Modifier.weight(1f))
@@ -1061,9 +1109,10 @@ private fun PlateRow(
                 Icon(CrossIcon, "Remove ${item.name}", tint = p.muted, modifier = Modifier.size(13.dp))
             }
         }
-        Column(Modifier.padding(start = 48.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Column(Modifier.padding(start = 48.dp).clickable(onClickLabel = "Edit ${item.name}", onClick = onQuantity), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.Center) {
                 Text("${item.calories.roundToInt()} kcal", fontSize = 12.sp, color = p.muted, maxLines = 1)
+                if (item.userVerified) com.sohum.bandlog.ui.components.YourNumbersBadge()
                 MacroDot("${fmt(item.proteinG)}g", p.red); MacroDot("${fmt(item.carbsG)}g", p.orange); MacroDot("${fmt(item.fatG)}g", p.blue)
                 AnimatedVisibility(showDelta, enter = scaleIn() + fadeIn(), exit = fadeOut() + scaleOut()) {
                     Box(Modifier.background(if (delta > 0) p.btn else p.card2, CircleShape).padding(8.dp, 1.dp)) {
