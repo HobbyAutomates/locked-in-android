@@ -192,6 +192,29 @@ class SquadViewModel : ViewModel() {
     var challengesSupported by mutableStateOf<Boolean?>(null); private set
     var challengeOpenId by mutableStateOf<String?>(null)
     var challengeBoard by mutableStateOf<List<com.sohum.bandlog.data.ChallengeBoardRow>>(emptyList()); private set
+    /** v2.16: the running challenge's board for the leaderboard podium (null = no challenge running → streak days). */
+    var podiumChallenge by mutableStateOf<List<com.sohum.bandlog.data.ChallengeBoardRow>?>(null); private set
+
+    /** v2.16 premium squad cards: each squad's board (members, today's rollups) and its latest post. */
+    data class Summary(val members: List<SquadMember>, val latest: GroupPost?)
+    var summaries by mutableStateOf<Map<String, Summary>>(emptyMap()); private set
+
+    fun loadSummaries() {
+        val ids = squads.map { it.id }
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            val got = coroutineScope {
+                ids.map { id ->
+                    async {
+                        val members = runCatching { Api.squadBoard(id) }.getOrDefault(emptyList())
+                        val latest = runCatching { Api.groupFeed(id, n = 3) }.getOrNull()?.maxByOrNull { it.createdAt }
+                        id to Summary(members, latest)
+                    }
+                }.map { it.await() }
+            }
+            summaries = got.toMap()
+        }
+    }
     var challengeBoardLoading by mutableStateOf(false); private set
     val openChallenge: com.sohum.bandlog.data.Challenge? get() = challenges?.firstOrNull { it.id == challengeOpenId }
 
@@ -204,6 +227,7 @@ class SquadViewModel : ViewModel() {
                 squads = Api.mySquads()
                 loaded = true
                 loadUnread()
+                loadSummaries()
             } catch (e: Exception) { error = e.message ?: "Couldn't load your squads" } finally { loading = false }
         }
     }
@@ -211,7 +235,7 @@ class SquadViewModel : ViewModel() {
     private suspend fun reloadSquads() { runCatching { squads = Api.mySquads() }; loaded = true }
 
     fun openSquad(id: String, info: Boolean = false) {
-        if (openId != id) { reads = null; reactOverrides = emptyMap(); posts = emptyList(); leaders = emptyList(); members = emptyList(); requests = emptyList(); board = emptyList(); challenges = null; challengeOpenId = null; challengeBoard = emptyList(); battleBoard = emptyList(); battleCrown = null }
+        if (openId != id) { podiumChallenge = null; reads = null; reactOverrides = emptyMap(); posts = emptyList(); leaders = emptyList(); members = emptyList(); requests = emptyList(); board = emptyList(); challenges = null; challengeOpenId = null; challengeBoard = emptyList(); battleBoard = emptyList(); battleCrown = null }
         openId = id; infoOpen = info
         loadPage(id)
         loadBattle(id)
@@ -241,6 +265,9 @@ class SquadViewModel : ViewModel() {
                     ?: board.map { LeaderRow(it.userId, it.name, null, it.avatarPath, it.weekStreak, 0) }.sortedByDescending { it.flames }
                 members = m.await() ?: board.map { MemberDetail(it.userId, it.name, null, it.avatarPath, it.isOwner, it.weekStreak, "") }
                 ch.await().onSuccess { if (openId == id) { challenges = it; challengesSupported = true } }.onFailure { if (challengesSupported != true) challengesSupported = false }
+                // v2.16: while a challenge runs, the podium ranks by its points.
+                val running = challenges?.firstOrNull { it.status == "active" }
+                podiumChallenge = if (running != null) runCatching { Api.challengeBoard(running.id) }.getOrNull() else null
                 if (openId == id) { autoPost = ap.await(); rd.await()?.let { reads = it } }
             }
             pageLoading = false
@@ -615,30 +642,25 @@ fun SquadScreen(vm: AppViewModel, onOpenProfile: () -> Unit) {
         }
 
         if (sq.squads.isNotEmpty()) {
-            Text("Your squads", fontSize = 17.sp, fontWeight = FontWeight(800), letterSpacing = (-0.4).sp, color = p.ink, modifier = Modifier.padding(start = 2.dp, top = 4.dp))
-            sq.squads.forEachIndexed { i, s ->
-                Rise(1 + i) {
-                    Card(onClick = { sq.openSquad(s.id) }, padding = 14.dp) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            SquadIconView(s.icon, s.name, 52.dp, cover = s.coverUrl)
-                            Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(s.name, fontSize = 16.sp, fontWeight = FontWeight(700), color = p.ink, maxLines = 1)
-                                Text(
-                                    s.description.ifBlank { if (s.ownerId == Session.userId) "You own this squad" else "Tap for chat, feed and the leaderboard" },
-                                    fontSize = 12.sp, color = p.muted, maxLines = 2,
-                                )
-                            }
-                            Spacer(Modifier.width(8.dp))
-                            // v2.11: unread Chat posts (schema_v35); the Private/Public pill otherwise.
-                            val badge = com.sohum.bandlog.util.Reactions.unreadLabel(sq.unread[s.id])
-                            if (badge != null) UnreadBadge(badge, "${sq.unread[s.id]} unread")
-                            else Box(Modifier.background(p.card2, CircleShape).padding(horizontal = 10.dp, vertical = 4.dp)) {
-                                Text(if (s.isPrivate) "Private" else "Public", fontSize = 11.sp, fontWeight = FontWeight(700), color = p.muted)
-                            }
-                        }
-                    }
+            // v2.16 (board PremiumSquad): "N friends logged today · tap to cheer" when true.
+            val today = com.sohum.bandlog.util.Dates.today()
+            val friends = com.sohum.bandlog.util.SquadPremium.friendsLoggedToday(sq.squads.mapNotNull { sq.summaries[it.id]?.members }, today, Session.userId)
+            if (friends.isNotEmpty()) Rise(1) {
+                CheerStrip(friends) {
+                    // Cheer where the first of them logged: open that squad on its chat.
+                    val id = sq.squads.firstOrNull { s -> sq.summaries[s.id]?.members?.any { it.userId == friends.first().userId } == true }?.id
+                    if (id != null) sq.openSquad(id)
                 }
+            }
+            Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 4.dp), verticalAlignment = Alignment.Bottom) {
+                Text("Your squads", fontSize = 19.sp, fontWeight = FontWeight(750), letterSpacing = (-0.4).sp, color = p.ink, modifier = Modifier.weight(1f))
+                Text("${sq.squads.size}", fontSize = 13.sp, fontWeight = FontWeight(500), color = p.muted)
+            }
+            // Your #1 squad (the biggest squad streak) gets the gold tile.
+            val topId = sq.squads.maxByOrNull { s -> sq.summaries[s.id]?.let { com.sohum.bandlog.util.SquadPremium.squadStreak(it.members) } ?: -1 }
+                ?.takeIf { s -> (sq.summaries[s.id]?.let { com.sohum.bandlog.util.SquadPremium.squadStreak(it.members) } ?: 0) > 0 }?.id
+            sq.squads.forEachIndexed { i, s ->
+                Rise(1 + i) { PremiumSquadCard(s, sq.summaries[s.id], sq.unread[s.id], top = s.id == topId) { sq.openSquad(s.id) } }
             }
         }
 

@@ -499,32 +499,8 @@ private fun LeaderboardTab(sq: SquadViewModel) {
     val p = palette
     val me = Session.userId
     var sheetRow by remember(sq.openId) { mutableStateOf<LeaderRowWithRank?>(null) }
-    if (sq.leaders.isEmpty()) {
-        if (sq.pageLoading) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = p.muted) }
-        else EmptyState("No one ranked yet", "Log a workout to light your first flame.")
-        return
-    }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 14.dp, 16.dp, 40.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        items(sq.leaders.withIndex().toList(), key = { it.value.userId }) { (i, r) ->
-            val isMe = r.userId == me
-            val already = r.userId in sq.sent
-            RankRow(i + 1, r.name, r.username, r.avatarPath, isMe = isMe, onClick = { sheetRow = LeaderRowWithRank(r, i + 1) }) {
-                Flame(if (r.flames > 0) p.flame else p.muted, 20.dp)
-                Text(" ${r.flames}", fontSize = 17.sp, fontWeight = FontWeight(800), color = p.ink)
-                if (!isMe) {
-                    Spacer(Modifier.width(8.dp))
-                    Row(
-                        Modifier.height(30.dp).pressable().background(if (already) p.card2 else p.btn, CircleShape)
-                            .clickable(enabled = !already) { sq.nudge(r.userId) }.padding(horizontal = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(FistIcon, "Nudge", tint = if (already) p.muted else p.btnInk, modifier = Modifier.size(12.dp))
-                        Text(if (already) " Nudged" else " Nudge", fontSize = 12.sp, fontWeight = FontWeight(700), color = if (already) p.muted else p.btnInk)
-                    }
-                }
-            }
-        }
-    }
+    // v2.16 (board SquadLeaderboard, locked by the owner): Members / Leaderboard, the glass podium, glass rows.
+    PremiumLeaderboardTab(sq) { row, rank -> sheetRow = LeaderRowWithRank(row, rank) }
     sheetRow?.let { (row, rank) ->
         BottomSheet(title = "Member", onDismiss = { sheetRow = null }) {
             Column(Modifier.fillMaxWidth().padding(bottom = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
