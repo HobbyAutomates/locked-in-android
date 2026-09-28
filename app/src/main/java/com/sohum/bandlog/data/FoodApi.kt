@@ -81,6 +81,20 @@ object FoodApi {
             if (it.sourceUrls.isNotEmpty()) put("source_urls", JSONArray(it.sourceUrls))
             if (it.userVerified) put("user_verified", true)
             if (it.fromVoice) put("from_voice", true)
+            it.perUnitKcal?.let { u -> put("per_unit_kcal", u) }
+            if (it.uncertainties.isNotEmpty()) put("uncertainties", JSONArray(it.uncertainties))
+            // Provenance and "Which one?" ride along so the reply keeps them (the server returns items as sent).
+            it.sourceInfo?.let { si ->
+                put("source_info", JSONObject().put("kind", si.kind).put("label", si.label).put("detail", si.detail)
+                    .put("links", JSONArray().apply { si.links.forEach { l -> put(JSONObject().put("label", l.label).put("url", l.url)) } }))
+            }
+            if (it.variants.isNotEmpty()) put("variants", JSONArray().apply {
+                it.variants.forEach { v ->
+                    put(JSONObject().put("food_id", v.foodId).put("name", v.name).put("kcal_per_100g", v.kcalPer100g).put("protein_per_100g", v.proteinPer100g)
+                        .put("carbs_per_100g", v.carbsPer100g).put("fat_per_100g", v.fatPer100g).put("micros_per_100g", JSONObject(v.micros))
+                        .put("source", v.source ?: JSONObject.NULL).put("label", v.label ?: JSONObject.NULL))
+                }
+            })
         }
 
     /** A meal item as the web's MealItem JSON (stored in leftovers / meal_splits items). */
@@ -210,6 +224,31 @@ object FoodApi {
         }
         if (arr.length() > 0) run(rest("meal_splits").header("Prefer", "return=minimal").post(json(arr.toString())).build(), "Send split")
         Unit
+    }
+
+    /**
+     * Claims a pending split before anything is logged (only a pending row flips), so a double tap or a
+     * second device can't log the same share twice. true = this call claimed it.
+     */
+    suspend fun claimSplit(id: String, accept: Boolean): Boolean = withContext(Dispatchers.IO) {
+        val body = JSONObject().put("status", if (accept) "accepted" else "declined").put("decided_at", java.time.Instant.now().toString())
+        val res = run(rest("meal_splits?id=eq.$id&to_user=eq.${uid()}&status=eq.pending").header("Prefer", "return=representation").patch(json(body.toString())).build(), "Update split")
+        JSONArray(res.ifBlank { "[]" }).length() > 0
+    }
+
+    /** Puts an accepted split back to pending when logging it failed (schema_v42's guard allows this). */
+    suspend fun unclaimSplit(id: String) = withContext(Dispatchers.IO) {
+        run(rest("meal_splits?id=eq.$id").header("Prefer", "return=minimal").patch(json(JSONObject().put("status", "pending").put("decided_at", JSONObject.NULL).toString())).build(), "Update split"); Unit
+    }
+
+    /** Marks an unused leftover as used before it's logged; true = this call claimed it. */
+    suspend fun claimLeftover(id: String): Boolean = withContext(Dispatchers.IO) {
+        val res = run(rest("leftovers?id=eq.$id&used_at=is.null").header("Prefer", "return=representation").patch(json(JSONObject().put("used_at", java.time.Instant.now().toString()).toString())).build(), "Update leftovers")
+        JSONArray(res.ifBlank { "[]" }).length() > 0
+    }
+
+    suspend fun unclaimLeftover(id: String) = withContext(Dispatchers.IO) {
+        run(rest("leftovers?id=eq.$id").header("Prefer", "return=minimal").patch(json(JSONObject().put("used_at", JSONObject.NULL).toString())).build(), "Update leftovers"); Unit
     }
 
     suspend fun decideSplit(id: String, accept: Boolean) = withContext(Dispatchers.IO) {

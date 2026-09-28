@@ -178,24 +178,48 @@ object VoicePlate {
     private class SegResult(val seg: VoiceSeg?, val oil: OilCue?)
 
     /** One segment → an oil cue (if any) and a food amount (if any). */
+    /** "not much", "no more": the negation softens to "less". */
+    private val DEGREE = setOf("much", "many", "more", "too", "enough", "so", "very", "zyada", "jyada")
+    /** Filler words allowed between a direction and its oil word ("without any oil"). */
+    private val OIL_FILLER = setOf("any", "some", "a", "bit", "of", "the", "much", "little", "mein", "me", "se")
+    private fun oilDirection(t: String?) = t != null && (t in OIL_LESS || t in OIL_NONE || t in OIL_EXTRA)
+
+    /** The oil cue in a segment (web findOilCue): level + the token indexes that belong to it, or null. */
+    private fun findOilCue(toks: List<String>, raw: String): Pair<String, Set<Int>>? {
+        for (i in toks.indices) {
+            val t = toks[i]
+            if (t !in OIL_WORDS) continue
+            val used = mutableSetOf(i)
+            var dir: String? = null
+            var j = i - 1
+            while (j >= 0 && toks[j] in OIL_FILLER && !oilDirection(toks[j])) j--
+            if (j >= 0 && oilDirection(toks[j])) { dir = toks[j]; for (k in j until i) used.add(k) }
+            else if (oilDirection(toks.getOrNull(i + 1))) { dir = toks[i + 1]; used.add(i + 1) }
+            if (dir == null) {
+                if (t == "oily" || t == "greasy") return "extra" to used
+                continue
+            }
+            val level = if (dir in OIL_NONE || OIL_FREE.containsMatchIn(raw)) "none" else if (dir in OIL_LESS) "less" else "extra"
+            return level to used
+        }
+        return null
+    }
+
     private fun parseSegment(raw: String): SegResult {
         // "20g" / "150ml" → "20 g"; "2x" → "2"
         val toks = raw.replace(DIGIT_UNIT, "$1 $2").replace(DIGIT_X, "$1").replace(NT, " not")
             .split(SEG_TOKENS).filter { it.isNotEmpty() }
 
-        // Oil cue: an oil word plus its direction anywhere in the segment.
+        // Oil cue: an oil word WITH a direction right next to it ("less oil", "bina ghee", "oil kam",
+        // "with butter"), or "oily" / "greasy". A bare oil word is part of a dish's name ("butter
+        // chicken", "fried rice", "dal tadka") and stays in the food words.
         var oil: OilCue? = null
-        val oilAt = toks.indexOfFirst { it in OIL_WORDS }
         val rest = ArrayList<String>()
-        if (oilAt >= 0) {
-            val level = when {
-                toks.any { it in OIL_NONE } || OIL_FREE.containsMatchIn(raw) -> "none"
-                toks.any { it in OIL_LESS } -> "less"
-                toks.any { it in OIL_EXTRA } -> "extra"
-                else -> "extra" // "fried" / "oily" / "greasy" / a bare oil word
-            }
+        val cue = findOilCue(toks, raw)
+        if (cue != null) {
+            val (level, used) = cue
             // Everything that isn't the oil phrase may still name a food ("dal with extra ghee" → dal).
-            for (t in toks) if (t !in OIL_WORDS && t !in OIL_LESS && t !in OIL_NONE && t !in OIL_EXTRA) rest.add(t)
+            toks.forEachIndexed { idx, t -> if (idx !in used) rest.add(t) }
             val foodWords = rest.filter { t -> t !in STOP && parseNumber(t) == null && UNITS[t] == null && t !in GRAM_WORDS && MOD_WORDS[t] == null }
             oil = OilCue(level, if (foodWords.isNotEmpty()) foodWords.joinToString(" ") { SYNONYMS[it] ?: it } else null)
             // "2 roti with ghee": the amount part still counts. A bare "less oil" has no food part.
@@ -233,8 +257,10 @@ object VoicePlate {
                 i++
                 continue
             }
-            val m = MOD_WORDS[t]
+            var m = MOD_WORDS[t]
             if (m != null) {
+                // "not much rice", "no more": a negation before a degree word means less, not none.
+                if (m == "none" && next != null && next in DEGREE) { m = "less"; i++ }
                 // "half" with a count ("1 and a half") is rare; "half" alone is a modifier.
                 if (m == "half" && count != null && mod == "set") count += 0.5
                 else mod = if (m == "none" || mod == "set") m else mod
@@ -248,6 +274,8 @@ object VoicePlate {
         if (food.isEmpty()) return SegResult(null, oil)
         // "didn't eat the papad" / "no papad": a count means nothing then.
         if (mod == "none") count = null
+        // "half roti", "aadha paratha": half of ONE piece, not half of every roti on the plate.
+        if (mod == "half" && count == null && unitGrams == null && pieceNoun(food.joinToString(" ")) != null) { count = 0.5; mod = "set" }
         // Synonyms folded for the name ("chawal" → "rice"), plurals kept as said ("oats" stays "oats").
         val name = food.joinToString(" ") { SYNONYMS[it] ?: it }
         return SegResult(VoiceSeg(raw, name, count, unitGrams, unitLabel, mod), oil)

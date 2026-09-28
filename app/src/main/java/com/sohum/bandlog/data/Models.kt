@@ -158,7 +158,11 @@ data class MealItem(
     fun withGrams(g: Double): MealItem {
         if (grams <= 0.0) return copy(grams = g)
         val k = g / grams
-        return copy(grams = g, calories = calories * k, proteinG = proteinG * k, carbsG = carbsG * k, fatG = fatG * k, micros = micros.mapValues { it.value * k }, servings = servings?.let { it * k })
+        return copy(
+            grams = g, calories = calories * k, proteinG = proteinG * k, carbsG = carbsG * k, fatG = fatG * k, micros = micros.mapValues { it.value * k }, servings = servings?.let { it * k },
+            // v2.18: a stored ± range scales with the amount (never left stale).
+            kcalLow = kcalLow?.let { it * k }, kcalHigh = kcalHigh?.let { it * k },
+        )
     }
 
     /**

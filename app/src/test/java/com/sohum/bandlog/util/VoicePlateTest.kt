@@ -96,4 +96,24 @@ class VoicePlateTest {
         assertEquals(3, VoicePlate.mergeVoice(base, "umm okay, that's it").items.size)
         assertEquals(4, VoicePlate.mergeVoice(base, "chaas bhi").items.size)
     }
+
+    /** Review fixes (web check-v218-food "review fixes"): no phantom ghee from dish names, "not much", "half roti". */
+    @Test fun reviewFixes() {
+        val bc = VoicePlate.mergeVoice(listOf(plate("butter chicken", 150.0, 330.0), plate("butter naan", 90.0, 290.0)), "butter chicken and butter naan")
+        assertEquals(330.0, bc.items[0].calories, 0.0)
+        assertEquals(290.0, bc.items[1].calories, 0.0)
+        assertEquals(emptyList<VoicePlate.OilCue>(), VoicePlate.parseVoice("fried rice").oil)
+        assertEquals(emptyList<VoicePlate.OilCue>(), VoicePlate.parseVoice("dal tadka").oil)
+        assertEquals(225.0, VoicePlate.mergeVoice(listOf(plate("dal tadka", 150.0, 170.0), plate("rice", 150.0, 195.0)), "extra dal tadka").items[0].grams, 0.0)
+        assertEquals(listOf(VoicePlate.OilCue("less", null)), VoicePlate.parseVoice("oil kam").oil)
+        assertEquals(listOf(VoicePlate.OilCue("none", null)), VoicePlate.parseVoice("without any oil").oil)
+        assertEquals(140.0, VoicePlate.mergeVoice(listOf(plate("rice", 200.0, 260.0)), "not much rice").items[0].grams, 0.0)
+        assertEquals(0, VoicePlate.mergeVoice(listOf(plate("rice", 200.0, 260.0)), "no rice").items.size)
+        assertEquals(20.0, VoicePlate.mergeVoice(listOf(plate("roti", 120.0, 330.0)), "half roti").items[0].grams, 0.0)
+        assertEquals(4, HomeRecipes.parseVoiceRecipe("Mom's dal: 1 katori toor dal, coriander for garnish, serves 4").servings)
+        val m = com.sohum.bandlog.data.MealItem(foodId = null, name = "Biryani", grams = 300.0, calories = 600.0, proteinG = 10.0, carbsG = 80.0, fatG = 20.0, source = "estimated", confidence = 0.6, kcalLow = 500.0, kcalHigh = 700.0)
+        val half = m.withGrams(150.0)
+        assertEquals(250.0, half.kcalLow!!, 0.001)
+        assertEquals(350.0, half.kcalHigh!!, 0.001)
+    }
 }

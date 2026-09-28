@@ -164,19 +164,22 @@ fun FoodHomeExtras(vm: AppViewModel, meals: List<Meal>, onOpenMeal: (Meal) -> Un
             HomeRow(PeopleIcon, null, "${s.fromName ?: "A squadmate"} split ${s.dish}", "Your share · ${s.kcal.roundToInt()} kcal · ${(s.share * 100).roundToInt()}%", busy == s.id,
                 action = "Accept", onAction = {
                     act(s.id) {
+                        // Claim first: only a pending row flips, so the share can't be logged twice.
+                        if (!FoodApi.claimSplit(s.id, accept = true)) { error = "Already done"; return@act }
                         val ok = vm.saveMeal(if (s.date <= Dates.today()) s.date else Dates.today(), "${s.dish} (shared${s.fromName?.let { " by $it" } ?: ""})", s.items, mealType = s.mealType ?: MealTypes.default(), method = "split")
-                        if (ok) FoodApi.decideSplit(s.id, true) else error = vm.error
+                        if (!ok) { FoodApi.unclaimSplit(s.id); error = vm.error }
                     }
                 },
-                onClose = { act(s.id) { FoodApi.decideSplit(s.id, false) } }, closeLabel = "Decline")
+                onClose = { act(s.id) { FoodApi.claimSplit(s.id, accept = false) } }, closeLabel = "Decline")
         }
 
         home?.leftovers.orEmpty().take(2).forEach { l ->
             HomeRow(BowlIcon, "Leftovers", FoodBits.leftoverLine(l.name, l.kcal, l.fractionLeft), null, busy == l.id,
                 action = "Log it", onAction = {
                     act(l.id) {
+                        if (!FoodApi.claimLeftover(l.id)) { error = "Already logged"; return@act }
                         val ok = vm.saveMeal(Dates.today(), "${l.name} (leftovers)", l.items, mealType = MealTypes.default(), method = "leftovers")
-                        if (ok) FoodApi.closeLeftover(l.id, used = true) else error = vm.error
+                        if (!ok) { FoodApi.unclaimLeftover(l.id); error = vm.error }
                     }
                 },
                 onClose = { act(l.id) { FoodApi.closeLeftover(l.id, used = false) } }, closeLabel = "Not eating it")

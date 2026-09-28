@@ -126,7 +126,12 @@ fun HoldMic(voice: VoiceNote, dark: Boolean, size: Dp = 44.dp, label: String = "
                     if (!wasOn) toggle()
                     tryAwaitRelease()
                     val held = System.currentTimeMillis() - t0
-                    if ((held >= HOLD_MS && voice.dictation.listening) || wasOn) { voice.dictation.finish(); stop() }
+                    // After a hold (or a tap on a live mic) the person is done: finish the recogniser if it's
+                    // still going (it may have ended itself on a pause), and always hand over the words.
+                    if (held >= HOLD_MS || wasOn) {
+                        if (voice.dictation.listening) voice.dictation.finish()
+                        stop()
+                    }
                 })
             }
             .semantics {
@@ -364,5 +369,6 @@ object PlateSave {
     suspend fun leftovers(name: String, left: List<MealItem>, fraction: Double) {
         if (left.isEmpty()) return
         runCatching { FoodApi.saveLeftover(name, left, fraction, null) }
+        FoodStore.refresh()
     }
 }

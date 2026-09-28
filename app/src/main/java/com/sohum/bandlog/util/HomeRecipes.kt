@@ -182,13 +182,16 @@ object HomeRecipes {
     fun parseVoiceRecipe(text: String?): VoiceRecipe {
         var t = text.orEmpty().replace(SPACES, " ").trim()
         var servings: Int? = null
-        val serve = SERVE_A.find(t) ?: SERVE_B.find(t)
-        if (serve != null) {
+        // Every "serves 4" / "for 4 people" / "4 servings", in order; the first with a real number wins
+        // ("coriander for garnish … serves 4" → 4).
+        val found = (SERVE_A.findAll(t) + SERVE_B.findAll(t)).sortedBy { it.range.first }
+        for (serve in found) {
             val w = serve.groupValues[1].lowercase()
             val n = if (w.all { it in '0'..'9' }) w.toIntOrNull() else SERVE_WORDS[w]
             if (n != null && n > 0 && n <= 50) {
                 servings = n
                 t = (t.substring(0, serve.range.first) + t.substring(serve.range.last + 1)).replace(SPACES, " ").trim()
+                break
             }
         }
         var name = ""
