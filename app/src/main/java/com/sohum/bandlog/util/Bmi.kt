@@ -36,6 +36,28 @@ object Bmi {
         else -> "Obese"
     }
 
+    /**
+     * v2.16 Progress band (Indian cut-offs): < 18.5 under, 18.5–23 healthy, 23–25 over, 25+ obese.
+     * Judged on the value rounded to one decimal, the number the card shows, so the words always
+     * agree with it (22.96 shows "23.0" and reads "over", not "healthy").
+     */
+    enum class Band(val label: String) { UNDER("Below healthy"), HEALTHY("Healthy"), OVER("A little above healthy"), OBESE("Above healthy") }
+
+    fun bandIndia(b: Double): Band {
+        val r = round1(b)
+        return when {
+            r < 18.5 -> Band.UNDER
+            r < 23.0 -> Band.HEALTHY
+            r < 25.0 -> Band.OVER
+            else -> Band.OBESE
+        }
+    }
+
+    /** One decimal, half up ("27.0"). */
+    fun round1(b: Double): Double = kotlin.math.floor(b * 10 + 0.5) / 10.0
+
+    fun format1(b: Double): String = String.format(java.util.Locale.US, "%.1f", round1(b))
+
     /** WHO global cut-offs (adults): 18.5 / 25 / 30. Shown second. */
     fun categoryWho(b: Double): String = when {
         b < 18.5 -> "Underweight"

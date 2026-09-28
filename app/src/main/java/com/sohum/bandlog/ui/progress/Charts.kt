@@ -500,3 +500,78 @@ fun EnergyTargetLine(values: List<Double?>, target: Double, xLabels: List<String
         }
     }
 }
+
+/** v2.16 brand accents for the premium Progress cards (PremiumProgress board). */
+object ProgressColors {
+    val Ember = Color(0xFFFF5B1F)
+    val EmberLight = Color(0xFFFF8B5E)
+    val EmberDeep = Color(0xFFC2410C)
+    val Gold = Color(0xFFD9B872)
+    val GoldDeep = Color(0xFFA8823A)
+    val Silver = Color(0xFFB9BEC6)
+    val Mint = Color(0xFF59E3A7)
+}
+
+/**
+ * v2.16 Energy (PremiumProgress board): ember bars that grow up one after another (m-growy, the
+ * same stagger the v2.12 dots popped on), a gold dashed target line with "target N" at its right
+ * end, and a short track stub for days with nothing logged. Future days are left empty.
+ */
+@Composable
+fun EnergyBars(values: List<Double?>, target: Double, xLabels: List<String>, motionKey: String, showTarget: Boolean, modifier: Modifier = Modifier) {
+    val p = palette
+    val measurer = rememberTextMeasurer()
+    val step = if (values.size <= 8) 120 else (1200 / values.size.coerceAtLeast(1))
+    val grows = values.indices.map { i -> rememberMotion("$motionKey-bar$i", 500 + i * step, PremiumMotion.GROW_Y_MS) }
+    val line = rememberMotion("$motionKey-target", 300, PremiumMotion.GROW_X_MS)
+    val style = TextStyle(fontSize = 11.sp, color = p.muted, fontWeight = FontWeight(600))
+    val tStyle = TextStyle(fontSize = 10.5.sp, color = ProgressColors.Gold, fontWeight = FontWeight(500))
+    val track = p.card2
+    Canvas(modifier) {
+        val n = values.size
+        if (n == 0) return@Canvas
+        val labelH = measurer.measure("M", style).size.height.toFloat()
+        val plotBottom = size.height - labelH - 8.dp.toPx()
+        val plotTop = 16.dp.toPx()
+        val maxV = maxOf(values.filterNotNull().maxOrNull() ?: 0.0, target).coerceAtLeast(1.0) * 1.05
+        fun h(v: Double) = ((plotBottom - plotTop) * (v / maxV)).toFloat()
+        val gap = if (n > 14) 2.dp.toPx() else 10.dp.toPx()
+        val bw = ((size.width - gap * (n - 1)) / n).coerceAtLeast(1f)
+        val radius = CornerRadius(minOf(8.dp.toPx(), bw / 2))
+        values.forEachIndexed { i, v ->
+            val x = i * (bw + gap)
+            val g = PremiumMotion.growY(grows[i].value)
+            if (v == null || v <= 0) {
+                val stub = 4.dp.toPx()
+                drawRoundRect(track, Offset(x, plotBottom - stub), Size(bw, stub), CornerRadius(stub / 2))
+            } else {
+                val full = h(v)
+                val bh = full * g
+                if (bh > 0.5f) {
+                    drawRoundRect(
+                        Brush.verticalGradient(listOf(ProgressColors.EmberLight, ProgressColors.Ember), startY = plotBottom - full, endY = plotBottom),
+                        Offset(x, plotBottom - bh), Size(bw, bh), radius,
+                    )
+                }
+            }
+        }
+        if (showTarget && target > 0) {
+            val ty = plotBottom - h(target)
+            val w = size.width * PremiumMotion.growX(line.value)
+            drawLine(ProgressColors.Gold.copy(alpha = 0.75f), Offset(0f, ty), Offset(w, ty), strokeWidth = 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 4.dp.toPx())))
+            val lay = measurer.measure("target ${String.format(java.util.Locale.US, "%,d", target.roundToInt())}", tStyle)
+            drawText(lay, topLeft = Offset(size.width - lay.size.width, (ty - lay.size.height - 2.dp.toPx()).coerceAtLeast(0f)), alpha = PremiumMotion.growX(line.value))
+        }
+        var limit = size.width
+        for (i in xLabels.indices.reversed()) {
+            val l = xLabels[i]
+            if (l.isEmpty() || i >= n) continue
+            val lay = measurer.measure(l, style)
+            val cx = i * (bw + gap) + bw / 2
+            val lx = (cx - lay.size.width / 2f).coerceIn(0f, (size.width - lay.size.width).coerceAtLeast(0f))
+            if (lx + lay.size.width > limit) continue
+            drawText(lay, topLeft = Offset(lx, size.height - labelH))
+            limit = lx - 4.dp.toPx()
+        }
+    }
+}

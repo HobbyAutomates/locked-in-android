@@ -208,14 +208,33 @@ fun rememberMotion(key: String, delayMs: Int = 0, durationMs: Int): State<Float>
         }
     }
     val dur = durationMs.coerceAtLeast(1)
-    val state = remember(fullKey, session) { mutableFloatStateOf(((MotionSession.nowMs() - start).toFloat() / dur).coerceIn(0f, 1f)) }
-    LaunchedEffect(fullKey, session) {
-        while (state.floatValue < 1f) {
-            withFrameNanos { }
-            state.floatValue = ((MotionSession.nowMs() - start).toFloat() / dur).coerceIn(0f, 1f)
-        }
-    }
+    val state = remember(fullKey, session) { LiveProgress(start, dur) }
+    LaunchedEffect(fullKey, session) { state.run() }
     return state
+}
+
+/**
+ * v2.16: a 0 → 1 progress that is computed from the clock whenever it's read, not only when the
+ * frame loop last wrote it. The loop still ticks [tick] every frame so readers invalidate, but a
+ * loop that stalls (the Progress BMI stuck at "19.0" of 27.0, and a card frozen mid-blur above
+ * the macro rings, both seen in v2.15) can no longer leave a value half-way: the next read, draw
+ * or recomposition gets the true value, and once it reaches 1 it stays 1.
+ */
+internal class LiveProgress(private val start: Long, private val dur: Int) : State<Float> {
+    private val tick = mutableFloatStateOf(live())
+    private fun live() = ((MotionSession.nowMs() - start).toFloat() / dur).coerceIn(0f, 1f)
+    override val value: Float
+        get() {
+            val stored = tick.floatValue // subscribes the reader
+            return if (stored >= 1f) 1f else max(stored, live())
+        }
+    suspend fun run() {
+        while (tick.floatValue < 1f) {
+            withFrameNanos { }
+            tick.floatValue = live()
+        }
+        tick.floatValue = 1f
+    }
 }
 
 /**
@@ -261,13 +280,8 @@ fun Entrance(index: Int, modifier: Modifier = Modifier, key: String = "entrance-
 
 @Composable
 private fun riseProgress(key: String, start: Long): State<Float> {
-    val state = remember(key, start) { mutableFloatStateOf(((MotionSession.nowMs() - start).toFloat() / PremiumMotion.ENTRANCE_MS).coerceIn(0f, 1f)) }
-    LaunchedEffect(key, start) {
-        while (state.floatValue < 1f) {
-            withFrameNanos { }
-            state.floatValue = ((MotionSession.nowMs() - start).toFloat() / PremiumMotion.ENTRANCE_MS).coerceIn(0f, 1f)
-        }
-    }
+    val state = remember(key, start) { LiveProgress(start, PremiumMotion.ENTRANCE_MS) }
+    LaunchedEffect(key, start) { state.run() }
     return state
 }
 

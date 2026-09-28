@@ -25,7 +25,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -214,13 +216,17 @@ fun StreakCardV2(vm: AppViewModel) {
     val ws = Dates.weekStart(today)
     val week = (0..6).map { Dates.addDays(ws, it.toLong()) }
     val count = rememberMotion("streak-count", 200, PremiumMotion.COUNT_MS)
-    val flame = p.orange
+    val flame = ProgressColors.Ember
 
     Card(padding = 20.dp) {
         CardLabel("Streak")
         Spacer(Modifier.height(10.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Icon(LineIcons.Flame, null, tint = flame, modifier = Modifier.size(34.dp))
+            Box(contentAlignment = Alignment.Center) {
+                // v2.16: an ember glow behind the big flame.
+                Box(Modifier.size(34.dp).shadow(18.dp, CircleShape, ambientColor = flame, spotColor = flame).background(flame.copy(alpha = 0.10f), CircleShape))
+                Icon(LineIcons.Flame, null, tint = flame, modifier = Modifier.size(34.dp))
+            }
             Spacer(Modifier.width(6.dp))
             Text(
                 "${countUp(current, count.value)}", fontSize = 44.sp, fontWeight = FontWeight(800), letterSpacing = (-1.5).sp, color = p.ink, lineHeight = 46.sp,
@@ -247,10 +253,11 @@ fun StreakCardV2(vm: AppViewModel) {
                 val pop = rememberMotion("streak-day$i", 520 + i * 120, PremiumMotion.POP_MS)
                 Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Box(
-                        Modifier.size(30.dp).popIn(pop).background(if (on) flame else p.card2, CircleShape),
+                        Modifier.size(32.dp).popIn(pop)
+                            .then(if (on) Modifier.shadow(10.dp, CircleShape, ambientColor = flame, spotColor = flame).background(Brush.linearGradient(listOf(ProgressColors.EmberLight, flame)), CircleShape) else Modifier.background(p.card2, CircleShape)),
                         contentAlignment = Alignment.Center,
                     ) {
-                        if (on) Icon(LineIcons.Flame, null, tint = if (p.bg.luminance() < 0.5f) Color.Black else Color.White, modifier = Modifier.size(15.dp))
+                        if (on) Icon(LineIcons.Flame, null, tint = Color.White, modifier = Modifier.size(15.dp))
                     }
                     Text(
                         Dates.parse(d).format(NARROW), fontSize = 11.sp,
@@ -325,9 +332,9 @@ fun EnergyCardV2(vm: AppViewModel, range: ProgressRange) {
             }
         }
         Spacer(Modifier.height(14.dp))
-        EnergyTargetLine(
-            slots.map { it.kcal }, target, slots.map { it.label }, "energy-${range.name}",
-            Modifier.fillMaxWidth().height(120.dp).semantics {
+        EnergyBars(
+            slots.map { it.kcal }, target, slots.map { it.label }, "energy-${range.name}", showTarget = !hide,
+            modifier = Modifier.fillMaxWidth().height(130.dp).semantics {
                 contentDescription = "Calories eaten each ${if (range == ProgressRange.QUARTER) "week" else "day"} against a target of ${target.roundToInt()}. $onTarget of $slotsTotal $unit on target."
             },
         )
@@ -366,9 +373,10 @@ fun MacrosCardV2(vm: AppViewModel, range: ProgressRange) {
     val avgF = totals.sumOf { it.fat } / n
     data class M(val name: String, val avg: Double, val target: Int, val color: Color)
     val macros = listOf(
-        M("Protein", avgP, prof.proteinTargetG, p.blue),
-        M("Carbs", avgC, prof.carbTargetG, p.orange),
-        M("Fat", avgF, prof.fatTargetG, p.purple),
+        // v2.16: ember / silver / deep ember (PremiumProgress board).
+        M("Protein", avgP, prof.proteinTargetG, ProgressColors.Ember),
+        M("Carbs", avgC, prof.carbTargetG, ProgressColors.Silver),
+        M("Fat", avgF, prof.fatTargetG, ProgressColors.EmberDeep),
     )
     val todayProtein = totalsFor(vm.meals, today).protein
     val toGo = (prof.proteinTargetG - todayProtein).coerceAtLeast(0.0)
@@ -388,8 +396,8 @@ fun MacrosCardV2(vm: AppViewModel, range: ProgressRange) {
                 val (status, sc) = when {
                     m.target <= 0 -> "no target" to p.muted
                     pct in 95..105 -> "on track" to p.green
-                    diff < 0 -> "${abs(diff).roundToInt()} g to go" to p.orange
-                    else -> "${diff.roundToInt()} g over" to p.muted
+                    diff < 0 -> "${abs(diff).roundToInt()} g to go" to p.muted
+                    else -> "${diff.roundToInt()} g over" to ProgressColors.EmberLight
                 }
                 val sweep = rememberMotion("macro-ring$i-${range.name}", 460 + i * 260, PremiumMotion.DRAW_MS - 500)
                 Column(
@@ -404,7 +412,8 @@ fun MacrosCardV2(vm: AppViewModel, range: ProgressRange) {
                             val tl = Offset(center.x - r, center.y - r)
                             drawCircle(track, r, center, style = Stroke(sw))
                             val f = (pct / 100f).coerceIn(0f, 1f) * PremiumMotion.eased(sweep.value, PremiumMotion.EasePen)
-                            if (f > 0.001f) drawArc(m.color, -90f, 360f * f, false, tl, Size(r * 2, r * 2), style = Stroke(sw, cap = StrokeCap.Round))
+                            val brush = if (m.color == ProgressColors.Ember) Brush.linearGradient(listOf(ProgressColors.EmberLight, ProgressColors.Ember)) else androidx.compose.ui.graphics.SolidColor(m.color)
+                            if (f > 0.001f) drawArc(brush, -90f, 360f * f, false, tl, Size(r * 2, r * 2), style = Stroke(sw, cap = StrokeCap.Round))
                         }
                         Text("${countUp(pct, sweep.value)}%", fontSize = 15.sp, fontWeight = FontWeight(800), color = p.ink)
                     }
@@ -420,7 +429,7 @@ fun MacrosCardV2(vm: AppViewModel, range: ProgressRange) {
             Text("Protein target hit today.", fontSize = 14.sp, fontWeight = FontWeight(600), color = p.green)
         } else {
             Row(verticalAlignment = Alignment.Bottom) {
-                Text("${toGo.roundToInt()} g", fontSize = 20.sp, fontWeight = FontWeight(800), color = p.blue)
+                Text("${toGo.roundToInt()} g", fontSize = 20.sp, fontWeight = FontWeight(800), color = ProgressColors.Ember)
                 Text(" protein to go today.${if (picks.isNotEmpty()) " Quick picks:" else ""}", fontSize = 14.sp, fontWeight = FontWeight(600), color = p.ink, modifier = Modifier.padding(bottom = 2.dp))
             }
             if (picks.isNotEmpty()) {
@@ -469,20 +478,24 @@ fun BmiCardV2(vm: AppViewModel, weightKg: Double?) {
             return@Card
         }
         val cat = Bmi.categoryIndia(b)
-        val (words, wc) = when (cat) {
-            "Normal" -> "Healthy" to p.green
-            "Underweight" -> "Below healthy" to p.blue
-            "Overweight" -> "A little above healthy" to p.orange
-            else -> "Above healthy" to p.red
+        // v2.16: the band from the rounded value the card shows (so 22.96 reads "23.0 · over"), in brand colours.
+        val band = Bmi.bandIndia(b)
+        val words = band.label
+        val wc = when (band) {
+            Bmi.Band.HEALTHY -> p.green
+            Bmi.Band.UNDER -> ProgressColors.Silver
+            Bmi.Band.OVER -> ProgressColors.Gold
+            Bmi.Band.OBESE -> ProgressColors.EmberLight
         }
         val count = rememberMotion("bmi-count", 200, PremiumMotion.COUNT_MS)
         Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.padding(top = 6.dp)) {
-            Text(String.format(Locale.US, "%.1f", countUp(b, count.value)), fontSize = 34.sp, fontWeight = FontWeight(800), letterSpacing = (-1).sp, color = p.ink, lineHeight = 38.sp)
+            Text(Bmi.format1(countUp(b, count.value)), fontSize = 34.sp, fontWeight = FontWeight(800), letterSpacing = (-1).sp, color = p.ink, lineHeight = 38.sp)
             Spacer(Modifier.width(10.dp))
-            Text(words, fontSize = 14.sp, fontWeight = FontWeight(600), color = wc, modifier = Modifier.padding(bottom = 5.dp))
+            StatusPill(words, wc, Modifier.padding(bottom = 6.dp))
         }
         Spacer(Modifier.height(12.dp))
-        val bands = listOf(Triple("Under", 15.0 to 18.5, p.blue), Triple("Healthy", 18.5 to 23.0, p.green), Triple("Over", 23.0 to 25.0, p.orange), Triple("Obese", 25.0 to 35.0, p.red))
+        // v2.16: colour-graded bar (silver → mint → gold → ember).
+        val bands = listOf(Triple("Under", 15.0 to 18.5, ProgressColors.Silver), Triple("Healthy", 18.5 to 23.0, ProgressColors.Mint), Triple("Over", 23.0 to 25.0, ProgressColors.Gold), Triple("Obese", 25.0 to 35.0, ProgressColors.Ember))
         val grows = bands.indices.map { rememberMotion("bmi-band$it", 300 + it * 150, PremiumMotion.GROW_X_MS) }
         val sweep = rememberMotion("bmi-sweep", 900, PremiumMotion.SWEEP_MS)
         val ink = p.ink
@@ -490,7 +503,7 @@ fun BmiCardV2(vm: AppViewModel, weightKg: Double?) {
         val measurer = androidx.compose.ui.text.rememberTextMeasurer()
         val label = androidx.compose.ui.text.TextStyle(fontSize = 11.sp, fontWeight = FontWeight(600), color = muted)
         val small = androidx.compose.ui.text.TextStyle(fontSize = 10.sp, fontWeight = FontWeight(500), color = muted)
-        Canvas(Modifier.fillMaxWidth().height(66.dp).semantics { contentDescription = "BMI ${String.format(Locale.US, "%.1f", b)} on the Indian scale: $cat" }) {
+        Canvas(Modifier.fillMaxWidth().height(66.dp).semantics { contentDescription = "BMI ${Bmi.format1(b)} on the Indian scale: ${band.label}" }) {
             val gap = 2.dp.toPx()
             val barTop = 18.dp.toPx()
             val barH = 12.dp.toPx()
