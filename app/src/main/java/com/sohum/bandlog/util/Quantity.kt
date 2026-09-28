@@ -317,6 +317,25 @@ object Counting {
         return countLabel(cu, kotlin.math.round(count * 2) / 2.0)
     }
 
+    /** v2.15: typical piece weights for things a photo counts (same scale the photo prompt uses: roti 40 g, idli 40 g …). */
+    private val PIECE_G = mapOf(
+        "roti" to 40.0, "chapati" to 40.0, "phulka" to 30.0, "paratha" to 80.0, "thepla" to 40.0, "naan" to 90.0, "puri" to 25.0, "poori" to 25.0,
+        "idli" to 40.0, "dosa" to 100.0, "uttapam" to 120.0, "vada" to 50.0, "egg" to 50.0, "samosa" to 60.0, "pav" to 35.0, "ladoo" to 40.0,
+        "momo" to 25.0, "slice" to 30.0, "banana" to 110.0, "apple" to 180.0, "cutlet" to 60.0, "kachori" to 50.0, "chilla" to 70.0,
+    )
+
+    /**
+     * v2.15: a one-piece serving for a row that has no serving of its own (a photo item, a web
+     * lookup): "Roti" at 120 g → "1 roti" = 40 g, so the editor can count 1 · 2 · 3. Null for loose foods.
+     */
+    fun pieceServing(name: String, grams: Double): Serving? {
+        if (grams <= 0) return null
+        val words = name.lowercase().replace(Regex("\\(.*?\\)"), " ").split(Regex("[\\s,]+")).filter { it.isNotBlank() }
+        val noun = words.map { singular(it) }.lastOrNull { it in PIECE_G } ?: return null
+        val n = kotlin.math.round(grams / PIECE_G.getValue(noun)).coerceAtLeast(1.0)
+        return Serving("1 $noun", (grams / n * 10).roundToInt() / 10.0)
+    }
+
     /** Whey and other supplements: counted in scoops, stepper only (no chips, no restaurant portion). */
     fun isSupplement(food: QuantityFood, unit: CountUnit?): Boolean =
         unit != null && unit.noun.startsWith("scoop") && (food.category == "protein" || food.category == null || Regex("whey|protein powder|creatine|mass gainer", RegexOption.IGNORE_CASE).containsMatchIn(food.name))

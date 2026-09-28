@@ -124,14 +124,32 @@ data class MealItem(
     val variants: List<FoodVariant> = emptyList(),
     /** v2.9: where the numbers came from, for the ⓘ sheet (display only, never saved). */
     val sourceInfo: SourceInfo? = null,
+    /** v2.15: the user typed these numbers ("Correct the numbers" or "Calories per roti") — the ✓ "Your numbers" badge. */
+    val userVerified: Boolean = false,
+    /** v2.15: calories per counted unit when the user set it ("95 kcal per roti"). */
+    val perUnitKcal: Double? = null,
+    /** v2.15: web sources the lookup read (the ⓘ sheet links them). */
+    val sourceUrls: List<String> = emptyList(),
+    /** v2.15: how the row reached the plate — text | photo | barcode | label | manual (beta logging only, never saved). */
+    val inputKind: String? = null,
+    /** v2.15: parse-meal's `serving_unit` ("1 roti" = 40 g) for a counted row — the editor's stepper unit (never saved). */
+    val servingUnit: Serving? = null,
 ) {
-    fun toJson(mealId: String, userId: String): JSONObject = JSONObject()
+    /** [extras] = the v2.15 columns (user_verified, per_unit_kcal, source_urls); off while schema_v38 isn't applied. */
+    fun toJson(mealId: String, userId: String, extras: Boolean = false): JSONObject = JSONObject()
         .put("meal_id", mealId).put("user_id", userId)
         .put("food_id", foodId ?: JSONObject.NULL).put("name", name).put("grams", grams)
         .put("calories", calories).put("protein_g", proteinG).put("carbs_g", carbsG).put("fat_g", fatG)
         .put("source", source).put("confidence", confidence ?: JSONObject.NULL)
         .put("micros", JSONObject(micros))
         .put("unit", unit ?: JSONObject.NULL).put("servings", servings ?: JSONObject.NULL).put("cooked_in", cookedIn ?: JSONObject.NULL)
+        .apply {
+            if (extras) {
+                put("user_verified", userVerified)
+                put("per_unit_kcal", perUnitKcal ?: JSONObject.NULL)
+                put("source_urls", if (sourceUrls.isEmpty()) JSONObject.NULL else JSONArray(sourceUrls.take(3)))
+            }
+        }
 
     /** Re-price after the user edits grams (scales linearly, micros included). */
     fun withGrams(g: Double): MealItem {
@@ -167,8 +185,23 @@ data class MealItem(
             imageUrl = urlOf(o),
             defaultCount = if (!o.has("default_count") || o.isNull("default_count")) null else o.optDouble("default_count").takeIf { !it.isNaN() && it > 0 },
             variants = FoodVariant.list(o.optJSONArray("variants")),
-            sourceInfo = SourceInfo.from(o.optJSONObject("source_info")),
+            sourceInfo = SourceInfo.from(o.optJSONObject("source_info")).withUrls(urls(o)),
+            userVerified = o.optBoolean("user_verified", false),
+            perUnitKcal = if (!o.has("per_unit_kcal") || o.isNull("per_unit_kcal")) null else o.optDouble("per_unit_kcal").takeIf { !it.isNaN() && it > 0 },
+            sourceUrls = urls(o),
+            servingUnit = o.optJSONObject("serving_unit")?.let { su ->
+                val g = su.optDouble("grams", 0.0); val l = su.optString("label").trim()
+                if (l.isNotEmpty() && !g.isNaN() && g > 0) Serving(l, g) else null
+            },
         )
+
+        /** v2.15 `source_urls` (a list of strings or of {url}) — web lookups' sources. */
+        fun urls(o: JSONObject?): List<String> {
+            val a = o?.optJSONArray("source_urls") ?: return emptyList()
+            return (0 until a.length()).mapNotNull { i ->
+                (a.optJSONObject(i)?.optString("url") ?: a.optString(i)).trim().takeIf { it.startsWith("http") }
+            }.distinct().take(5)
+        }
 
         /** `image_url` when present and non-blank, else null. */
         fun urlOf(o: JSONObject?, key: String = "image_url"): String? =
@@ -700,6 +733,11 @@ data class PlateItem(
     val variants: List<FoodVariant> = emptyList(),
     /** v2.9: where the numbers came from, for the ⓘ sheet — null on older reports. */
     val sourceInfo: SourceInfo? = null,
+    /** v2.15: web sources the lookup read. */
+    val sourceUrls: List<String> = emptyList(),
+    /** v2.15: the user typed these numbers. */
+    val userVerified: Boolean = false,
+    val perUnitKcal: Double? = null,
 ) {
     fun withGrams(g: Double): PlateItem {
         if (grams <= 0.0) return copy(grams = g)
@@ -713,8 +751,19 @@ data class PlateItem(
     fun toMealItem() = MealItem(
         foodId = foodId, name = name, grams = grams, calories = calories, proteinG = proteinG, carbsG = carbsG, fatG = fatG,
         source = source, confidence = when (confidence) { "high" -> 0.9; "medium" -> 0.6; else -> 0.3 }, micros = micros, cookedIn = cookedIn,
-        variants = variants, sourceInfo = sourceInfo,
+        variants = variants, sourceInfo = sourceInfo, sourceUrls = sourceUrls, userVerified = userVerified, perUnitKcal = perUnitKcal, inputKind = "photo",
     )
+
+    /** Back from the item editor: the edited amount and numbers (confidence and range follow the grams). */
+    fun withEdit(m: MealItem): PlateItem {
+        val k = if (grams > 0) m.grams / grams else 1.0
+        return copy(
+            grams = m.grams, calories = m.calories, proteinG = m.proteinG, carbsG = m.carbsG, fatG = m.fatG,
+            micros = if (m.micros.isEmpty()) micros.mapValues { it.value * k } else m.micros,
+            gramsLow = gramsLow?.let { it * k }, gramsHigh = gramsHigh?.let { it * k },
+            userVerified = m.userVerified || userVerified, perUnitKcal = m.perUnitKcal ?: perUnitKcal,
+        )
+    }
 
     /** "150 g (120-190)", or just "150 g" when there's no range. */
     fun gramsRangeLabel(): String {
@@ -741,7 +790,8 @@ data class PlateItem(
             gramsHigh = if (o.has("grams_high") && !o.isNull("grams_high")) o.optDouble("grams_high") else null,
             uncertainties = o.optJSONArray("uncertainties")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList(),
             variants = FoodVariant.list(o.optJSONArray("variants")),
-            sourceInfo = SourceInfo.from(o.optJSONObject("source_info")),
+            sourceInfo = SourceInfo.from(o.optJSONObject("source_info")).withUrls(MealItem.urls(o)),
+            sourceUrls = MealItem.urls(o),
         )
     }
 }
@@ -1233,6 +1283,9 @@ data class FoodVariant(
 data class SourceLink(val label: String, val url: String)
 data class SourceInfo(val kind: String, val label: String, val detail: String, val links: List<SourceLink> = emptyList()) {
     companion object {
+        /** A host name for a bare source URL ("https://www.healthifyme.com/…" → "healthifyme.com"). */
+        fun hostOf(url: String): String = url.substringAfter("://").substringBefore('/').removePrefix("www.").ifBlank { url }
+
         fun from(o: JSONObject?): SourceInfo? {
             if (o == null) return null
             val label = o.optString("label").ifBlank { return null }
@@ -1246,4 +1299,15 @@ data class SourceInfo(val kind: String, val label: String, val detail: String, v
             return SourceInfo(o.optString("kind", "custom"), label, o.optString("detail"), links)
         }
     }
+}
+
+/**
+ * v2.15: add a web lookup's `source_urls` to the ⓘ links (skipping ones already linked). With no
+ * source_info at all, the urls alone make a "Web sources" entry.
+ */
+fun SourceInfo?.withUrls(urls: List<String>): SourceInfo? {
+    if (urls.isEmpty()) return this
+    val base = this ?: SourceInfo("web", "Web sources", "Looked up on the web, then sanity-checked.")
+    val have = base.links.map { it.url }.toSet()
+    return base.copy(links = base.links + urls.filter { it !in have }.map { SourceLink(SourceInfo.hostOf(it), it) })
 }
