@@ -24,11 +24,13 @@ object ItemInfo {
     fun origin(r: Row): String = when {
         Recipes.isRecipeItem(r.unit) -> "recipe"
         r.source == "scan" -> "scan"
+        // v2.15: a web lookup (Sonnet + web search) — cached food rows carry a web- id.
+        r.source == "web" || r.foodId?.startsWith("web-") == true -> "web"
         r.source == "estimated" || r.foodId == null -> "ai"
         else -> "database"
     }
 
-    val ORIGIN_LABEL = mapOf("database" to "Database match", "ai" to "AI estimate", "scan" to "From the label", "recipe" to "Your recipe")
+    val ORIGIN_LABEL = mapOf("database" to "Database match", "ai" to "AI estimate", "scan" to "From the label", "recipe" to "Your recipe", "web" to "Web sources")
 
     /** "High" | "Medium" | "Low". */
     fun level(r: Row): String = if (origin(r) == "recipe") "High" else Sources.confidenceLabel(r.confidence, r.source)
@@ -40,6 +42,7 @@ object ItemInfo {
         return when (o) {
             "recipe" -> "Worked out from your own recipe's ingredients."
             "scan" -> "Read off the pack's nutrition table, so only the amount can differ."
+            "web" -> "Looked up on the web from real sources (the links are below); the amount is still an estimate."
             "database" -> when {
                 r.cookedIn == "restaurant" -> "A food-table match with extra oil for a restaurant portion; the oil is the big unknown."
                 lvl == "High" -> "Matched to a row in the food table; only the amount is an estimate."

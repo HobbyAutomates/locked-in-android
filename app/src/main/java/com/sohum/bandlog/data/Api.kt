@@ -104,6 +104,43 @@ object Api {
         run(rest("app_events").header("Prefer", "return=minimal").post(json(rows.toString())).build(), "Send events"); Unit
     }
 
+    // ---- v2.15 accuracy: per-user overrides, corrections, beta log events (schema_v38) ----
+
+    /** The user's remembered per-unit numbers (RLS: own rows). Throws on a missing table — the caller hides the feature. */
+    suspend fun foodOverrides(): List<com.sohum.bandlog.util.PerUnit.Override> = withContext(Dispatchers.IO) {
+        val body = run(rest("user_food_overrides?select=food_key,unit,kcal_per_unit,protein_per_unit,carbs_per_unit,fat_per_unit&order=updated_at.desc&limit=500").get().build(), "Load overrides")
+        val arr = JSONArray(body)
+        (0 until arr.length()).mapNotNull { i ->
+            val o = arr.getJSONObject(i)
+            fun d(k: String) = if (!o.has(k) || o.isNull(k)) null else o.optDouble(k).takeIf { !it.isNaN() }
+            val kcal = d("kcal_per_unit") ?: return@mapNotNull null
+            com.sohum.bandlog.util.PerUnit.Override(o.optString("food_key"), o.optString("unit"), kcal, d("protein_per_unit"), d("carbs_per_unit"), d("fat_per_unit"))
+        }
+    }
+
+    /** Upsert on (user_id, food_key, unit). */
+    suspend fun saveFoodOverride(o: com.sohum.bandlog.util.PerUnit.Override) = withContext(Dispatchers.IO) {
+        val uid = Session.userId ?: throw AuthException("Not signed in")
+        val row = JSONObject().put("user_id", uid).put("food_key", o.foodKey).put("unit", o.unit).put("kcal_per_unit", o.kcalPerUnit)
+            .put("protein_per_unit", o.proteinPerUnit ?: JSONObject.NULL).put("carbs_per_unit", o.carbsPerUnit ?: JSONObject.NULL).put("fat_per_unit", o.fatPerUnit ?: JSONObject.NULL)
+            .put("updated_at", java.time.Instant.now().toString())
+        run(
+            rest("user_food_overrides?on_conflict=user_id,food_key,unit").header("Prefer", "resolution=merge-duplicates,return=minimal").post(json(JSONArray().put(row).toString())).build(),
+            "Save override",
+        ); Unit
+    }
+
+    /** One bandlog.food_corrections row (insert / select own). */
+    suspend fun insertCorrection(row: JSONObject) = withContext(Dispatchers.IO) {
+        val uid = Session.userId ?: throw AuthException("Not signed in")
+        run(rest("food_corrections").header("Prefer", "return=minimal").post(json(JSONArray().put(row.put("user_id", uid)).toString())).build(), "Save correction"); Unit
+    }
+
+    /** A batch of bandlog.log_events rows (beta; see LogEvents). */
+    suspend fun insertLogEvents(rows: JSONArray) = withContext(Dispatchers.IO) {
+        run(rest("log_events").header("Prefer", "return=minimal").post(json(rows.toString())).build(), "Send log events"); Unit
+    }
+
     // ---- weight log ----
 
     suspend fun weights(): List<WeightEntry> = withContext(Dispatchers.IO) {
@@ -376,15 +413,43 @@ object Api {
     // ---- meals ----
 
     private const val MEAL_ITEM_COLS = "id,food_id,name,grams,calories,protein_g,carbs_g,fat_g,source,confidence,micros,unit,servings,cooked_in"
+    /** v2.15 (schema_v38): the user's own numbers and the web sources on each saved row. */
+    private const val MEAL_ITEM_EXTRAS = ",user_verified,per_unit_kcal,source_urls"
 
-    /** v2.8: selects meal_type, and again without it while schema_v30 isn't applied. */
+    /** v2.15: whether meal_items has the schema_v38 columns (null = not tried yet; false after a "no such column"). */
+    @Volatile private var itemExtras: Boolean? = null
+
+    private fun missingExtras(m: String?): Boolean {
+        val msg = m ?: return false
+        return listOf("user_verified", "per_unit_kcal", "source_urls").any { msg.contains(it) } &&
+            (msg.contains("42703") || msg.contains("PGRST204") || msg.contains("column", ignoreCase = true) || msg.contains("schema cache", ignoreCase = true))
+    }
+
+    /** Inserts [items] into meal_items, with the v2.15 columns while they exist. */
+    private suspend fun insertItems(mealId: String, uid: String, items: List<MealItem>, label: String) {
+        suspend fun send(extras: Boolean) {
+            val arr = JSONArray().apply { items.forEach { put(it.toJson(mealId, uid, extras)) } }
+            run(rest("meal_items").post(json(arr.toString())).build(), label)
+        }
+        if (itemExtras == false) { send(false); return }
+        try { send(true); itemExtras = true } catch (e: ApiException) {
+            if (!missingExtras(e.message)) throw e
+            itemExtras = false; send(false)
+        }
+    }
+
+    /** v2.8: selects meal_type, and again without it while schema_v30 isn't applied. v2.15: same for the item extras. */
     suspend fun meals(from: String, to: String): List<Meal> = withContext(Dispatchers.IO) {
-        fun sel(withType: Boolean) = "id,date,raw_text,created_at,photo_path${if (withType) ",meal_type" else ""},meal_items($MEAL_ITEM_COLS)"
-        val body = try {
-            run(rest("meals?select=${sel(true)}&date=gte.$from&date=lte.$to&order=created_at.desc").get().build(), "Load meals")
+        fun sel(withType: Boolean, extras: Boolean) = "id,date,raw_text,created_at,photo_path${if (withType) ",meal_type" else ""},meal_items($MEAL_ITEM_COLS${if (extras) MEAL_ITEM_EXTRAS else ""})"
+        suspend fun load(extras: Boolean): String = try {
+            run(rest("meals?select=${sel(true, extras)}&date=gte.$from&date=lte.$to&order=created_at.desc").get().build(), "Load meals")
         } catch (e: ApiException) {
             if (!com.sohum.bandlog.util.MealTypes.missingColumn(e.message)) throw e
-            run(rest("meals?select=${sel(false)}&date=gte.$from&date=lte.$to&order=created_at.desc").get().build(), "Load meals")
+            run(rest("meals?select=${sel(false, extras)}&date=gte.$from&date=lte.$to&order=created_at.desc").get().build(), "Load meals")
+        }
+        val body = if (itemExtras == false) load(false) else try { load(true).also { itemExtras = true } } catch (e: ApiException) {
+            if (!missingExtras(e.message)) throw e
+            itemExtras = false; load(false)
         }
         val arr = JSONArray(body)
         (0 until arr.length()).map { Meal.from(arr.getJSONObject(it)) }
@@ -405,10 +470,7 @@ object Api {
             run(rest("meals").header("Prefer", "return=representation").post(json(base.toString())).build(), "Save meal")
         }
         val mealId = JSONArray(created).getJSONObject(0).getString("id")
-        if (items.isNotEmpty()) {
-            val arr = JSONArray().apply { items.forEach { put(it.toJson(mealId, uid)) } }
-            run(rest("meal_items").post(json(arr.toString())).build(), "Save meal items")
-        }
+        if (items.isNotEmpty()) insertItems(mealId, uid, items, "Save meal items")
         mealId
     }
 
@@ -428,10 +490,7 @@ object Api {
         }
         run(rest("meal_items?meal_id=eq.$id").delete().build(), "Update meal items")
         val keep = items.filter { it.grams > 0 }
-        if (keep.isNotEmpty()) {
-            val arr = JSONArray().apply { keep.forEach { put(it.toJson(id, uid)) } }
-            run(rest("meal_items").post(json(arr.toString())).build(), "Update meal items")
-        }
+        if (keep.isNotEmpty()) insertItems(id, uid, keep, "Update meal items")
         Unit
     }
 
@@ -509,7 +568,8 @@ object Api {
             payload.put("correction", correction)
             payload.put("previous", JSONArray().apply { previous?.forEach { put(JSONObject().put("name", it.name).put("grams", it.grams).put("calories", it.calories).put("protein_g", it.proteinG)) } })
         }
-        val o = api("parse-meal", payload, "Parse")
+        // v2.15: unknown foods are now searched on the web (≤ ~25 s server-side) — give it room.
+        val o = api("parse-meal", payload, "Parse", timeoutSec = 75)
         val items = o.optJSONArray("items") ?: JSONArray()
         fun strings(k: String) = o.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
         ParseResult(

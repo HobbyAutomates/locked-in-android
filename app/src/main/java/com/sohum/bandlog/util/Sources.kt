@@ -42,6 +42,7 @@ object Sources {
         "off" -> SourceInfo("off", "Open Food Facts", "A packaged product's record on Open Food Facts.")
         "dish" -> SourceInfo("dish", "Locked In dish recipe", "Worked out from a standard recipe in the Indian Nutrient Databank (INDB), per 100 g cooked.", listOf(SourceLink("Indian Nutrient Databank (INDB)", "https://doi.org/10.1016/j.cdnut.2024.103790")))
         "ai" -> SourceInfo("ai", "AI estimate", "Looked up by the AI when the food table had no match, then sanity-checked.")
+        "web" -> SourceInfo("web", "Web sources", "Looked up on the web (food tables, brand pages, trackers), then sanity-checked.")
         else -> SourceInfo("custom", "Locked In food list", "Hand-checked everyday values, per 100 g as usually eaten.")
     }
 

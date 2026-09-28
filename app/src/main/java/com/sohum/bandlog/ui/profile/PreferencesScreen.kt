@@ -289,6 +289,13 @@ fun PrivacyScreen(vm: AppViewModel, onBack: () -> Unit) {
                 fontSize = 12.sp, color = p.muted, lineHeight = 17.sp, modifier = Modifier.padding(horizontal = 4.dp),
             )
         }
+        // v2.15: the beta log of entries and corrections (off in builds with BETA_ANALYTICS=false).
+        if (com.sohum.bandlog.BuildConfig.BETA_ANALYTICS) Rise(2) {
+            Text(
+                "Beta: to make the numbers more accurate, Locked In keeps a private log of what you log, edit, delete or skip, the scans you accept or dismiss, the notes you type and any numbers you correct (with the source you name). Only you and the Locked In team can see it, and it's never shared with your squads.",
+                fontSize = 12.sp, color = p.muted, lineHeight = 17.sp, modifier = Modifier.padding(horizontal = 4.dp),
+            )
+        }
     }
 }
 

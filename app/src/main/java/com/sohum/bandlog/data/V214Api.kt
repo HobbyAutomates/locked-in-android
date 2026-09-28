@@ -135,7 +135,7 @@ object V214Api {
     /** Signed-out first log: the same parse as signed in, no DB writes, rate-limited per device + IP. */
     suspend fun parsePreview(text: String): ParseResult {
         if (Session.signedIn) return Api.parseMeal(text)
-        val o = obj(web("POST", "parse-meal", JSONObject().put("text", text).put("preview", true), auth = false, label = "Parse", device = true))
+        val o = obj(web("POST", "parse-meal", JSONObject().put("text", text).put("preview", true), auth = false, label = "Parse", device = true, timeoutSec = 75))
         val items = o.optJSONArray("items") ?: JSONArray()
         fun strings(k: String) = o.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
         return ParseResult((0 until items.length()).map { MealItem.from(items.getJSONObject(it)) }, strings("assumptions"), strings("unparsed"), ParsedWater.from(o.optJSONObject("water")))

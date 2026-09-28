@@ -151,7 +151,7 @@ class MainActivity : ComponentActivity() {
         super.onStart(); Analytics.track("app_open")
         if (Session.signedIn) com.sohum.bandlog.ui.platform.PlatformNav.onAppOpen(this) // v2.13 platform
     }
-    override fun onStop() { Analytics.flushSoon(); super.onStop() }
+    override fun onStop() { Analytics.flushSoon(); com.sohum.bandlog.data.LogEvents.flushSoon(); super.onStop() }
 
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)

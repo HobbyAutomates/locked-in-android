@@ -538,6 +538,7 @@ class AppViewModel : ViewModel() {
                     val photo = photoPath ?: batches.firstNotNullOfOrNull { it.photoPath }
                     val mid = Api.saveMeal(date, label, all, photo, mealType)
                     Analytics.track("meal_logged", "method" to method, "items" to all.size, "pending" to true)
+                    logMealEvent(mid, method, label, all)
                     shareMeal(date, label, all, photo, mid)
                 }
                 else error = "Couldn't find any food in “${label.take(40)}”"
@@ -775,6 +776,7 @@ class AppViewModel : ViewModel() {
         var mid: String? = null
         val ok = mutate { mid = Api.saveMeal(date, raw, items, photoPath, mealType) }
         if (ok) Analytics.track("meal_logged", "method" to method, "items" to items.size)
+        if (ok) logMealEvent(mid, method, raw, items)
         if (ok) shareMeal(date, raw, items, photoPath, mid)
         if (ok && date != today) { awaitRefresh(); pushRollupFor(listOf(date)) }
         return ok
@@ -787,6 +789,8 @@ class AppViewModel : ViewModel() {
     suspend fun updateMeal(meal: com.sohum.bandlog.data.Meal, date: String, mealType: String, items: List<MealItem>, rawText: String? = null): Boolean {
         val ok = mutate { Api.updateMeal(meal.id, date, mealType, items, rawText) }
         if (ok) Analytics.track("meal_edited", "items" to items.size, "moved" to (meal.date != date))
+        // v2.15 beta log: the saved rows that were removed in the editor (edits are logged as they happen).
+        if (ok) meal.items.filter { old -> old.id != null && items.none { it.id == old.id } }.forEach { com.sohum.bandlog.data.LogEvents.removed(meal.id, it, aiSuggested = false) }
         if (ok) repostEdited(meal.id, listOf("meal" to mealPostBody(rawText ?: meal.rawText, items)))
         if (ok) { awaitRefresh(); pushRollupFor(listOf(meal.date, date, today)) }
         return ok
@@ -795,8 +799,14 @@ class AppViewModel : ViewModel() {
     suspend fun deleteMeal(id: String): Boolean {
         val day = meals.firstOrNull { it.id == id }?.date
         val ok = mutate {
+            val gone = meals.firstOrNull { it.id == id }
             Api.deleteMeal(id)
             Analytics.track("meal_deleted")
+            com.sohum.bandlog.data.LogEvents.record(
+                "delete", id, null,
+                org.json.JSONObject().put("whole_meal", true).put("raw", gone?.rawText.orEmpty().take(500))
+                    .put("items", org.json.JSONArray().apply { gone?.items?.forEach { put(com.sohum.bandlog.data.LogEvents.numbers(it)) } }),
+            )
             // v2.9: schema_v31's trigger does this server-side; this covers a database without it.
             runCatching { Api.deleteMyPostsFor(id) }
         }
@@ -908,7 +918,17 @@ class AppViewModel : ViewModel() {
     /** Fire a suspend mutation from a composable that has no scope of its own. */
     fun launch(block: suspend () -> Unit) { viewModelScope.launch { block() } }
 
+    /** v2.15 beta log: one "log" row per meal saved, with every item's numbers and where they came from. */
+    private fun logMealEvent(mealId: String?, method: String, raw: String, items: List<MealItem>) {
+        com.sohum.bandlog.data.LogEvents.record(
+            "log", mealId, null,
+            org.json.JSONObject().put("method", method).put("raw", raw.take(1000))
+                .put("items", org.json.JSONArray().apply { items.forEach { put(com.sohum.bandlog.data.LogEvents.numbers(it).put("input_kind", it.inputKind ?: org.json.JSONObject.NULL)) } }),
+        )
+    }
+
     fun signOut() {
+        com.sohum.bandlog.data.Overrides.clear()
         viewModelScope.launch {
             SupabaseAuth.signOut()
             signedIn = false; workouts = emptyList(); meals = emptyList(); weights = emptyList(); exercises = emptyList(); water = emptyList(); progressPhotos = emptyList()
