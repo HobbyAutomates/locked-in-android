@@ -59,6 +59,9 @@ android {
         compose = true
         buildConfig = true
     }
+    // v2.18: compress native libs inside the APK. The ML Kit pose library (form check) is ~37 MB
+    // uncompressed across both ABIs, which pushed the APK past Supabase Storage's 50 MB upload cap.
+    packaging { jniLibs { useLegacyPackaging = true } }
 }
 
 dependencies {
